@@ -64,6 +64,8 @@ header{display:flex;align-items:center;justify-content:space-between;gap:10px;
   box-shadow:inset 0 1px 1px rgba(255,255,255,.5),0 6px 18px rgba(212,175,55,.22)}
 .brand-name{font-weight:800;font-size:16px;letter-spacing:.02em}
 .brand-name em{font-style:normal;color:var(--gold)}
+.w-magic{color:#f59e2d}
+.w-market{color:#fff}
 .hdr-right{display:flex;align-items:center;gap:8px}
 .balance-chip{display:flex;align-items:center;gap:7px;padding:8px 13px;border-radius:999px;cursor:pointer;
   background:rgba(255,255,255,.05);border:1px solid var(--line);
@@ -328,7 +330,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 <!-- экран блокировки -->
 <div id="lock">
   <img src="logo.png" alt="" style="width:132px">
-  <div style="margin:18px 0 5vh;font-size:15px;font-weight:700;letter-spacing:.34em;text-indent:.34em;text-transform:uppercase;color:var(--gold-soft);text-align:center">Magic Market</div>
+  <div style="margin:18px 0 5vh;font-size:15px;font-weight:700;letter-spacing:.34em;text-indent:.34em;text-transform:uppercase;text-align:center"><span class="w-magic">Magic</span> <span class="w-market">Market</span></div>
   <div class="pin-title" id="lockTitle">Введите пин-код</div>
   <div class="pin-dots" id="lockDots"></div>
   <div class="pin-pad" id="lockPad"></div>
@@ -338,7 +340,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <header>
     <div class="brand">
       <img src="logo.png" alt="" style="height:36px;width:auto">
-      <div class="brand-name">Magic <em>Market</em></div>
+      <div class="brand-name"><span class="w-magic">Magic</span> <span class="w-market">Market</span></div>
     </div>
     <div class="hdr-right">
       <div class="balance-chip" onclick="openSheet('topup')">
