@@ -10,7 +10,8 @@ from io import BytesIO
 import asyncpg
 from PIL import Image
 
-REF_PERCENT = 0.05          # доля реферера с покупки приглашённого
+# уровни рефералки: (приглашено от, доля с покупок рефералов)
+REF_TIERS = [(0, 0.05), (10, 0.10), (50, 0.15)]
 TRANSFER_TTL = 15 * 60      # код переноса живёт 15 минут
 ORDER_CODE_BASE = 1000      # MM-1001, MM-1002, ...
 AUTO_DELIVER_DAYS = 5       # через сколько дней после отправки заказ считается полученным
@@ -286,6 +287,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
     } for r in rows]
     return {
         "balance": u["balance"], "ref_count": cnt, "ref_earned": u["ref_earned"],
+        "ref_percent": round(ref_percent(cnt) * 100),
         "orders": orders,
         "products": await get_products(conn=c),
         "payment": payment_public(await get_settings(conn=c)),
@@ -311,11 +313,20 @@ async def payments_history(tg_id: int, c) -> list:
 
 # ── заказы ───────────────────────────────────────────────────────────────────
 # статусы: -2 отменён, -1 ждёт оплаты/проверки, 0 оплачен, 1 в работе, 2 в пути (ТТН), 3 получен
+def ref_percent(invited: int) -> float:
+    p = REF_TIERS[0][1]
+    for n, k in REF_TIERS:
+        if invited >= n:
+            p = k
+    return p
+
+
 async def _ref_bonus(c, buyer_id: int, total: int):
-    """5% рефереру — начисляется только после фактической оплаты."""
+    """Процент рефереру по его уровню — начисляется только после фактической оплаты."""
     ref_by = await c.fetchval("SELECT ref_by FROM users WHERE tg_id=$1", buyer_id)
     if ref_by:
-        bonus = round(total * REF_PERCENT)
+        invited = await c.fetchval("SELECT COUNT(*) FROM users WHERE ref_by=$1", ref_by)
+        bonus = round(total * ref_percent(invited))
         await c.execute("""
             UPDATE users SET balance=balance+$1, ref_earned=ref_earned+$1 WHERE tg_id=$2
         """, bonus, ref_by)

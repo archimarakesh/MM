@@ -398,7 +398,8 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div class="section-head"><h2>Реферальная программа</h2></div>
     <div class="bezel reveal">
       <div class="bezel-core">
-        <p style="font-size:12.5px;color:var(--muted);line-height:1.6">Приглашайте друзей — с каждой их покупки на ваш баланс капает <b style="color:var(--gold-soft)">5%</b> монетой.</p>
+        <p style="font-size:12.5px;color:var(--muted);line-height:1.6">Приглашайте друзей — с каждой их покупки на ваш баланс капает <b style="color:var(--gold-soft)" id="refPercent">5%</b>. Чем больше приглашённых — тем выше процент.</p>
+        <div class="ref-stats" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:0" id="refLevels"></div>
         <div class="ref-stats">
           <div class="ref-stat"><b id="refCount">0</b><span>Приглашено</span></div>
           <div class="ref-stat"><b id="refEarned">0 ₴</b><span>Заработано</span></div>
@@ -666,6 +667,7 @@ function applySnapshot(d) {
   S.balance = d.balance; S.orders = d.orders;
   S.refCount = d.ref_count; S.refEarned = d.ref_earned;
   S.payments = d.payments || [];
+  if (d.ref_percent) S.refPercent = d.ref_percent;
   if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
   if (d.payment) PAY = d.payment;
   if ('is_admin' in d) {
@@ -964,11 +966,20 @@ async function rateOrder(n) {
 }
 
 /* ═══════════ Баланс / пополнение ═══════════ */
+const REF_TIERS_UI = [['0–9', 5], ['10–49', 10], ['50+', 15]];
+function refPct(n) { return n >= 50 ? 15 : n >= 10 ? 10 : 5; }
 function syncBalance() {
   document.getElementById('hdrBalance').textContent = fmt(S.balance) + ' ₴';
   document.getElementById('profBalance').textContent = fmt(S.balance);
   document.getElementById('refCount').textContent = S.refCount;
   document.getElementById('refEarned').textContent = fmt(S.refEarned) + ' ₴';
+  const pct = S.refPercent || refPct(S.refCount || 0);
+  document.getElementById('refPercent').textContent = pct + '%';
+  document.getElementById('refLevels').innerHTML = REF_TIERS_UI.map(([lbl, p]) => `
+    <div class="ref-stat" style="text-align:center;padding:10px 6px${p === pct ? ';border-color:var(--gold-line);background:rgba(212,175,55,.07)' : ''}">
+      <b style="font-size:16px${p === pct ? ';color:var(--gold-soft)' : ''}">${p}%</b>
+      <span>${lbl}</span>
+    </div>`).join('');
 }
 let tuMethod = '', tuReceipt = '', INV = null, invTimer = null, invPoll = null;
 const TU_ST_CARD = ['⏳ Проверяется', '✅ Зачислено', '❌ Отклонено'];
