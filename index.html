@@ -947,29 +947,59 @@ function pinStep() {
   }
 }
 
-/* экран блокировки при входе */
-let lockBuf = '';
+/* экран блокировки при входе:
+   - не из Telegram (и не локальный file:// для разработки) — доступ закрыт;
+   - первый вход — обязательное создание пин-кода;
+   - дальше — вход по пину */
+let lockBuf = '', lockMode = 'enter', lockFirst = '';
 function initLock() {
-  if (!S.pin) return;
   const lock = document.getElementById('lock');
+  const title = document.getElementById('lockTitle');
+  if (!tg?.initData && location.protocol !== 'file:') {
+    lock.classList.add('show');
+    document.getElementById('lockPad').style.display = 'none';
+    document.getElementById('lockDots').style.display = 'none';
+    title.innerHTML = 'Магазин доступен только внутри Telegram<br><br>' +
+      '<a href="https://t.me/Magic_Marketplace_bot" style="color:var(--gold-soft);font-weight:700;text-decoration:none">@Magic_Marketplace_bot</a>';
+    return;
+  }
   lock.classList.add('show');
-  buildPad(document.getElementById('lockPad'), document.getElementById('lockDots'),
-    d => {
-      if (lockBuf.length >= PIN_LEN) return;
-      lockBuf += d;
-      paintDots(document.getElementById('lockDots'), lockBuf.length);
-      if (lockBuf.length === PIN_LEN) setTimeout(() => {
-        if (lockBuf === S.pin) { lock.classList.remove('show'); haptic('medium'); }
-        else {
-          const dots = document.getElementById('lockDots');
-          dots.classList.add('pin-shake'); setTimeout(() => dots.classList.remove('pin-shake'), 500);
-          document.getElementById('lockTitle').textContent = 'Неверный пин-код';
-          haptic('heavy');
-        }
-        lockBuf = ''; paintDots(document.getElementById('lockDots'), 0);
-      }, 240);
-    },
+  lockMode = S.pin ? 'enter' : 'create';
+  title.textContent = lockMode === 'enter' ? 'Введите пин-код' : 'Придумайте пин-код';
+  buildPad(document.getElementById('lockPad'), document.getElementById('lockDots'), lockDigit,
     () => { lockBuf = lockBuf.slice(0, -1); paintDots(document.getElementById('lockDots'), lockBuf.length); });
+}
+function lockDigit(d) {
+  if (lockBuf.length >= PIN_LEN) return;
+  lockBuf += d;
+  paintDots(document.getElementById('lockDots'), lockBuf.length);
+  if (lockBuf.length === PIN_LEN) setTimeout(lockStep, 240);
+}
+function lockStep() {
+  const lock = document.getElementById('lock');
+  const title = document.getElementById('lockTitle');
+  const dots = document.getElementById('lockDots');
+  const fail = msg => {
+    dots.classList.add('pin-shake'); setTimeout(() => dots.classList.remove('pin-shake'), 500);
+    title.textContent = msg; haptic('heavy');
+  };
+  if (lockMode === 'enter') {
+    if (lockBuf === S.pin) { lock.classList.remove('show'); haptic('medium'); }
+    else fail('Неверный пин-код');
+  } else if (lockMode === 'create') {
+    lockFirst = lockBuf; lockMode = 'repeat';
+    title.textContent = 'Повторите пин-код';
+  } else { /* repeat */
+    if (lockBuf === lockFirst) {
+      S.pin = lockBuf; save(); syncSettings();
+      lock.classList.remove('show'); haptic('medium');
+      toast('Пин-код установлен 🔐');
+    } else {
+      lockMode = 'create'; lockFirst = '';
+      fail('Не совпало — придумайте заново');
+    }
+  }
+  lockBuf = ''; paintDots(dots, 0);
 }
 
 /* ═══════════ Scroll reveal ═══════════ */

@@ -14,7 +14,9 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("mm")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-APP_URL = os.getenv("APP_URL", "")  # публичный https-адрес Railway-сервиса
+# публичный https-адрес: APP_URL или автоматический домен Railway
+_railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+APP_URL = os.getenv("APP_URL", "") or (f"https://{_railway_domain}" if _railway_domain else "")
 
 # ── бот ──────────────────────────────────────────────────────────────────────
 bot = dp = None
@@ -22,7 +24,7 @@ if BOT_TOKEN:
     from aiogram import Bot, Dispatcher
     from aiogram.filters import CommandObject, CommandStart
     from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
-                               Message, WebAppInfo)
+                               MenuButtonWebApp, Message, WebAppInfo)
 
     bot = Bot(BOT_TOKEN)
     dp = Dispatcher()
@@ -55,6 +57,17 @@ async def lifespan(_: FastAPI):
     await db.init()
     task = None
     if dp:
+        log.info("APP_URL = %r", APP_URL)
+        if APP_URL:
+            # синяя кнопка меню с мини-аппом — не нужно настраивать в BotFather
+            try:
+                await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+                    text="Magic Market", web_app=WebAppInfo(url=APP_URL)))
+                log.info("Кнопка меню WebApp установлена")
+            except Exception:
+                log.exception("Не удалось установить кнопку меню")
+        else:
+            log.warning("APP_URL/RAILWAY_PUBLIC_DOMAIN не заданы — кнопка WebApp не будет показана")
         task = asyncio.create_task(dp.start_polling(bot))
         log.info("Бот запущен (polling)")
     else:
