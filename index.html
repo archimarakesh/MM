@@ -559,7 +559,20 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div><h3>Перенос аккаунта</h3><p>На другой Telegram-аккаунт</p></div>
     <div class="arr" style="margin-left:auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.05);color:var(--muted)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></div>
   </div>
+  <div class="set-row" onclick="openSheet('delacc')">
+    <div class="link-ico">🗑</div>
+    <div><h3 style="color:var(--danger)">Удалить аккаунт</h3><p>Баланс, заказы и история — безвозвратно</p></div>
+    <div class="arr" style="margin-left:auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.05);color:var(--muted)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></div>
+  </div>
   <p class="note">Версия 0.1 · Magic Market</p>
+</div>
+
+<div class="sheet" id="sheet-delacc">
+  <div class="sheet-grip"></div>
+  <h2 style="color:var(--danger)">Удаление аккаунта</h2>
+  <p class="sheet-sub">Будут <b style="color:var(--danger)">безвозвратно</b> удалены: баланс кошелька, история заказов и пополнений, оценки и реферальные связи. Восстановить аккаунт будет невозможно.</p>
+  <button class="btn btn-gold" onclick="closeSheets()">Оставить аккаунт</button>
+  <button class="btn btn-ghost" id="delAccBtn" style="margin-top:10px;color:var(--danger)" onclick="deleteAccount()">Удалить аккаунт</button>
 </div>
 
 <div class="sheet" id="sheet-pin">
@@ -741,6 +754,10 @@ function openSheet(name) {
   document.getElementById('veil').classList.add('open');
   document.getElementById('sheet-' + name).classList.add('open');
   if (name === 'settings') syncSettings();
+  if (name === 'delacc') {
+    delAccArmed = false;
+    document.getElementById('delAccBtn').textContent = 'Удалить аккаунт';
+  }
 }
 function closeSheets(silent) {
   if (!silent) haptic('soft');
@@ -1393,6 +1410,27 @@ async function redeemTransfer() {
     closeSheets(true); haptic('medium');
     toast('Аккаунт перенесён ✦');
   } catch (e) { toast(e.message); }
+}
+
+/* ═══════════ Удаление аккаунта ═══════════ */
+let delAccArmed = false;
+async function deleteAccount() {
+  const b = document.getElementById('delAccBtn');
+  if (!delAccArmed) {
+    delAccArmed = true;
+    b.textContent = 'Точно удалить всё? Нажмите ещё раз';
+    haptic('heavy');
+    return;
+  }
+  if (API.ok) {
+    try { await API.call('/api/account/delete'); }
+    catch (e) { return toast(e.message); }
+  }
+  localStorage.removeItem(DB_KEY);
+  closeSheets(true);
+  haptic('medium');
+  toast('Аккаунт удалён');
+  setTimeout(() => { tg ? tg.close() : location.reload(); }, 1000);
 }
 
 /* ═══════════ Админка ═══════════ */

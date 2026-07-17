@@ -476,6 +476,16 @@ async def api_invoice_cancel(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/account/delete")
+async def api_account_delete(request: Request):
+    u = tg_user(request)
+    await db.delete_account(u["id"])
+    await notify(ADMIN_ID,
+                 f"🗑 Пользователь {u.get('first_name', '')} "
+                 f"(@{u.get('username', '—')}, ID {u['id']}) удалил аккаунт.")
+    return {"ok": True}
+
+
 @app.post("/api/transfer/create")
 async def api_transfer_create(request: Request):
     u = tg_user(request)

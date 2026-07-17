@@ -633,6 +633,18 @@ async def invoice_paid(inv_id: int, txid: str) -> dict | None:
         return res
 
 
+async def delete_account(tg_id: int):
+    """Полное удаление аккаунта со всей историей. Необратимо."""
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("DELETE FROM orders WHERE user_id=$1", tg_id)
+        await c.execute("DELETE FROM topups WHERE user_id=$1", tg_id)
+        await c.execute("DELETE FROM invoices WHERE user_id=$1", tg_id)
+        await c.execute("DELETE FROM ratings WHERE user_id=$1", tg_id)
+        await c.execute("DELETE FROM transfers WHERE user_id=$1", tg_id)
+        await c.execute("UPDATE users SET ref_by=NULL WHERE ref_by=$1", tg_id)
+        await c.execute("DELETE FROM users WHERE tg_id=$1", tg_id)
+
+
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
 async def transfer_create(tg_id: int) -> str:
     code = secrets.token_hex(3).upper()
