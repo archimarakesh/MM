@@ -932,7 +932,13 @@ function openOrder(i) {
     <p class="note" style="margin-bottom:10px">${o.status === -1
       ? '⏳ Заказ ждёт подтверждения оплаты.'
       : 'Заказ отменён — оплата не поступила или не прошла проверку.'}</p>`}
-    ${o.ttn ? `<div class="ttn"><span>ТТН Новой Почты</span><b>${o.ttn}</b></div>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
+    ${o.ttn ? `
+    <div class="ttn" style="cursor:pointer" onclick="copyText('${o.ttn}')">
+      <span>ТТН Новой Почты · нажмите, чтобы скопировать</span>
+      <b style="display:flex;align-items:center;gap:6px">${o.ttn}
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </b>
+    </div>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
     ${o.ship ? `<p class="note">Получатель: ${o.ship.name} · ${o.ship.city}, отд. ${o.ship.np}</p>` : ''}
     ${o.status === 3 ? `
       <div class="hr"></div>
