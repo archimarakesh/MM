@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 import aiohttp
 import qrcode
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 import auth
 import db
@@ -257,6 +257,17 @@ async def logo():
 @app.get("/logo.webp")
 async def logo_webp():
     return FileResponse("logo.webp")
+
+
+@app.get("/photo/{pid}/{idx}")
+async def product_photo(pid: int, idx: int):
+    data = await db.product_photo(pid, idx)
+    if not data:
+        raise HTTPException(404, "Нет фото")
+    header, b64 = data.split(",", 1)
+    mime = header.split(":", 1)[1].split(";", 1)[0]
+    return Response(base64.b64decode(b64), media_type=mime,
+                    headers={"Cache-Control": "public, max-age=600"})
 
 
 # ── пользовательское API ─────────────────────────────────────────────────────

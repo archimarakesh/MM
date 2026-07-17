@@ -562,7 +562,9 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div class="field"><label>Эмодзи</label><input id="peEmoji" placeholder="🏆"></div>
     <div class="field"><label>Бейдж</label><input id="peTag" placeholder="ХИТ / NEW / пусто"></div>
   </div>
+  <div class="field"><label>Фото товара · до 4 шт</label><div id="pePhotos" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div></div>
   <div class="field"><label>Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
+  <input type="file" id="peFile" accept="image/*" style="display:none">
   <div class="pay-opts" style="grid-template-columns:1fr">
     <div class="pay-opt" id="peActive" onclick="peToggleActive()">Товар активен<small>показывается в каталоге</small></div>
   </div>
@@ -601,9 +603,9 @@ const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 /* Товары легко заменить: базовая цена за грамм + пороги скидок */
 const TIERS = [
   { from: 1, k: 1.00 }, { from: 10, k: 0.90 }, { from: 25, k: 0.80 },
-  { from: 50, k: 0.70 }, { from: 100, k: 0.60 },
+  { from: 50, k: 0.70 }, { from: 100, k: 0.60 }, { from: 250, k: 0.55 },
 ];
-const WEIGHTS = [5, 10, 25, 50, 100];
+const WEIGHTS = [5, 10, 25, 50, 100, 250];
 const GRADS = [
   'linear-gradient(140deg,#3a2d0e,#1c1506)', 'linear-gradient(140deg,#23211d,#0e0d0b)',
   'linear-gradient(140deg,#3d2c12,#241505)', 'linear-gradient(140deg,#1f1d2b,#0d0c14)',
@@ -722,7 +724,8 @@ function renderGoods() {
     <div class="good bezel reveal" style="transition-delay:${i * 60}ms" onclick="openProduct('${p.id}')">
       <div class="bezel-core">
         <div class="good-img" style="background:${p.grad}">
-          ${p.tag ? `<span class="good-tag">${p.tag}</span>` : ''}${p.emoji}
+          ${p.tag ? `<span class="good-tag">${p.tag}</span>` : ''}
+          ${p.photos ? `<img src="/photo/${p.id}/0" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : p.emoji}
         </div>
         <div>
           <h3>${p.name}</h3>
@@ -744,8 +747,13 @@ function openProduct(id) {
 function renderProductSheet() {
   const p = curProduct, t = tierFor(p, curGrams), ts = tiersOf(p);
   document.getElementById('productBody').innerHTML = `
+    ${p.photos ? `
+    <div style="display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;margin-bottom:14px;border-radius:18px">
+      ${Array.from({ length: p.photos }, (_, i) =>
+        `<img src="/photo/${p.id}/${i}" alt="" style="width:${p.photos > 1 ? '88%' : '100%'};flex:none;aspect-ratio:1.25;object-fit:cover;border-radius:18px;scroll-snap-align:center;border:1px solid var(--line)">`).join('')}
+    </div>` : ''}
     <div class="p-hero">
-      <div class="good-img" style="background:${p.grad}">${p.emoji}</div>
+      ${p.photos ? '' : `<div class="good-img" style="background:${p.grad}">${p.emoji}</div>`}
       <div>
         <h2>${p.name}</h2>
         <p class="sheet-sub" style="margin:2px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}${p.sub} · базово ${fmt(p.base)} ₴/г</p>
@@ -1026,20 +1034,22 @@ async function cancelInvoice() {
   renderTuBody();
 }
 function copyText(t) { navigator.clipboard?.writeText(t); haptic('medium'); toast('Скопировано'); }
-document.getElementById('tuFile').addEventListener('change', e => {
-  const f = e.target.files[0];
-  if (!f) return;
+function compressFile(file, maxSide, quality, cb) {
   const img = new Image();
   img.onload = () => {
-    const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+    const k = Math.min(1, maxSide / Math.max(img.width, img.height));
     const cv = document.createElement('canvas');
     cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
     cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-    tuReceipt = cv.toDataURL('image/jpeg', 0.8);
     URL.revokeObjectURL(img.src);
-    renderTuBody();
+    cb(cv.toDataURL('image/jpeg', quality));
   };
-  img.src = URL.createObjectURL(f);
+  img.src = URL.createObjectURL(file);
+}
+document.getElementById('tuFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  compressFile(f, 1280, 0.8, d => { tuReceipt = d; renderTuBody(); });
   e.target.value = '';
 });
 async function submitCard() {
@@ -1217,9 +1227,17 @@ function openPedit(id) {
   document.getElementById('peSub').value = curPe?.sub || '';
   document.getElementById('peEmoji').value = curPe?.emoji || '';
   document.getElementById('peTag').value = curPe?.tag || '';
-  const ts = curPe ? curPe.tiers : TIERS;
+  const ts = curPe ? [...curPe.tiers] : [...TIERS];
+  while (ts.length < 6) {
+    const last = ts[ts.length - 1];
+    ts.push({ from: Math.round(last.from * 2.5), k: +(last.k * 0.92).toFixed(4) });
+  }
   const basePrice = curPe ? curPe.base : 100;
-  document.getElementById('peTiers').innerHTML = ts.map((t, i) => `
+  pePhotos = curPe
+    ? Array.from({ length: curPe.photos || 0 }, (_, i) => ({ url: `/photo/${curPe.id}/${i}`, payload: { old: i } }))
+    : [];
+  renderPePhotos();
+  document.getElementById('peTiers').innerHTML = ts.slice(0, 6).map((t, i) => `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--muted-2)">от</span>
@@ -1232,13 +1250,33 @@ function openPedit(id) {
   syncPeActive();
   openSheet('pedit');
 }
+let pePhotos = [];
+function renderPePhotos() {
+  const el = document.getElementById('pePhotos');
+  el.innerHTML = pePhotos.map((p, i) => `
+    <div style="position:relative">
+      <img src="${p.url}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;border:1px solid var(--line)">
+      <div onclick="peRemovePhoto(${i})" style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--danger);color:#fff;display:grid;place-items:center;font-size:12px;cursor:pointer">✕</div>
+    </div>`).join('') +
+    (pePhotos.length < 4 ? `<div onclick="document.getElementById('peFile').click()" style="aspect-ratio:1;border-radius:12px;border:1px dashed var(--gold-line);display:grid;place-items:center;font-size:24px;color:var(--muted);cursor:pointer">+</div>` : '');
+}
+function peRemovePhoto(i) { pePhotos.splice(i, 1); renderPePhotos(); haptic('light'); }
+document.getElementById('peFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  compressFile(f, 900, 0.78, d => {
+    if (pePhotos.length < 4) pePhotos.push({ url: d, payload: d });
+    renderPePhotos();
+  });
+  e.target.value = '';
+});
 function peToggleActive() { peActiveVal = !peActiveVal; syncPeActive(); haptic('light'); }
 function syncPeActive() { document.getElementById('peActive').classList.toggle('sel', peActiveVal); }
 async function savePedit() {
   const name = document.getElementById('peName').value.trim();
   if (!name) return toast('Укажите название');
   const rows = [];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     const from = parseInt(document.getElementById('peFrom' + i).value, 10);
     const price = parseFloat(document.getElementById('pePrice' + i).value);
     if (!from || !price || price <= 0) return toast('Проверьте градацию цен');
@@ -1254,6 +1292,7 @@ async function savePedit() {
       tag: document.getElementById('peTag').value.trim(),
       base, tiers: rows.map(x => ({ from: x.from, k: +(x.price / base).toFixed(4) })),
       active: peActiveVal,
+      photos: pePhotos.map(x => x.payload),
     });
     AD.products = r.products;
     P = r.products.filter(x => x.active).map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));

@@ -14,8 +14,10 @@ AUTO_DELIVER_DAYS = 5       # через сколько дней после от
 
 DEFAULT_TIERS = [
     {"from": 1, "k": 1.00}, {"from": 10, "k": 0.90}, {"from": 25, "k": 0.80},
-    {"from": 50, "k": 0.70}, {"from": 100, "k": 0.60},
+    {"from": 50, "k": 0.70}, {"from": 100, "k": 0.60}, {"from": 250, "k": 0.55},
 ]
+MAX_PHOTO_LEN = 400_000   # ~300 КБ картинки в base64
+MAX_PHOTOS = 4
 SEED_PRODUCTS = [
     ("Golden Reserve", "Флагманская позиция", "🏆", "ХИТ", 120),
     ("Black Label", "Тёмная классика", "🖤", "", 95),
@@ -69,6 +71,7 @@ async def init():
                 ttn     TEXT,
                 ship    TEXT,
                 date    TEXT);
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS photos TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
@@ -134,13 +137,26 @@ async def upsert_user(tg_id: int, name: str, username: str | None, ref_by: int |
 
 # ── товары ───────────────────────────────────────────────────────────────────
 def _product_row(r, rating) -> dict:
+    try:
+        photos = len(json.loads(r["photos"])) if r["photos"] else 0
+    except (ValueError, TypeError):
+        photos = 0
     return {
         "id": r["id"], "name": r["name"], "sub": r["sub"], "emoji": r["emoji"],
         "tag": r["tag"], "base": r["base"],
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
-        "active": r["active"],
+        "active": r["active"], "photos": photos,
         "rating": rating.get(r["id"], {"avg": 0, "count": 0}),
     }
+
+
+async def product_photo(pid: int, idx: int) -> str | None:
+    async with _pool.acquire() as c:
+        val = await c.fetchval("SELECT photos FROM products WHERE id=$1", pid)
+    if not val:
+        return None
+    arr = json.loads(val)
+    return arr[idx] if 0 <= idx < len(arr) else None
 
 
 async def get_products(include_inactive: bool = False, conn=None) -> list:
@@ -156,20 +172,35 @@ async def get_products(include_inactive: bool = False, conn=None) -> list:
 async def save_product(d: dict) -> int:
     tiers = json.dumps(d.get("tiers") or DEFAULT_TIERS)
     async with _pool.acquire() as c:
+        old: list = []
+        if d.get("id"):
+            val = await c.fetchval("SELECT photos FROM products WHERE id=$1", int(d["id"]))
+            old = json.loads(val) if val else []
+        # фото: {"old": i} — оставить существующее, строка data: — новое
+        photos = []
+        for ph in (d.get("photos") or [])[:MAX_PHOTOS]:
+            if isinstance(ph, dict) and "old" in ph:
+                i = int(ph["old"])
+                if 0 <= i < len(old):
+                    photos.append(old[i])
+            elif isinstance(ph, str) and ph.startswith("data:image/") and len(ph) <= MAX_PHOTO_LEN:
+                photos.append(ph)
+        pj = json.dumps(photos)
         if d.get("id"):
             await c.execute("""
-                UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7, active=$8
+                UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
+                                    active=$8, photos=$9
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-                d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)))
+                d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)), pj)
             return int(d["id"])
         return await c.fetchval("""
-            INSERT INTO products(name, sub, emoji, tag, base, tiers, pos)
-            VALUES($1,$2,$3,$4,$5,$6,
+            INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers)
+            d.get("tag", ""), int(d["base"]), tiers, pj)
 
 
 def price_for(product: dict, grams: int) -> int:
