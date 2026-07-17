@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>MM — Магазин</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#050505;
+  --bg-2:#0c0b09;
+  --card:#12100c;
+  --card-2:#1a1712;
+  --gold:#d4af37;
+  --gold-soft:#e8c96a;
+  --gold-dim:rgba(212,175,55,.16);
+  --gold-line:rgba(212,175,55,.22);
+  --line:rgba(255,255,255,.07);
+  --txt:#f3eee2;
+  --muted:#9a927f;
+  --muted-2:#6b6455;
+  --ok:#7fd48a;
+  --warn:#e0b24d;
+  --danger:#e07a5f;
+  --ease:cubic-bezier(.32,.72,0,1);
+  --r-xl:1.75rem;
+  --r-lg:1.25rem;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:'Manrope',sans-serif;
+  background:var(--bg);
+  color:var(--txt);
+  overflow-x:hidden;
+  min-height:100dvh;
+  -webkit-font-smoothing:antialiased;
+}
+/* ── фон: золотые орбы + зерно ── */
+.orbs{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.orbs::before{content:'';position:absolute;width:70vw;height:70vw;max-width:520px;max-height:520px;
+  top:-18%;right:-25%;border-radius:50%;
+  background:radial-gradient(circle,rgba(212,175,55,.13),transparent 65%)}
+.orbs::after{content:'';position:absolute;width:60vw;height:60vw;max-width:440px;max-height:440px;
+  bottom:-12%;left:-22%;border-radius:50%;
+  background:radial-gradient(circle,rgba(140,100,20,.10),transparent 65%)}
+.grain{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+#app{position:relative;z-index:1;max-width:480px;margin:0 auto;min-height:100dvh;
+  padding:0 16px calc(118px + env(safe-area-inset-bottom))}
+
+/* ── шапка ── */
+header{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:calc(14px + env(safe-area-inset-top)) 2px 6px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-mark{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+  background:linear-gradient(135deg,#f0d47a,#b8860b);color:#100c04;
+  font-family:'Playfair Display',serif;font-weight:700;font-size:17px;letter-spacing:.5px;
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.5),0 6px 18px rgba(212,175,55,.22)}
+.brand-name{font-family:'Playfair Display',serif;font-weight:600;font-size:19px;letter-spacing:.06em}
+.brand-name em{font-style:normal;color:var(--gold)}
+.hdr-right{display:flex;align-items:center;gap:8px}
+.balance-chip{display:flex;align-items:center;gap:7px;padding:8px 13px;border-radius:999px;cursor:pointer;
+  background:rgba(212,175,55,.08);border:1px solid var(--gold-line);
+  transition:transform .5s var(--ease),background .5s var(--ease)}
+.balance-chip:active{transform:scale(.96)}
+.balance-chip .coin{width:16px;height:16px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#ffe9a8,#c69320);
+  box-shadow:inset 0 -1px 2px rgba(0,0,0,.35)}
+.balance-chip b{font-size:13.5px;font-weight:700;color:var(--gold-soft);white-space:nowrap}
+.icon-btn{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;border:1px solid var(--line);
+  background:rgba(255,255,255,.04);color:var(--muted);
+  transition:transform .5s var(--ease),color .5s var(--ease),border-color .5s var(--ease)}
+.icon-btn:active{transform:scale(.92) rotate(30deg);color:var(--gold)}
+.icon-btn svg{width:19px;height:19px}
+
+/* ── общие блоки ── */
+.eyebrow{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 12px;
+  font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;font-weight:600;color:var(--gold-soft);
+  border:1px solid var(--gold-line);background:rgba(212,175,55,.06);margin-bottom:12px}
+.eyebrow::before{content:'';width:4px;height:4px;border-radius:50%;background:var(--gold)}
+h1.page-title{font-family:'Playfair Display',serif;font-weight:600;font-size:clamp(26px,7.5vw,34px);
+  line-height:1.12;letter-spacing:.01em;margin-bottom:4px}
+h1.page-title em{font-style:italic;color:var(--gold)}
+.page-sub{color:var(--muted);font-size:13.5px;line-height:1.55;margin-bottom:20px}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;margin:26px 0 12px}
+.section-head h2{font-family:'Playfair Display',serif;font-weight:600;font-size:19px;letter-spacing:.02em}
+.section-head span{font-size:11px;color:var(--muted-2);letter-spacing:.12em;text-transform:uppercase}
+
+/* двойной безель */
+.bezel{background:rgba(255,255,255,.028);border:1px solid var(--line);border-radius:var(--r-xl);padding:6px}
+.bezel-core{background:linear-gradient(160deg,var(--card-2),var(--card));border-radius:calc(var(--r-xl) - 6px);
+  border:1px solid rgba(255,255,255,.045);box-shadow:inset 0 1px 1px rgba(255,255,255,.06);padding:18px}
+.bezel.gold{border-color:var(--gold-line);background:rgba(212,175,55,.05)}
+.bezel.gold .bezel-core{background:linear-gradient(150deg,#221c0e,#141007);border-color:rgba(212,175,55,.18)}
+
+/* кнопки */
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;border:none;cursor:pointer;
+  border-radius:999px;padding:15px 22px;font-family:'Manrope',sans-serif;font-weight:700;font-size:14.5px;
+  transition:transform .5s var(--ease),box-shadow .5s var(--ease),opacity .5s var(--ease)}
+.btn:active{transform:scale(.97)}
+.btn-gold{background:linear-gradient(135deg,#f0d47a,#c9971d);color:#140f03;
+  box-shadow:0 10px 26px rgba(212,175,55,.25),inset 0 1px 1px rgba(255,255,255,.55)}
+.btn-ghost{background:rgba(255,255,255,.05);color:var(--txt);border:1px solid var(--line)}
+.btn .btn-ico{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex:none;
+  background:rgba(0,0,0,.14);margin:-6px -10px -6px 2px;
+  transition:transform .5s var(--ease)}
+.btn-ghost .btn-ico{background:rgba(255,255,255,.08)}
+.btn:active .btn-ico{transform:translate(2px,-1px) scale(1.06)}
+.btn .btn-ico svg{width:14px;height:14px}
+.btn[disabled]{opacity:.4;pointer-events:none}
+
+/* ── страницы ── */
+.view{display:none;animation:viewIn .7s var(--ease)}
+.view.active{display:block}
+@keyframes viewIn{from{opacity:0;transform:translateY(18px);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
+.reveal{opacity:0;transform:translateY(22px);filter:blur(5px);
+  transition:opacity .8s var(--ease),transform .8s var(--ease),filter .8s var(--ease)}
+.reveal.in{opacity:1;transform:none;filter:none}
+
+/* ── магазин: товары ── */
+.goods{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.good{cursor:pointer;transition:transform .5s var(--ease)}
+.good:active{transform:scale(.965)}
+.good .bezel-core{padding:12px;display:flex;flex-direction:column;gap:10px}
+.good-img{aspect-ratio:1/.86;border-radius:14px;display:grid;place-items:center;font-size:38px;position:relative;overflow:hidden;
+  border:1px solid rgba(255,255,255,.05)}
+.good-img::after{content:'';position:absolute;inset:0;
+  background:radial-gradient(circle at 30% 22%,rgba(255,255,255,.14),transparent 55%)}
+.good-tag{position:absolute;top:8px;left:8px;z-index:1;font-size:8.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  padding:4px 8px;border-radius:999px;background:rgba(5,5,5,.55);border:1px solid var(--gold-line);color:var(--gold-soft);backdrop-filter:blur(4px)}
+.good h3{font-size:14px;font-weight:700;letter-spacing:.01em}
+.good .good-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.good-price{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
+.good-price b{font-family:'Playfair Display',serif;font-size:17px;color:var(--gold-soft)}
+.good-price span{font-size:10.5px;color:var(--muted-2)}
+
+/* ── шторки (bottom sheets) ── */
+.sheet-veil{position:fixed;inset:0;z-index:80;background:rgba(3,3,3,.6);backdrop-filter:blur(14px);
+  opacity:0;pointer-events:none;transition:opacity .55s var(--ease)}
+.sheet-veil.open{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:81;max-width:480px;margin:0 auto;
+  background:linear-gradient(180deg,#16130d,#0b0a07);border:1px solid var(--gold-line);border-bottom:none;
+  border-radius:26px 26px 0 0;padding:10px 20px calc(24px + env(safe-area-inset-bottom));
+  max-height:88dvh;overflow-y:auto;overscroll-behavior:contain;
+  transform:translateY(105%);transition:transform .6s var(--ease)}
+.sheet.open{transform:none}
+.sheet-grip{width:40px;height:4px;border-radius:99px;background:rgba(255,255,255,.14);margin:4px auto 16px}
+.sheet h2{font-family:'Playfair Display',serif;font-weight:600;font-size:21px;margin-bottom:4px}
+.sheet .sheet-sub{color:var(--muted);font-size:12.5px;margin-bottom:18px;line-height:1.5}
+
+/* товарная шторка */
+.p-hero{display:flex;gap:14px;align-items:center;margin-bottom:16px}
+.p-hero .good-img{width:86px;aspect-ratio:1;flex:none;font-size:34px}
+.weight-chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px}
+.wchip{padding:9px 15px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;
+  border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--muted);
+  transition:all .45s var(--ease)}
+.wchip.sel{border-color:var(--gold);color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d);
+  box-shadow:0 6px 16px rgba(212,175,55,.25)}
+.tier-table{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px}
+.tier-row{display:flex;justify-content:space-between;padding:10px 15px;font-size:12.5px;
+  border-bottom:1px solid var(--line);color:var(--muted);transition:background .45s var(--ease)}
+.tier-row:last-child{border-bottom:none}
+.tier-row.hit{background:rgba(212,175,55,.09);color:var(--gold-soft)}
+.tier-row b{font-weight:700}
+.total-row{display:flex;align-items:baseline;justify-content:space-between;margin:4px 2px 16px}
+.total-row span{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)}
+.total-row b{font-family:'Playfair Display',serif;font-size:28px;color:var(--gold-soft)}
+
+/* формы */
+.field{margin-bottom:12px}
+.field label{display:block;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px 6px}
+.field input,.field select{width:100%;padding:14px 16px;border-radius:16px;font-family:'Manrope',sans-serif;font-size:14.5px;color:var(--txt);
+  background:rgba(255,255,255,.045);border:1px solid var(--line);outline:none;appearance:none;
+  transition:border-color .45s var(--ease),background .45s var(--ease)}
+.field input:focus,.field select:focus{border-color:var(--gold-line);background:rgba(212,175,55,.05)}
+.field select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%239a927f' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L2 5h12z'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 16px center}
+.pay-opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.pay-opt{padding:13px;border-radius:16px;text-align:center;cursor:pointer;font-size:12.5px;font-weight:700;
+  border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--muted);
+  transition:all .45s var(--ease)}
+.pay-opt small{display:block;font-weight:500;font-size:10.5px;margin-top:3px;color:var(--muted-2)}
+.pay-opt.sel{border-color:var(--gold-line);background:rgba(212,175,55,.08);color:var(--gold-soft)}
+
+/* ── история ── */
+.order{margin-bottom:12px;cursor:pointer;transition:transform .5s var(--ease)}
+.order:active{transform:scale(.98)}
+.order .bezel-core{padding:15px 16px}
+.order-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.order-top b{font-size:14px}
+.status{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:5px 10px;border-radius:999px}
+.st-paid{background:rgba(224,178,77,.12);color:var(--warn);border:1px solid rgba(224,178,77,.3)}
+.st-ship{background:rgba(212,175,55,.12);color:var(--gold-soft);border:1px solid var(--gold-line)}
+.st-done{background:rgba(127,212,138,.1);color:var(--ok);border:1px solid rgba(127,212,138,.25)}
+.order-meta{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.order-meta b{color:var(--gold-soft);font-family:'Playfair Display',serif;font-size:14.5px}
+.timeline{margin:14px 0 6px;padding-left:4px}
+.tl-step{display:flex;gap:12px;position:relative;padding-bottom:18px}
+.tl-step:last-child{padding-bottom:0}
+.tl-step::before{content:'';position:absolute;left:5.5px;top:16px;bottom:2px;width:1px;background:var(--line)}
+.tl-step:last-child::before{display:none}
+.tl-dot{width:12px;height:12px;border-radius:50%;flex:none;margin-top:2px;border:1px solid var(--line);background:var(--card)}
+.tl-step.done .tl-dot{background:radial-gradient(circle at 35% 30%,#ffe9a8,#c69320);border-color:transparent;
+  box-shadow:0 0 10px rgba(212,175,55,.4)}
+.tl-step span{font-size:13px;color:var(--muted-2)}
+.tl-step.done span{color:var(--txt)}
+.tl-step small{display:block;font-size:11px;color:var(--muted-2);margin-top:1px}
+.ttn{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:11px 14px;border-radius:14px;
+  background:rgba(212,175,55,.06);border:1px dashed var(--gold-line);font-size:12.5px}
+.ttn b{color:var(--gold-soft);letter-spacing:.06em}
+.empty{padding:44px 20px;text-align:center;color:var(--muted-2)}
+.empty .e-ico{font-size:34px;margin-bottom:10px;opacity:.7}
+.empty p{font-size:13px;line-height:1.6}
+
+/* ── профиль ── */
+.profile-head{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.avatar{width:64px;height:64px;border-radius:50%;flex:none;display:grid;place-items:center;overflow:hidden;
+  font-family:'Playfair Display',serif;font-size:24px;color:#140f03;
+  background:linear-gradient(135deg,#f0d47a,#b8860b);
+  box-shadow:0 0 0 1px var(--gold-line),0 0 0 5px rgba(212,175,55,.07),0 10px 24px rgba(212,175,55,.2)}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.profile-head h2{font-family:'Playfair Display',serif;font-weight:600;font-size:21px}
+.profile-head p{font-size:12.5px;color:var(--muted);margin-top:3px}
+.balance-hero .bezel-core{padding:20px}
+.balance-hero .b-label{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.balance-hero .b-sum{font-family:'Playfair Display',serif;font-size:38px;color:var(--gold-soft);line-height:1}
+.balance-hero .b-sum small{font-size:17px;color:var(--muted)}
+.balance-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.balance-actions .btn{padding:12px 16px;font-size:13px}
+.ref-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.ref-stat{border:1px solid var(--line);border-radius:var(--r-lg);padding:13px 15px;background:rgba(255,255,255,.025)}
+.ref-stat b{font-family:'Playfair Display',serif;font-size:21px;color:var(--gold-soft);display:block}
+.ref-stat span{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2)}
+.ref-link{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:16px;cursor:pointer;
+  background:rgba(212,175,55,.06);border:1px dashed var(--gold-line);
+  font-size:12px;color:var(--gold-soft);word-break:break-all;
+  transition:background .45s var(--ease)}
+.ref-link:active{background:rgba(212,175,55,.14)}
+.ref-link svg{width:15px;height:15px;flex:none}
+
+/* ── поддержка ── */
+.link-card{margin-bottom:11px;cursor:pointer;transition:transform .5s var(--ease);text-decoration:none;display:block;color:inherit}
+.link-card:active{transform:scale(.975)}
+.link-card .bezel-core{padding:15px 16px;display:flex;align-items:center;gap:13px}
+.link-ico{width:42px;height:42px;border-radius:13px;flex:none;display:grid;place-items:center;font-size:19px;
+  background:rgba(212,175,55,.08);border:1px solid var(--gold-line)}
+.link-card h3{font-size:14px;font-weight:700}
+.link-card p{font-size:11.5px;color:var(--muted);margin-top:2px}
+.link-card .arr{margin-left:auto;width:28px;height:28px;border-radius:50%;flex:none;display:grid;place-items:center;
+  background:rgba(255,255,255,.05);color:var(--muted)}
+.link-card .arr svg{width:12px;height:12px}
+
+/* ── настройки ── */
+.set-row{display:flex;align-items:center;gap:13px;padding:15px 4px;cursor:pointer;border-bottom:1px solid var(--line);
+  transition:opacity .4s var(--ease)}
+.set-row:last-child{border-bottom:none}
+.set-row:active{opacity:.6}
+.set-row .link-ico{width:38px;height:38px;font-size:16px}
+.set-row h3{font-size:13.5px;font-weight:700}
+.set-row p{font-size:11px;color:var(--muted);margin-top:2px}
+.toggle{margin-left:auto;width:44px;height:26px;border-radius:99px;flex:none;position:relative;
+  background:rgba(255,255,255,.08);border:1px solid var(--line);transition:background .45s var(--ease)}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;
+  background:#8b8371;transition:transform .45s var(--ease),background .45s var(--ease)}
+.toggle.on{background:rgba(212,175,55,.25);border-color:var(--gold-line)}
+.toggle.on::after{transform:translateX(18px);background:linear-gradient(135deg,#f0d47a,#c9971d)}
+
+/* PIN-пад */
+.pin-dots{display:flex;gap:14px;justify-content:center;margin:18px 0 24px}
+.pin-dot{width:13px;height:13px;border-radius:50%;border:1px solid var(--gold-line);background:transparent;
+  transition:all .35s var(--ease)}
+.pin-dot.fill{background:radial-gradient(circle at 35% 30%,#ffe9a8,#c69320);border-color:transparent;
+  box-shadow:0 0 12px rgba(212,175,55,.5)}
+.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:270px;margin:0 auto}
+.pin-key{aspect-ratio:1.35;border-radius:18px;display:grid;place-items:center;font-size:20px;font-weight:600;cursor:pointer;
+  background:rgba(255,255,255,.04);border:1px solid var(--line);
+  transition:all .4s var(--ease);user-select:none}
+.pin-key:active{transform:scale(.93);background:rgba(212,175,55,.12);border-color:var(--gold-line)}
+.pin-key.mute{background:transparent;border-color:transparent;color:var(--muted)}
+.pin-title{text-align:center;font-size:13px;color:var(--muted);min-height:20px}
+.pin-shake{animation:shake .5s var(--ease)}
+@keyframes shake{0%,100%{transform:none}20%{transform:translateX(-10px)}40%{transform:translateX(9px)}60%{transform:translateX(-6px)}80%{transform:translateX(4px)}}
+
+/* экран блокировки */
+#lock{position:fixed;inset:0;z-index:90;background:var(--bg);display:none;flex-direction:column;
+  align-items:center;justify-content:center;padding:20px}
+#lock.show{display:flex}
+#lock .brand-mark{width:56px;height:56px;font-size:24px;border-radius:18px;margin-bottom:18px}
+
+/* ── нижняя навигация ── */
+nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:70;
+  max-width:448px;margin:0 auto}
+.nav-core{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;padding:7px;border-radius:999px;
+  background:rgba(14,12,8,.72);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+  border:1px solid var(--gold-line);
+  box-shadow:0 18px 44px rgba(0,0,0,.55),inset 0 1px 1px rgba(255,255,255,.06)}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 4px;border-radius:999px;cursor:pointer;
+  color:var(--muted-2);transition:color .5s var(--ease),background .5s var(--ease),transform .5s var(--ease)}
+.nav-item:active{transform:scale(.93)}
+.nav-item svg{width:20px;height:20px}
+.nav-item span{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.nav-item.active{color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d);
+  box-shadow:0 8px 20px rgba(212,175,55,.3),inset 0 1px 1px rgba(255,255,255,.5)}
+
+/* toast */
+#toast{position:fixed;top:calc(14px + env(safe-area-inset-top));left:50%;transform:translate(-50%,-160%);z-index:95;
+  padding:12px 20px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap;
+  background:rgba(20,17,10,.9);backdrop-filter:blur(16px);border:1px solid var(--gold-line);color:var(--gold-soft);
+  transition:transform .6s var(--ease)}
+#toast.show{transform:translate(-50%,0)}
+.hr{height:1px;background:var(--line);margin:18px 0}
+.note{font-size:11.5px;color:var(--muted-2);line-height:1.6;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="orbs"></div>
+<div class="grain"></div>
+
+<!-- экран блокировки -->
+<div id="lock">
+  <div class="brand-mark">MM</div>
+  <div class="pin-title" id="lockTitle">Введите пин-код</div>
+  <div class="pin-dots" id="lockDots"></div>
+  <div class="pin-pad" id="lockPad"></div>
+</div>
+
+<div id="app">
+  <header>
+    <div class="brand">
+      <div class="brand-mark">MM</div>
+      <div class="brand-name">M<em>M</em></div>
+    </div>
+    <div class="hdr-right">
+      <div class="balance-chip" onclick="openSheet('topup')">
+        <div class="coin"></div><b id="hdrBalance">0 ₴</b>
+      </div>
+      <div class="icon-btn" onclick="openSheet('settings')" aria-label="Настройки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══ МАГАЗИН ══ -->
+  <section class="view active" id="view-shop">
+    <div class="eyebrow">Продажа на вес</div>
+    <h1 class="page-title">Каталог <em>MM</em></h1>
+    <p class="page-sub">Чем больше вес — тем ниже цена за грамм. Доставка Новой Почтой по всей стране.</p>
+    <div class="goods" id="goods"></div>
+  </section>
+
+  <!-- ══ ИСТОРИЯ ══ -->
+  <section class="view" id="view-history">
+    <div class="eyebrow">Ваши заказы</div>
+    <h1 class="page-title">История <em>покупок</em></h1>
+    <p class="page-sub">Статусы заказов и трек-номера Новой Почты.</p>
+    <div id="ordersList"></div>
+  </section>
+
+  <!-- ══ ПРОФИЛЬ ══ -->
+  <section class="view" id="view-profile">
+    <div class="profile-head">
+      <div class="avatar" id="avatar">U</div>
+      <div>
+        <h2 id="profName">Гость</h2>
+        <p id="profId">ID —</p>
+      </div>
+    </div>
+
+    <div class="bezel gold balance-hero reveal">
+      <div class="bezel-core">
+        <div class="b-label">Баланс кошелька</div>
+        <div class="b-sum"><span id="profBalance">0</span> <small>₴</small></div>
+        <div class="balance-actions">
+          <button class="btn btn-gold" onclick="openSheet('topup')">Пополнить
+            <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+          </button>
+          <button class="btn btn-ghost" onclick="go('history')">История</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Реферальная программа</h2><span>5%</span></div>
+    <div class="bezel reveal">
+      <div class="bezel-core">
+        <p style="font-size:12.5px;color:var(--muted);line-height:1.6">Приглашайте друзей — с каждой их покупки на ваш баланс капает <b style="color:var(--gold-soft)">5%</b> монетой.</p>
+        <div class="ref-stats">
+          <div class="ref-stat"><b id="refCount">0</b><span>Приглашено</span></div>
+          <div class="ref-stat"><b id="refEarned">0 ₴</b><span>Заработано</span></div>
+        </div>
+        <div class="ref-link" onclick="copyRef()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span id="refLink">t.me/mm_shop_bot?start=ref…</span>
+        </div>
+        <button class="btn btn-gold" style="margin-top:12px" onclick="shareRef()">Пригласить друга
+          <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ ПОДДЕРЖКА ══ -->
+  <section class="view" id="view-support">
+    <div class="eyebrow">Мы на связи</div>
+    <h1 class="page-title">Поддержка <em>&amp; сообщество</em></h1>
+    <p class="page-sub">Наши каналы, чаты и форумы. Техподдержка отвечает ежедневно 10:00–22:00.</p>
+    <div id="supportLinks"></div>
+  </section>
+</div>
+
+<!-- нижняя навигация -->
+<nav>
+  <div class="nav-core">
+    <div class="nav-item active" data-v="shop" onclick="go('shop')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
+      <span>Магазин</span>
+    </div>
+    <div class="nav-item" data-v="history" onclick="go('history')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span>История</span>
+    </div>
+    <div class="nav-item" data-v="profile" onclick="go('profile')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>
+      <span>Профиль</span>
+    </div>
+    <div class="nav-item" data-v="support" onclick="go('support')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 20l1-5.6a8.38 8.38 0 0 1-.9-3.9A8.5 8.5 0 0 1 11.6 2a8.38 8.38 0 0 1 8.5 8.5z"/></svg>
+      <span>Помощь</span>
+    </div>
+  </div>
+</nav>
+
+<!-- шторки -->
+<div class="sheet-veil" id="veil" onclick="closeSheets()"></div>
+
+<div class="sheet" id="sheet-product">
+  <div class="sheet-grip"></div>
+  <div id="productBody"></div>
+</div>
+
+<div class="sheet" id="sheet-checkout">
+  <div class="sheet-grip"></div>
+  <h2>Оформление заказа</h2>
+  <p class="sheet-sub" id="coSummary"></p>
+  <div class="field"><label>Имя и фамилия</label><input id="coName" placeholder="Иван Иванов"></div>
+  <div class="field"><label>Телефон</label><input id="coPhone" inputmode="tel" placeholder="+380"></div>
+  <div class="field"><label>Город</label><input id="coCity" placeholder="Киев"></div>
+  <div class="field"><label>Отделение Новой Почты</label><input id="coNP" inputmode="numeric" placeholder="№ отделения или почтомата"></div>
+  <div class="field"><label>Оплата</label>
+    <div class="pay-opts">
+      <div class="pay-opt sel" data-pay="balance" onclick="selPay(this)">С баланса<small id="payBalHint"></small></div>
+      <div class="pay-opt" data-pay="card" onclick="selPay(this)">Картой<small>перевод на карту</small></div>
+    </div>
+  </div>
+  <button class="btn btn-gold" onclick="placeOrder()">Подтвердить заказ
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+  </button>
+  <p class="note">После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.</p>
+</div>
+
+<div class="sheet" id="sheet-order">
+  <div class="sheet-grip"></div>
+  <div id="orderBody"></div>
+</div>
+
+<div class="sheet" id="sheet-topup">
+  <div class="sheet-grip"></div>
+  <h2>Пополнение баланса</h2>
+  <p class="sheet-sub">Средства зачисляются на внутренний кошелёк и доступны для оплаты заказов.</p>
+  <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="500"></div>
+  <div class="pay-opts">
+    <div class="pay-opt sel" data-tu="card" onclick="selTu(this)">Карта<small>Visa / MC</small></div>
+    <div class="pay-opt" data-tu="crypto" onclick="selTu(this)">Крипта<small>USDT TRC-20</small></div>
+  </div>
+  <button class="btn btn-gold" onclick="topUp()">Пополнить
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+  </button>
+</div>
+
+<div class="sheet" id="sheet-settings">
+  <div class="sheet-grip"></div>
+  <h2>Настройки</h2>
+  <p class="sheet-sub">Безопасность и управление аккаунтом.</p>
+  <div class="set-row" onclick="startPinChange()">
+    <div class="link-ico">🔐</div>
+    <div><h3>Пин-код</h3><p id="pinState">Не установлен</p></div>
+    <div class="arr" style="margin-left:auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.05);color:var(--muted)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></div>
+  </div>
+  <div class="set-row" onclick="toggleNotif(this)">
+    <div class="link-ico">🔔</div>
+    <div><h3>Уведомления</h3><p>Статусы заказов и акции</p></div>
+    <div class="toggle on" id="notifToggle"></div>
+  </div>
+  <div class="set-row" onclick="openTransfer()">
+    <div class="link-ico">↔️</div>
+    <div><h3>Перенос аккаунта</h3><p>На другой Telegram-аккаунт</p></div>
+    <div class="arr" style="margin-left:auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.05);color:var(--muted)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></div>
+  </div>
+  <p class="note">Версия 0.1 · MM Mini App</p>
+</div>
+
+<div class="sheet" id="sheet-pin">
+  <div class="sheet-grip"></div>
+  <h2 style="text-align:center" id="pinHead">Пин-код</h2>
+  <div class="pin-title" id="pinTitle">Придумайте новый пин-код</div>
+  <div class="pin-dots" id="pinDots"></div>
+  <div class="pin-pad" id="pinPad"></div>
+</div>
+
+<div class="sheet" id="sheet-transfer">
+  <div class="sheet-grip"></div>
+  <h2>Перенос аккаунта</h2>
+  <p class="sheet-sub">Код действует 15 минут. Откройте приложение на новом Telegram-аккаунте и введите его — баланс, история и рефералы переедут автоматически.</p>
+  <div class="bezel gold"><div class="bezel-core" style="text-align:center;padding:22px">
+    <div style="font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Код переноса</div>
+    <div id="transferCode" style="font-family:'Playfair Display',serif;font-size:32px;letter-spacing:.28em;color:var(--gold-soft)">— — — —</div>
+  </div></div>
+  <button class="btn btn-gold" style="margin-top:14px" onclick="genTransfer()">Сгенерировать код
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>
+  </button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ═══════════ Telegram ═══════════ */
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#050505'); tg.setBackgroundColor('#050505'); }
+const tgUser = tg?.initDataUnsafe?.user;
+const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
+
+/* ═══════════ Данные ═══════════ */
+/* Товары легко заменить: базовая цена за грамм + пороги скидок */
+const TIERS = [
+  { from: 1,   k: 1.00, label: '1–9 г' },
+  { from: 10,  k: 0.90, label: '10–24 г' },
+  { from: 25,  k: 0.80, label: '25–49 г' },
+  { from: 50,  k: 0.70, label: '50–99 г' },
+  { from: 100, k: 0.60, label: '100 г+' },
+];
+const WEIGHTS = [5, 10, 25, 50, 100];
+const PRODUCTS = [
+  { id: 'p1', name: 'Golden Reserve', sub: 'Флагманская позиция', emoji: '🏆', base: 120, tag: 'ХИТ',   grad: 'linear-gradient(140deg,#3a2d0e,#1c1506)' },
+  { id: 'p2', name: 'Black Label',    sub: 'Тёмная классика',     emoji: '🖤', base: 95,  tag: '',      grad: 'linear-gradient(140deg,#23211d,#0e0d0b)' },
+  { id: 'p3', name: 'Royal Amber',    sub: 'Янтарная серия',      emoji: '💎', base: 150, tag: 'NEW',   grad: 'linear-gradient(140deg,#3d2c12,#241505)' },
+  { id: 'p4', name: 'Velvet Night',   sub: 'Мягкий профиль',      emoji: '🌙', base: 80,  tag: '',      grad: 'linear-gradient(140deg,#1f1d2b,#0d0c14)' },
+  { id: 'p5', name: 'Imperial Gold',  sub: 'Лимитированный выпуск', emoji: '👑', base: 210, tag: 'LIMIT', grad: 'linear-gradient(140deg,#463108,#201602)' },
+  { id: 'p6', name: 'Silk Road',      sub: 'Восточная коллекция', emoji: '🐫', base: 105, tag: '',      grad: 'linear-gradient(140deg,#2e2418,#161009)' },
+];
+const SUPPORT = [
+  { ico: '📣', title: 'Канал MM',        sub: 'Новости, поступления, акции',   url: 'https://t.me/mm_channel' },
+  { ico: '💬', title: 'Чат покупателей', sub: 'Отзывы и общение',              url: 'https://t.me/mm_chat' },
+  { ico: '🌐', title: 'Наш форум',       sub: 'Обсуждения и ветка магазина',   url: 'https://forum.example.com' },
+  { ico: '🛠', title: 'Техподдержка',    sub: 'Оператор · 10:00–22:00',        url: 'https://t.me/mm_support' },
+];
+
+/* ═══════════ Состояние (демо на localStorage, потом заменим на API) ═══════════ */
+const DB_KEY = 'mm_state_v1';
+let S = JSON.parse(localStorage.getItem(DB_KEY) || 'null') || {
+  balance: 1250, pin: null, notif: true,
+  refCount: 3, refEarned: 187,
+  orders: [
+    { id: 'MM-1042', product: 'Golden Reserve', grams: 25, total: 2400, date: '12.07.2026',
+      status: 2, ttn: '20450334455667' },
+    { id: 'MM-1038', product: 'Black Label', grams: 10, total: 855, date: '02.07.2026',
+      status: 3, ttn: '20450311122334' },
+  ],
+};
+const save = () => localStorage.setItem(DB_KEY, JSON.stringify(S));
+const fmt = n => n.toLocaleString('ru-RU');
+const STATUSES = ['Оплачен', 'Отправлен', 'В пути', 'Доставлен'];
+
+/* ═══════════ Навигация ═══════════ */
+function go(v) {
+  haptic('light');
+  document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
+  document.getElementById('view-' + v).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.v === v));
+  if (v === 'history') renderOrders();
+  window.scrollTo({ top: 0 });
+  requestAnimationFrame(observeReveals);
+}
+
+/* ═══════════ Шторки ═══════════ */
+function openSheet(name) {
+  haptic('light');
+  closeSheets(true);
+  document.getElementById('veil').classList.add('open');
+  document.getElementById('sheet-' + name).classList.add('open');
+  if (name === 'settings') syncSettings();
+}
+function closeSheets(silent) {
+  if (!silent) haptic('soft');
+  document.getElementById('veil').classList.remove('open');
+  document.querySelectorAll('.sheet').forEach(s => s.classList.remove('open'));
+}
+
+/* ═══════════ Toast ═══════════ */
+let toastT;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+/* ═══════════ Магазин ═══════════ */
+function tierFor(g) { let t = TIERS[0]; for (const x of TIERS) if (g >= x.from) t = x; return t; }
+function priceFor(p, g) { return Math.round(p.base * tierFor(g).k * g); }
+
+function renderGoods() {
+  document.getElementById('goods').innerHTML = PRODUCTS.map((p, i) => `
+    <div class="good bezel reveal" style="transition-delay:${i * 60}ms" onclick="openProduct('${p.id}')">
+      <div class="bezel-core">
+        <div class="good-img" style="background:${p.grad}">
+          ${p.tag ? `<span class="good-tag">${p.tag}</span>` : ''}${p.emoji}
+        </div>
+        <div>
+          <h3>${p.name}</h3>
+          <div class="good-sub">${p.sub}</div>
+        </div>
+        <div class="good-price"><b>от ${fmt(Math.round(p.base * 0.6))} ₴</b><span>за грамм</span></div>
+      </div>
+    </div>`).join('');
+  observeReveals();
+}
+
+let curProduct = null, curGrams = 10;
+function openProduct(id) {
+  curProduct = PRODUCTS.find(p => p.id === id);
+  curGrams = 10;
+  renderProductSheet();
+  openSheet('product');
+}
+function renderProductSheet() {
+  const p = curProduct, t = tierFor(curGrams);
+  document.getElementById('productBody').innerHTML = `
+    <div class="p-hero">
+      <div class="good-img" style="background:${p.grad}">${p.emoji}</div>
+      <div>
+        <h2>${p.name}</h2>
+        <p class="sheet-sub" style="margin:2px 0 0">${p.sub} · базово ${fmt(p.base)} ₴/г</p>
+      </div>
+    </div>
+    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес</label>
+    <div class="weight-chips">
+      ${WEIGHTS.map(w => `<div class="wchip ${w === curGrams ? 'sel' : ''}" onclick="setGrams(${w})">${w} г</div>`).join('')}
+    </div>
+    <div class="tier-table">
+      ${TIERS.map(x => `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${x.label}</span><b>${fmt(Math.round(p.base * x.k))} ₴/г</b></div>`).join('')}
+    </div>
+    <div class="total-row"><span>Итого · ${curGrams} г</span><b>${fmt(priceFor(p, curGrams))} ₴</b></div>
+    <button class="btn btn-gold" onclick="openCheckout()">Оформить заказ
+      <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+    </button>`;
+}
+function setGrams(w) { haptic('light'); curGrams = w; renderProductSheet(); document.getElementById('sheet-product').classList.add('open'); }
+
+/* ═══════════ Checkout ═══════════ */
+let payMethod = 'balance';
+function openCheckout() {
+  const total = priceFor(curProduct, curGrams);
+  document.getElementById('coSummary').textContent =
+    `${curProduct.name} · ${curGrams} г · ${fmt(total)} ₴`;
+  document.getElementById('payBalHint').textContent = `доступно ${fmt(S.balance)} ₴`;
+  openSheet('checkout');
+}
+function selPay(el) {
+  haptic('light');
+  document.querySelectorAll('[data-pay]').forEach(x => x.classList.remove('sel'));
+  el.classList.add('sel'); payMethod = el.dataset.pay;
+}
+function placeOrder() {
+  const name = document.getElementById('coName').value.trim();
+  const phone = document.getElementById('coPhone').value.trim();
+  const city = document.getElementById('coCity').value.trim();
+  const np = document.getElementById('coNP').value.trim();
+  if (!name || !phone || !city || !np) return toast('Заполните все поля доставки');
+  const total = priceFor(curProduct, curGrams);
+  if (payMethod === 'balance') {
+    if (S.balance < total) return toast('Недостаточно средств — пополните баланс');
+    S.balance -= total;
+  }
+  S.orders.unshift({
+    id: 'MM-' + (1043 + S.orders.length),
+    product: curProduct.name, grams: curGrams, total,
+    date: new Date().toLocaleDateString('ru-RU'),
+    status: 0, ttn: null,
+    ship: { name, phone, city, np },
+  });
+  save(); syncBalance(); closeSheets(true);
+  haptic('medium');
+  toast('Заказ оформлен ✦');
+  go('history');
+}
+
+/* ═══════════ История ═══════════ */
+function stClass(s) { return s >= 3 ? 'st-done' : s >= 1 ? 'st-ship' : 'st-paid'; }
+function renderOrders() {
+  const el = document.getElementById('ordersList');
+  if (!S.orders.length) {
+    el.innerHTML = `<div class="empty"><div class="e-ico">🕰</div><p>Заказов пока нет.<br>Загляните в каталог — там всё самое интересное.</p></div>`;
+    return;
+  }
+  el.innerHTML = S.orders.map((o, i) => `
+    <div class="order bezel reveal" style="transition-delay:${i * 60}ms" onclick="openOrder(${i})">
+      <div class="bezel-core">
+        <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${STATUSES[o.status]}</span></div>
+        <div class="order-meta"><span>${o.product} · ${o.grams} г · ${o.date}</span><b>${fmt(o.total)} ₴</b></div>
+      </div>
+    </div>`).join('');
+  observeReveals();
+}
+function openOrder(i) {
+  const o = S.orders[i];
+  document.getElementById('orderBody').innerHTML = `
+    <h2>${o.id}</h2>
+    <p class="sheet-sub">${o.product} · ${o.grams} г · ${o.date} · <b style="color:var(--gold-soft)">${fmt(o.total)} ₴</b></p>
+    <div class="timeline">
+      ${STATUSES.map((s, k) => `
+        <div class="tl-step ${k <= o.status ? 'done' : ''}">
+          <div class="tl-dot"></div>
+          <div><span>${s}</span>${k === 1 && o.ttn ? `<small>Новая Почта</small>` : ''}</div>
+        </div>`).join('')}
+    </div>
+    ${o.ttn ? `<div class="ttn"><span>ТТН Новой Почты</span><b>${o.ttn}</b></div>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
+    ${o.ship ? `<p class="note">Получатель: ${o.ship.name} · ${o.ship.city}, отд. ${o.ship.np}</p>` : ''}`;
+  openSheet('order');
+}
+
+/* ═══════════ Баланс / пополнение ═══════════ */
+function syncBalance() {
+  document.getElementById('hdrBalance').textContent = fmt(S.balance) + ' ₴';
+  document.getElementById('profBalance').textContent = fmt(S.balance);
+  document.getElementById('refCount').textContent = S.refCount;
+  document.getElementById('refEarned').textContent = fmt(S.refEarned) + ' ₴';
+}
+let tuMethod = 'card';
+function selTu(el) {
+  haptic('light');
+  document.querySelectorAll('[data-tu]').forEach(x => x.classList.remove('sel'));
+  el.classList.add('sel'); tuMethod = el.dataset.tu;
+}
+function topUp() {
+  const v = parseInt(document.getElementById('tuSum').value, 10);
+  if (!v || v <= 0) return toast('Укажите сумму');
+  /* демо: мгновенное зачисление; в проде — счёт на оплату */
+  S.balance += v; save(); syncBalance();
+  document.getElementById('tuSum').value = '';
+  closeSheets(true); haptic('medium');
+  toast(`Баланс пополнен на ${fmt(v)} ₴`);
+}
+
+/* ═══════════ Профиль / рефералка ═══════════ */
+function initProfile() {
+  const name = tgUser ? [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ') : 'Гость MM';
+  const id = tgUser?.id || '000000';
+  document.getElementById('profName').textContent = name;
+  document.getElementById('profId').textContent = 'ID ' + id + (tgUser?.username ? ' · @' + tgUser.username : '');
+  const av = document.getElementById('avatar');
+  if (tgUser?.photo_url) av.innerHTML = `<img src="${tgUser.photo_url}" alt="">`;
+  else av.textContent = (name[0] || 'M').toUpperCase();
+  document.getElementById('refLink').textContent = refUrl(id);
+}
+const refUrl = id => `t.me/mm_shop_bot?start=ref_${id}`;
+function copyRef() {
+  navigator.clipboard?.writeText('https://' + refUrl(tgUser?.id || '000000'));
+  haptic('medium'); toast('Ссылка скопирована');
+}
+function shareRef() {
+  const url = 'https://' + refUrl(tgUser?.id || '000000');
+  const text = 'Заходи в MM — премиальный магазин в Telegram ✦';
+  if (tg) tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
+  else copyRef();
+}
+
+/* ═══════════ Поддержка ═══════════ */
+function renderSupport() {
+  document.getElementById('supportLinks').innerHTML = SUPPORT.map((l, i) => `
+    <a class="link-card bezel reveal" style="transition-delay:${i * 60}ms" href="${l.url}" target="_blank" rel="noopener">
+      <div class="bezel-core">
+        <div class="link-ico">${l.ico}</div>
+        <div><h3>${l.title}</h3><p>${l.sub}</p></div>
+        <div class="arr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></div>
+      </div>
+    </a>`).join('');
+  observeReveals();
+}
+
+/* ═══════════ Настройки ═══════════ */
+function syncSettings() {
+  document.getElementById('pinState').textContent = S.pin ? 'Установлен · нажмите чтобы сменить' : 'Не установлен';
+  document.getElementById('notifToggle').classList.toggle('on', S.notif);
+}
+function toggleNotif() {
+  S.notif = !S.notif; save(); syncSettings(); haptic('light');
+  toast(S.notif ? 'Уведомления включены' : 'Уведомления выключены');
+}
+function openTransfer() {
+  document.getElementById('transferCode').textContent = '— — — —';
+  openSheet('transfer');
+}
+function genTransfer() {
+  const code = Array.from({ length: 4 }, () => Math.floor(Math.random() * 10)).join(' ');
+  document.getElementById('transferCode').textContent = code;
+  haptic('medium'); toast('Код создан · действует 15 минут');
+}
+
+/* ═══════════ PIN ═══════════ */
+const PIN_LEN = 4;
+function buildPad(padEl, dotsEl, onDigit, onDel) {
+  dotsEl.innerHTML = Array.from({ length: PIN_LEN }, () => '<div class="pin-dot"></div>').join('');
+  const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  padEl.innerHTML = keys.map(k =>
+    k === '' ? '<div></div>' :
+    `<div class="pin-key ${k === '⌫' ? 'mute' : ''}" data-k="${k}">${k}</div>`).join('');
+  padEl.querySelectorAll('.pin-key').forEach(el => el.addEventListener('click', () => {
+    haptic('light');
+    el.dataset.k === '⌫' ? onDel() : onDigit(el.dataset.k);
+  }));
+}
+function paintDots(dotsEl, n) {
+  dotsEl.querySelectorAll('.pin-dot').forEach((d, i) => d.classList.toggle('fill', i < n));
+}
+
+/* смена пин-кода (в настройках) */
+let pinBuf = '', pinStage = 0, pinFirst = '';
+function startPinChange() {
+  pinBuf = ''; pinFirst = '';
+  pinStage = S.pin ? -1 : 0; /* -1 = сначала подтвердить старый */
+  document.getElementById('pinTitle').textContent = pinStage === -1 ? 'Введите текущий пин-код' : 'Придумайте новый пин-код';
+  buildPad(document.getElementById('pinPad'), document.getElementById('pinDots'), pinDigit, pinDel);
+  paintDots(document.getElementById('pinDots'), 0);
+  openSheet('pin');
+}
+function pinDigit(d) {
+  if (pinBuf.length >= PIN_LEN) return;
+  pinBuf += d;
+  paintDots(document.getElementById('pinDots'), pinBuf.length);
+  if (pinBuf.length === PIN_LEN) setTimeout(pinStep, 240);
+}
+function pinDel() {
+  pinBuf = pinBuf.slice(0, -1);
+  paintDots(document.getElementById('pinDots'), pinBuf.length);
+}
+function pinStep() {
+  const title = document.getElementById('pinTitle');
+  const dots = document.getElementById('pinDots');
+  if (pinStage === -1) {
+    if (pinBuf === S.pin) { pinStage = 0; title.textContent = 'Придумайте новый пин-код'; }
+    else { dots.classList.add('pin-shake'); setTimeout(() => dots.classList.remove('pin-shake'), 500); title.textContent = 'Неверно — попробуйте ещё раз'; }
+    pinBuf = ''; paintDots(dots, 0); return;
+  }
+  if (pinStage === 0) {
+    pinFirst = pinBuf; pinBuf = ''; pinStage = 1;
+    title.textContent = 'Повторите пин-код'; paintDots(dots, 0); return;
+  }
+  if (pinBuf === pinFirst) {
+    S.pin = pinBuf; save(); closeSheets(true); syncSettings();
+    haptic('medium'); toast('Пин-код установлен 🔐');
+  } else {
+    dots.classList.add('pin-shake'); setTimeout(() => dots.classList.remove('pin-shake'), 500);
+    pinStage = 0; pinBuf = ''; pinFirst = '';
+    title.textContent = 'Не совпало — придумайте заново'; paintDots(dots, 0);
+  }
+}
+
+/* экран блокировки при входе */
+let lockBuf = '';
+function initLock() {
+  if (!S.pin) return;
+  const lock = document.getElementById('lock');
+  lock.classList.add('show');
+  buildPad(document.getElementById('lockPad'), document.getElementById('lockDots'),
+    d => {
+      if (lockBuf.length >= PIN_LEN) return;
+      lockBuf += d;
+      paintDots(document.getElementById('lockDots'), lockBuf.length);
+      if (lockBuf.length === PIN_LEN) setTimeout(() => {
+        if (lockBuf === S.pin) { lock.classList.remove('show'); haptic('medium'); }
+        else {
+          const dots = document.getElementById('lockDots');
+          dots.classList.add('pin-shake'); setTimeout(() => dots.classList.remove('pin-shake'), 500);
+          document.getElementById('lockTitle').textContent = 'Неверный пин-код';
+          haptic('heavy');
+        }
+        lockBuf = ''; paintDots(document.getElementById('lockDots'), 0);
+      }, 240);
+    },
+    () => { lockBuf = lockBuf.slice(0, -1); paintDots(document.getElementById('lockDots'), lockBuf.length); });
+}
+
+/* ═══════════ Scroll reveal ═══════════ */
+const io = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+}), { threshold: .08 });
+function observeReveals() {
+  document.querySelectorAll('.reveal:not(.in)').forEach(el => io.observe(el));
+}
+
+/* ═══════════ Старт ═══════════ */
+renderGoods(); renderOrders(); renderSupport();
+initProfile(); syncBalance(); syncSettings(); initLock();
+observeReveals();
+</script>
+</body>
+</html>
