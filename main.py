@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 import aiohttp
 import qrcode
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 
 import auth
@@ -239,19 +240,23 @@ async def notify(chat_id: int, text: str):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await db.init()
-    task = None
+    task = menu_task = None
     if dp:
         log.info("APP_URL = %r, ADMIN_ID = %r", APP_URL, ADMIN_ID)
-        if APP_URL:
-            # синяя кнопка меню с мини-аппом — не нужно настраивать в BotFather
+
+        async def _set_menu():
+            # в фоне, чтобы не задерживать приём запросов на старте
+            if not APP_URL:
+                log.warning("APP_URL/RAILWAY_PUBLIC_DOMAIN не заданы — кнопка WebApp не будет показана")
+                return
             try:
                 await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
                     text="Magic Market", web_app=WebAppInfo(url=APP_URL)))
                 log.info("Кнопка меню WebApp установлена")
             except Exception:
                 log.exception("Не удалось установить кнопку меню")
-        else:
-            log.warning("APP_URL/RAILWAY_PUBLIC_DOMAIN не заданы — кнопка WebApp не будет показана")
+
+        menu_task = asyncio.create_task(_set_menu())
         task = asyncio.create_task(dp.start_polling(bot))
         log.info("Бот запущен (polling)")
     else:
@@ -261,11 +266,14 @@ async def lifespan(_: FastAPI):
     yield
     checker.cancel()
     tracker.cancel()
+    if menu_task:
+        menu_task.cancel()
     if task:
         task.cancel()
 
 
 app = FastAPI(title="Magic Market", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
 def tg_user(request: Request) -> dict:
@@ -293,14 +301,17 @@ async def index():
     return FileResponse("index.html")
 
 
+_IMMUTABLE = {"Cache-Control": "public, max-age=86400"}
+
+
 @app.get("/logo.png")
 async def logo():
-    return FileResponse("logo.png")
+    return FileResponse("logo.png", headers=_IMMUTABLE)
 
 
 @app.get("/logo.webp")
 async def logo_webp():
-    return FileResponse("logo.webp")
+    return FileResponse("logo.webp", headers=_IMMUTABLE)
 
 
 @app.get("/photo/{pid}/{idx}")
