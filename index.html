@@ -265,6 +265,17 @@ h1.page-title em{font-style:normal;color:inherit}
   background:rgba(255,255,255,.05);color:var(--muted)}
 .link-card .arr svg{width:12px;height:12px}
 
+/* ── FAQ ── */
+.faq-item{border:1px solid var(--line);border-radius:16px;margin-bottom:10px;background:rgba(255,255,255,.025);overflow:hidden}
+.faq-q{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;
+  font-size:13.5px;font-weight:700;cursor:pointer;user-select:none}
+.faq-q svg{width:15px;height:15px;flex:none;color:var(--muted-2);transition:transform .4s var(--ease)}
+.faq-item.open .faq-q svg{transform:rotate(180deg);color:var(--gold-soft)}
+.faq-a{max-height:0;overflow:hidden;transition:max-height .45s var(--ease)}
+.faq-item.open .faq-a{max-height:500px}
+.faq-a-in{padding:0 16px 14px;font-size:12.5px;color:var(--muted);line-height:1.7}
+.faq-a-in b{color:var(--txt)}
+
 /* ── настройки ── */
 .set-row{display:flex;align-items:center;gap:13px;padding:15px 4px;cursor:pointer;border-bottom:1px solid var(--line);
   transition:opacity .4s var(--ease)}
@@ -457,6 +468,8 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <h1 class="page-title">Поддержка <em>&amp; сообщество</em></h1>
     <p class="page-sub">Наши каналы, чаты и форумы. Техподдержка отвечает ежедневно 10:00–22:00.</p>
     <div id="supportLinks"></div>
+    <div class="section-head"><h2>Частые вопросы</h2><span>FAQ</span></div>
+    <div id="faqList"></div>
   </section>
 </div>
 
@@ -1292,6 +1305,41 @@ function shareRef() {
 }
 
 /* ═══════════ Поддержка ═══════════ */
+const FAQ = [
+  { q: 'Как сделать заказ?',
+    a: 'Откройте <b>Магазин</b> → выберите товар → укажите вес: быстрые кнопки или своё число от 1 до 1000 г (чем больше вес — тем дешевле грамм) → <b>«Оформить заказ»</b> → заполните имя, телефон, город и отделение Новой Почты → выберите способ оплаты и подтвердите.' },
+  { q: 'Какие есть способы оплаты?',
+    a: '<b>С баланса</b> — списывается сразу.<br><b>Картой</b> — переводите на наши реквизиты и прикрепляете квитанцию (фото или PDF), заказ подтверждается после проверки. Лимит — до 5 000 ₴.<br><b>Криптой (USDT TRC-20 / BTC)</b> — создаётся счёт с QR-кодом и точной суммой на 30 минут, зачисление автоматическое после подтверждения сети.' },
+  { q: 'Как пополнить баланс?',
+    a: 'Нажмите на баланс в шапке или <b>«Пополнить»</b> в профиле. Укажите сумму и способ: карта — перевод + квитанция, проверяем вручную; крипта — счёт с QR, зачисляется автоматически. Внизу страницы — история всех пополнений со статусами.' },
+  { q: 'Как отследить заказ?',
+    a: 'Вкладка <b>История</b> → откройте заказ. Стадии: <b>Оплачен → В работе → В пути → Получен</b>. Когда посылка отправлена, появится ТТН Новой Почты — нажмите на него, чтобы скопировать. Статус «Получен» ставится автоматически по данным Новой Почты.' },
+  { q: 'Как оценить товар?',
+    a: 'После статуса <b>«Получен»</b> откройте заказ в Истории — внизу появятся звёзды от 1 до 5. Средняя оценка видна в каталоге у каждого товара.' },
+  { q: 'Как работает реферальная программа?',
+    a: 'В <b>Профиле</b> скопируйте свою ссылку и отправьте друзьям. С каждой покупки приглашённых на ваш баланс капает процент: <b>5%</b> (до 10 друзей), <b>10%</b> (10–49), <b>15%</b> (50+). Бонус начисляется после оплаты покупки.' },
+  { q: 'Пин-код и перенос аккаунта',
+    a: 'Пин-код создаётся при первом входе и запрашивается при каждом открытии. Сменить его можно в настройках (шестерёнка вверху справа). Там же — <b>перенос аккаунта</b>: сгенерируйте код на старом аккаунте и введите его на новом в течение 15 минут — баланс, заказы и рефералы переедут.' },
+  { q: 'Оплата не зачислилась — что делать?',
+    a: 'Карта: проверка квитанции занимает время — дождитесь уведомления. Крипта: сеть подтверждает до 30 минут, нажмите <b>«Проверить»</b> в счёте. Если счёт истёк, а оплата ушла — напишите в <b>техподдержку</b> с номером транзакции, разберёмся и зачислим.' },
+];
+function renderFaq() {
+  document.getElementById('faqList').innerHTML = FAQ.map((f, i) => `
+    <div class="faq-item reveal" style="transition-delay:${i * 40}ms" id="faq-${i}">
+      <div class="faq-q" onclick="toggleFaq(${i})">${f.q}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="faq-a"><div class="faq-a-in">${f.a}</div></div>
+    </div>`).join('');
+  observeReveals();
+}
+function toggleFaq(i) {
+  haptic('light');
+  const el = document.getElementById('faq-' + i);
+  const wasOpen = el.classList.contains('open');
+  document.querySelectorAll('.faq-item.open').forEach(x => x.classList.remove('open'));
+  if (!wasOpen) el.classList.add('open');
+}
 function renderSupport() {
   document.getElementById('supportLinks').innerHTML = SUPPORT.map((l, i) => `
     <a class="link-card bezel reveal" style="transition-delay:${i * 60}ms" href="${l.url}" target="_blank" rel="noopener">
@@ -1682,7 +1730,7 @@ function observeReveals() {
 }
 
 /* ═══════════ Старт ═══════════ */
-renderGoods(); renderOrders(); renderSupport();
+renderGoods(); renderOrders(); renderSupport(); renderFaq();
 initProfile(); syncBalance(); syncSettings(); initLock();
 observeReveals();
 serverSync();
