@@ -848,12 +848,8 @@ function renderCoPays() {
     `<div class="pay-opt ${payMethod === o.key ? 'sel' : ''}" onclick="selPay('${o.key}')">${o.label}<small>${o.small}</small></div>`).join('');
   const ex = document.getElementById('coExtra');
   if (payMethod === 'card') {
-    const req = (PAY.card_number || '') + (PAY.card_holder ? '\n' + PAY.card_holder : '');
     ex.innerHTML = `
-      <div class="ref-link" style="margin-bottom:12px" onclick="copyText(this.querySelector('span').textContent)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        <span style="white-space:pre-line">${req}</span>
-      </div>
+      ${cardBlock()}
       <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('coFile').click()">
         ${coReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
       ${coReceipt ? `<img src="${coReceipt}" style="width:100%;border-radius:14px;margin-bottom:12px;border:1px solid var(--line)">` : ''}`;
@@ -1041,12 +1037,8 @@ function renderTuBody() {
     return;
   }
   if (tuMethod === 'card') {
-    const req = (PAY.card_number || '') + (PAY.card_holder ? '\n' + PAY.card_holder : '');
     b.innerHTML = `
-      <div class="ref-link" style="margin-bottom:12px" onclick="copyText(this.querySelector('span').textContent)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        <span style="white-space:pre-line">${req}</span>
-      </div>
+      ${cardBlock()}
       <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('tuFile').click()">
         ${tuReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
       ${tuReceipt ? `<img src="${tuReceipt}" style="width:100%;border-radius:14px;margin-bottom:12px;border:1px solid var(--line)">` : ''}
@@ -1137,6 +1129,18 @@ async function cancelInvoice() {
   else renderTuBody();
 }
 function copyText(t) { navigator.clipboard?.writeText(t); haptic('medium'); toast('Скопировано'); }
+function cardBlock() {
+  const num = (PAY.card_number || '').replace(/'/g, '');
+  return `
+  <div class="ref-link" style="margin-bottom:12px;display:block" onclick="copyText('${num}')">
+    <div style="display:flex;align-items:center;gap:10px">
+      <svg style="width:16px;height:16px;flex:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span style="font-size:19px;font-weight:800;letter-spacing:.05em;color:var(--txt);word-break:break-all">${PAY.card_number || ''}</span>
+    </div>
+    ${PAY.card_holder ? `<div style="font-size:12.5px;color:var(--muted);margin-top:5px">${PAY.card_holder}</div>` : ''}
+    <div style="font-size:10.5px;color:var(--muted-2);margin-top:3px">Нажмите — скопируется только номер карты</div>
+  </div>`;
+}
 function compressFile(file, maxSide, quality, cb) {
   const img = new Image();
   img.onload = () => {
