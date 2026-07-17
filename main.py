@@ -138,6 +138,40 @@ async def _settle(inv: dict, txid: str) -> bool:
     return True
 
 
+# ── трекер Новой Почты ───────────────────────────────────────────────────────
+NP_API = "https://api.novaposhta.ua/v2.0/json/"
+NP_RECEIVED = {"9", "10", "11"}  # «Отримано» в разных вариантах
+
+
+async def np_tracker():
+    """Раз в 30 минут проверяет ТТН заказов «В пути» и ставит «Получен»."""
+    while True:
+        try:
+            orders = await db.shipped_orders()
+            if orders:
+                payload = {
+                    "apiKey": os.getenv("NP_API_KEY", ""),
+                    "modelName": "TrackingDocument",
+                    "calledMethod": "getStatusDocuments",
+                    "methodProperties": {"Documents": [
+                        {"DocumentNumber": o["ttn"], "Phone": ""} for o in orders]},
+                }
+                async with aiohttp.ClientSession() as s:
+                    async with s.post(NP_API, json=payload,
+                                      timeout=aiohttp.ClientTimeout(total=20)) as r:
+                        data = (await r.json()).get("data", []) or []
+                by_ttn = {str(d.get("Number", "")): str(d.get("StatusCode", "")) for d in data}
+                for o in orders:
+                    if by_ttn.get(o["ttn"]) in NP_RECEIVED and await db.mark_delivered(o["id"]):
+                        await notify(o["user_id"],
+                                     f"🎉 Заказ <b>{o['code']}</b> получен! "
+                                     "Будем рады вашей оценке ★ в «Истории».")
+                        await notify(ADMIN_ID, f"📬 Заказ {o['code']} получен (по данным НП).")
+        except Exception:
+            log.exception("Ошибка трекера Новой Почты")
+        await asyncio.sleep(1800)
+
+
 async def invoice_checker():
     """Фоновая проверка неоплаченных счетов раз в минуту."""
     while True:
@@ -223,8 +257,10 @@ async def lifespan(_: FastAPI):
     else:
         log.warning("BOT_TOKEN не задан — бот не запущен, API без авторизации не работает")
     checker = asyncio.create_task(invoice_checker())
+    tracker = asyncio.create_task(np_tracker())
     yield
     checker.cancel()
+    tracker.cancel()
     if task:
         task.cancel()
 
@@ -515,8 +551,20 @@ async def api_admin_ttn(request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     await notify(res["user_id"],
-                 f"📦 Заказ <b>{res['code']}</b> отправлен!\n"
+                 f"📦 Заказ <b>{res['code']}</b> в пути!\n"
                  f"ТТН Новой Почты: <code>{res['ttn']}</code>")
+    return {"orders": await db.admin_orders()}
+
+
+@app.post("/api/admin/work")
+async def api_admin_work(request: Request):
+    admin_user(request)
+    b = await request.json()
+    try:
+        res = await db.order_to_work(str(b.get("order", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await notify(res["user_id"], f"🛠 Заказ <b>{res['code']}</b> принят в работу — собираем.")
     return {"orders": await db.admin_orders()}
 
 

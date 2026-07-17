@@ -682,7 +682,7 @@ async function serverSync() {
   catch (e) { /* сервера нет — остаёмся в демо-режиме */ }
 }
 const fmt = n => n.toLocaleString('ru-RU');
-const STATUSES = ['Оплачен', 'Отправлен', 'В пути', 'Получен'];
+const STATUSES = ['Оплачен', 'В работе', 'В пути', 'Получен'];
 
 /* ═══════════ Навигация ═══════════ */
 function go(v) {
@@ -926,7 +926,7 @@ function openOrder(i) {
       ${STATUSES.map((s, k) => `
         <div class="tl-step ${k <= o.status ? 'done' : ''}">
           <div class="tl-dot"></div>
-          <div><span>${s}</span>${k === 1 && o.ttn ? `<small>Новая Почта</small>` : ''}</div>
+          <div><span>${s}</span>${k === 2 && o.ttn ? `<small>Новая Почта</small>` : ''}</div>
         </div>`).join('')}
     </div>` : `
     <p class="note" style="margin-bottom:10px">${o.status === -1
@@ -1268,9 +1268,10 @@ function renderAdmin(tab) {
             <button class="btn btn-ghost" style="padding:12px" onclick="decideOrder('${o.id}', false)">Отклонить</button>
           </div>` : ''}
         ${o.status === -1 && !o.receipt ? `<p class="note" style="margin-top:8px">⏳ Ждёт крипто-оплату</p>` : ''}
+        ${o.status === 0 ? `<button class="btn btn-ghost" style="margin-top:10px;padding:11px" onclick="workOrder('${o.id}')">🛠 Взять в работу</button>` : ''}
         ${o.ttn ? `<div class="ttn"><span>ТТН</span><b>${o.ttn}</b></div>` : o.status >= 0 ? `
           <div style="display:flex;gap:8px;margin-top:10px">
-            <input class="mini-input" id="ttn-${o.id}" placeholder="ТТН Новой Почты" inputmode="numeric" style="flex:1">
+            <input class="mini-input" id="ttn-${o.id}" placeholder="ТТН Новой Почты → статус «В пути»" inputmode="numeric" style="flex:1">
             <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
           </div>` : ''}
       </div></div>`).join('') : '<div class="empty"><p>Заказов пока нет</p></div>';
@@ -1401,6 +1402,12 @@ async function deleteProduct() {
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Товар удалён');
   openSheet('admin'); renderAdmin('products');
+}
+async function workOrder(code) {
+  try { AD.orders = (await API.call('/api/admin/work', { order: code })).orders; }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Заказ в работе 🛠');
+  renderAdmin('orders');
 }
 async function decideOrder(code, approve) {
   try { AD.orders = (await API.call('/api/admin/order', { order: code, approve })).orders; }

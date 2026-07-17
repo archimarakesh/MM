@@ -288,7 +288,7 @@ async def payments_history(tg_id: int, c) -> list:
 
 
 # ── заказы ───────────────────────────────────────────────────────────────────
-# статусы: -2 отменён, -1 ждёт оплаты/проверки, 0 оплачен, 1 отправлен, 2 в пути, 3 получен
+# статусы: -2 отменён, -1 ждёт оплаты/проверки, 0 оплачен, 1 в работе, 2 в пути (ТТН), 3 получен
 async def _ref_bonus(c, buyer_id: int, total: int):
     """5% рефереру — начисляется только после фактической оплаты."""
     ref_by = await c.fetchval("SELECT ref_by FROM users WHERE tg_id=$1", buyer_id)
@@ -478,10 +478,38 @@ async def set_ttn(order_code: str, ttn: str) -> dict:
         if not o:
             raise ValueError("Заказ не найден")
         await c.execute("""
-            UPDATE orders SET ttn=$2, status=GREATEST(status, 1), shipped_at=COALESCE(shipped_at, now())
+            UPDATE orders SET ttn=$2, status=GREATEST(status, 2), shipped_at=COALESCE(shipped_at, now())
             WHERE id=$1
         """, oid, ttn.strip())
         return {"user_id": o["user_id"], "code": order_code, "ttn": ttn.strip()}
+
+
+async def order_to_work(order_code: str) -> dict:
+    try:
+        oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
+    except (IndexError, ValueError):
+        raise ValueError("Неверный номер заказа")
+    async with _pool.acquire() as c:
+        o = await c.fetchrow("SELECT user_id FROM orders WHERE id=$1 AND status=0", oid)
+        if not o:
+            raise ValueError("Заказ не найден или уже в работе")
+        await c.execute("UPDATE orders SET status=1 WHERE id=$1", oid)
+        return {"user_id": o["user_id"], "code": order_code}
+
+
+async def shipped_orders() -> list:
+    """Заказы «В пути» с ТТН — для трекера Новой Почты."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, user_id, ttn FROM orders WHERE status=2 AND ttn IS NOT NULL LIMIT 100")
+    return [{"id": r["id"], "user_id": r["user_id"], "ttn": r["ttn"],
+             "code": f"MM-{r['id'] + ORDER_CODE_BASE}"} for r in rows]
+
+
+async def mark_delivered(oid: int) -> bool:
+    async with _pool.acquire() as c:
+        tag = await c.execute("UPDATE orders SET status=3 WHERE id=$1 AND status=2", oid)
+    return tag == "UPDATE 1"
 
 
 # ── крипто-счета (автопроверка оплаты) ───────────────────────────────────────
