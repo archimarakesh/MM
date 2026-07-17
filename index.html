@@ -278,8 +278,8 @@ h1.page-title em{font-style:normal;color:inherit}
   transition:all .35s var(--ease)}
 .pin-dot.fill{background:radial-gradient(circle at 35% 30%,#ffe9a8,#c69320);border-color:transparent;
   box-shadow:0 0 12px rgba(212,175,55,.5)}
-.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:312px;margin:0 auto}
-.pin-key{aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:26px;font-weight:600;cursor:pointer;
+.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:min(92vw,420px);margin:0 auto}
+.pin-key{aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:34px;font-weight:600;cursor:pointer;
   background:rgba(255,255,255,.04);border:1px solid var(--line);
   transition:all .4s var(--ease);user-select:none}
 .pin-key:active{transform:scale(.93);background:rgba(212,175,55,.12);border-color:var(--gold-line)}
@@ -290,7 +290,7 @@ h1.page-title em{font-style:normal;color:inherit}
 
 /* экран блокировки */
 #lock{position:fixed;inset:0;z-index:90;background:var(--bg);display:none;flex-direction:column;
-  align-items:center;justify-content:center;padding:20px}
+  align-items:center;justify-content:flex-start;padding:calc(9vh + env(safe-area-inset-top)) 20px 30px;overflow-y:auto}
 #lock.show{display:flex}
 
 /* ── нижняя навигация ── */
@@ -324,7 +324,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 
 <!-- экран блокировки -->
 <div id="lock">
-  <img src="logo.png" alt="Magic Market" style="width:150px;margin-bottom:26px">
+  <img src="logo.png" alt="Magic Market" style="width:150px;margin-bottom:5vh">
   <div class="pin-title" id="lockTitle">Введите пин-код</div>
   <div class="pin-dots" id="lockDots"></div>
   <div class="pin-pad" id="lockPad"></div>
