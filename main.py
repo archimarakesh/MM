@@ -122,11 +122,19 @@ async def _settle(inv: dict, txid: str) -> bool:
     res = await db.invoice_paid(inv["id"], txid)
     if not res:
         return False
-    await notify(res["user_id"],
-                 f"✅ Оплата получена — баланс пополнен на <b>{res['amount']} ₴</b>.")
-    await notify(ADMIN_ID,
-                 f"₿ Крипто-оплата: счёт #{inv['id']}, +{res['amount']} ₴ "
-                 f"({inv['amount_crypto']} {CRYPTO[inv['currency']]['label']}).")
+    if res["order_code"]:
+        await notify(res["user_id"],
+                     f"✅ Заказ <b>{res['order_code']}</b> оплачен — принят в работу.")
+        await notify(ADMIN_ID,
+                     f"₿ <b>Заказ {res['order_code']} оплачен криптой</b> "
+                     f"({inv['amount_crypto']} {CRYPTO[inv['currency']]['label']} = {res['amount']} ₴). "
+                     f"Админка → Заказы.")
+    else:
+        await notify(res["user_id"],
+                     f"✅ Оплата получена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+        await notify(ADMIN_ID,
+                     f"₿ Крипто-пополнение: счёт #{inv['id']}, +{res['amount']} ₴ "
+                     f"({inv['amount_crypto']} {CRYPTO[inv['currency']]['label']}).")
     return True
 
 
@@ -283,18 +291,45 @@ async def api_auth(request: Request):
 async def api_order(request: Request):
     u = tg_user(request)
     b = await request.json()
+    pay = str(b.get("pay", "balance"))
+    ship = dict(b.get("ship") or {})
+    ship_txt = (f"{ship.get('name', '')} · {ship.get('phone', '')}\n"
+                f"{ship.get('city', '')}, НП №{ship.get('np', '')}")
     try:
-        snap = await db.create_order(
-            u["id"], int(b["product_id"]), int(b["grams"]),
-            str(b.get("pay", "balance")), dict(b.get("ship") or {}))
+        if pay in CRYPTO:
+            address = (await db.get_settings()).get(CRYPTO[pay]["wallet_key"], "")
+            if not address:
+                raise ValueError("Этот способ оплаты сейчас недоступен")
+            total = await db.order_total(int(b["product_id"]), int(b["grams"]))
+            try:
+                amt = await crypto_amount(pay, total)
+            except ValueError:
+                raise
+            except Exception:
+                raise ValueError("Не удалось получить курс — попробуйте через минуту")
+            snap, code, inv = await db.create_order_invoice(
+                u["id"], int(b["product_id"]), int(b["grams"]), pay, ship, amt, address)
+            snap["invoice"] = invoice_public(inv)
+            snap["invoice"]["order"] = code
+        elif pay == "card":
+            receipt = str(b.get("receipt", ""))
+            if not receipt.startswith("data:image/") or len(receipt) > MAX_RECEIPT_LEN:
+                raise ValueError("Приложите фото квитанции об оплате")
+            snap = await db.create_order(
+                u["id"], int(b["product_id"]), int(b["grams"]), "card", ship, receipt)
+            await notify(ADMIN_ID,
+                         f"🛒 <b>Заказ {snap['order_code']} — квитанция на проверку</b>\n"
+                         f"{b.get('product_name', '')} · {b['grams']} г · {snap['order_total']} ₴\n"
+                         f"{ship_txt}\nАдминка → Заказы.")
+        else:
+            snap = await db.create_order(
+                u["id"], int(b["product_id"]), int(b["grams"]), "balance", ship)
+            await notify(ADMIN_ID,
+                         f"🛒 <b>Новый заказ {snap['order_code']} (оплачен с баланса)</b>\n"
+                         f"{b.get('product_name', '')} · {b['grams']} г · {snap['order_total']} ₴\n"
+                         f"{ship_txt}")
     except ValueError as e:
         raise HTTPException(400, str(e))
-    ship = b.get("ship") or {}
-    await notify(ADMIN_ID,
-                 f"🛒 <b>Новый заказ {snap['order_code']}</b>\n"
-                 f"{b.get('product_name', '')} · {b['grams']} г · {snap['order_total']} ₴\n"
-                 f"{ship.get('name', '')} · {ship.get('phone', '')}\n"
-                 f"{ship.get('city', '')}, НП №{ship.get('np', '')}")
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
     return snap
 
@@ -451,6 +486,24 @@ async def api_admin_topup(request: Request):
         await notify(res["user_id"],
                      "❌ Квитанция не прошла проверку. Если это ошибка — напишите в поддержку.")
     return {"topups": await db.admin_topups()}
+
+
+@app.post("/api/admin/order")
+async def api_admin_order(request: Request):
+    admin_user(request)
+    b = await request.json()
+    try:
+        res = await db.order_decide(str(b.get("order", "")), bool(b.get("approve")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res["approved"]:
+        await notify(res["user_id"],
+                     f"✅ Оплата заказа <b>{res['code']}</b> подтверждена — принят в работу.")
+    else:
+        await notify(res["user_id"],
+                     f"❌ Оплата заказа <b>{res['code']}</b> не прошла проверку — заказ отменён. "
+                     "Если это ошибка — напишите в поддержку.")
+    return {"orders": await db.admin_orders()}
 
 
 @app.post("/api/admin/ttn")

@@ -205,6 +205,8 @@ h1.page-title em{font-style:normal;color:inherit}
 .st-paid{background:rgba(224,178,77,.12);color:var(--warn);border:1px solid rgba(224,178,77,.3)}
 .st-ship{background:rgba(212,175,55,.12);color:var(--gold-soft);border:1px solid var(--gold-line)}
 .st-done{background:rgba(127,212,138,.1);color:var(--ok);border:1px solid rgba(127,212,138,.25)}
+.st-wait{background:rgba(224,178,77,.12);color:var(--warn);border:1px solid rgba(224,178,77,.3)}
+.st-cancel{background:rgba(224,122,95,.12);color:var(--danger);border:1px solid rgba(224,122,95,.3)}
 .order-meta{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
 .order-meta b{color:var(--txt);font-size:13.5px}
 .timeline{margin:14px 0 6px;padding-left:4px}
@@ -477,15 +479,21 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div class="field"><label>Город</label><input id="coCity" placeholder="Киев"></div>
   <div class="field"><label>Отделение Новой Почты</label><input id="coNP" inputmode="numeric" placeholder="№ отделения или почтомата"></div>
   <div class="field"><label>Оплата</label>
-    <div class="pay-opts">
-      <div class="pay-opt sel" data-pay="balance" onclick="selPay(this)">С баланса<small id="payBalHint"></small></div>
-      <div class="pay-opt" data-pay="card" onclick="selPay(this)">Картой<small>перевод на карту</small></div>
-    </div>
+    <div class="pay-opts" id="coPays"></div>
   </div>
+  <div id="coExtra"></div>
   <button class="btn btn-gold" onclick="placeOrder()">Подтвердить заказ
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
   </button>
   <p class="note">После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.</p>
+  <input type="file" id="coFile" accept="image/*" style="display:none">
+</div>
+
+<div class="sheet" id="sheet-invoice">
+  <div class="sheet-grip"></div>
+  <h2>Оплата заказа</h2>
+  <p class="sheet-sub">Оплатите счёт в течение 30 минут — заказ подтвердится автоматически.</p>
+  <div id="invoiceBody"></div>
 </div>
 
 <div class="sheet" id="sheet-order">
@@ -798,19 +806,49 @@ function customGramsInput(v) {
 }
 
 /* ═══════════ Checkout ═══════════ */
-let payMethod = 'balance';
+let payMethod = 'balance', coReceipt = '';
 function openCheckout() {
   const total = priceFor(curProduct, curGrams);
   document.getElementById('coSummary').textContent =
     `${curProduct.name} · ${curGrams} г · ${fmt(total)} ₴`;
-  document.getElementById('payBalHint').textContent = `доступно ${fmt(S.balance)} ₴`;
+  payMethod = 'balance'; coReceipt = '';
+  renderCoPays();
   openSheet('checkout');
 }
-function selPay(el) {
-  haptic('light');
-  document.querySelectorAll('[data-pay]').forEach(x => x.classList.remove('sel'));
-  el.classList.add('sel'); payMethod = el.dataset.pay;
+function coOptions() {
+  const o = [{ key: 'balance', label: 'С баланса', small: `доступно ${fmt(S.balance)} ₴` }];
+  if (API.ok) {
+    if (PAY.card_number) o.push({ key: 'card', label: 'Картой', small: 'перевод + квитанция' });
+    if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20', small: 'авто-счёт' });
+    if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC', small: 'авто-счёт' });
+  }
+  return o;
 }
+function renderCoPays() {
+  document.getElementById('coPays').innerHTML = coOptions().map(o =>
+    `<div class="pay-opt ${payMethod === o.key ? 'sel' : ''}" onclick="selPay('${o.key}')">${o.label}<small>${o.small}</small></div>`).join('');
+  const ex = document.getElementById('coExtra');
+  if (payMethod === 'card') {
+    const req = (PAY.card_number || '') + (PAY.card_holder ? '\n' + PAY.card_holder : '');
+    ex.innerHTML = `
+      <div class="ref-link" style="margin-bottom:12px" onclick="copyText(this.querySelector('span').textContent)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span style="white-space:pre-line">${req}</span>
+      </div>
+      <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('coFile').click()">
+        ${coReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
+      ${coReceipt ? `<img src="${coReceipt}" style="width:100%;border-radius:14px;margin-bottom:12px;border:1px solid var(--line)">` : ''}`;
+  } else if (payMethod === 'trc20' || payMethod === 'btc') {
+    ex.innerHTML = `<p class="note" style="margin:0 0 12px">После подтверждения появится счёт с QR-кодом, адресом и точной суммой — оплатите его в течение 30 минут, заказ подтвердится автоматически.</p>`;
+  } else ex.innerHTML = '';
+}
+function selPay(k) { haptic('light'); payMethod = k; renderCoPays(); }
+document.getElementById('coFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  compressFile(f, 1280, 0.8, d => { coReceipt = d; renderCoPays(); });
+  e.target.value = '';
+});
 async function placeOrder() {
   const name = document.getElementById('coName').value.trim();
   const phone = document.getElementById('coPhone').value.trim();
@@ -820,25 +858,38 @@ async function placeOrder() {
   const total = priceFor(curProduct, curGrams);
   const ship = { name, phone, city, np };
   if (API.ok) {
-    try {
-      applySnapshot(await API.call('/api/order', {
-        product_id: curProduct.id, product_name: curProduct.name,
-        grams: curGrams, pay: payMethod, ship,
-      }));
-    } catch (e) { return toast(e.message); }
-  } else {
-    if (payMethod === 'balance') {
-      if (S.balance < total) return toast('Недостаточно средств — пополните баланс');
-      S.balance -= total;
+    const body = { product_id: curProduct.id, product_name: curProduct.name,
+                   grams: curGrams, pay: payMethod, ship };
+    if (payMethod === 'card') {
+      if (!coReceipt) return toast('Приложите фото квитанции об оплате');
+      body.receipt = coReceipt;
     }
-    S.orders.unshift({
-      id: 'MM-' + (1043 + S.orders.length),
-      product: curProduct.name, grams: curGrams, total,
-      date: new Date().toLocaleDateString('ru-RU'),
-      status: 0, ttn: null, ship,
-    });
-    save(); syncBalance();
+    let d;
+    try { d = await API.call('/api/order', body); } catch (e) { return toast(e.message); }
+    applySnapshot(d);
+    coReceipt = '';
+    closeSheets(true); haptic('medium');
+    if (d.invoice) {
+      INV = d.invoice;
+      renderInvoice(document.getElementById('invoiceBody'));
+      openSheet('invoice');
+      startInvPoll();
+      return;
+    }
+    toast(payMethod === 'card' ? 'Заказ создан — оплата на проверке ⏳' : 'Заказ оформлен ✦');
+    go('history');
+    return;
   }
+  /* демо-режим: только с баланса */
+  if (S.balance < total) return toast('Недостаточно средств — пополните баланс');
+  S.balance -= total;
+  S.orders.unshift({
+    id: 'MM-' + (1043 + S.orders.length),
+    product: curProduct.name, grams: curGrams, total,
+    date: new Date().toLocaleDateString('ru-RU'),
+    status: 0, ttn: null, ship,
+  });
+  save(); syncBalance();
   closeSheets(true);
   haptic('medium');
   toast('Заказ оформлен ✦');
@@ -846,7 +897,8 @@ async function placeOrder() {
 }
 
 /* ═══════════ История ═══════════ */
-function stClass(s) { return s >= 3 ? 'st-done' : s >= 1 ? 'st-ship' : 'st-paid'; }
+function stClass(s) { return s >= 3 ? 'st-done' : s >= 1 ? 'st-ship' : s >= 0 ? 'st-paid' : s === -1 ? 'st-wait' : 'st-cancel'; }
+function stLabel(s) { return s === -1 ? 'Ждёт оплаты' : s === -2 ? 'Отменён' : STATUSES[s]; }
 function renderOrders() {
   const el = document.getElementById('ordersList');
   if (!S.orders.length) {
@@ -856,7 +908,7 @@ function renderOrders() {
   el.innerHTML = S.orders.map((o, i) => `
     <div class="order bezel reveal" style="transition-delay:${i * 60}ms" onclick="openOrder(${i})">
       <div class="bezel-core">
-        <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${STATUSES[o.status]}</span></div>
+        <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
         <div class="order-meta"><span>${o.product} · ${o.grams} г · ${o.date}</span><b>${fmt(o.total)} ₴</b></div>
       </div>
     </div>`).join('');
@@ -869,13 +921,17 @@ function openOrder(i) {
   document.getElementById('orderBody').innerHTML = `
     <h2>${o.id}</h2>
     <p class="sheet-sub">${o.product} · ${o.grams} г · ${o.date} · <b style="color:var(--gold-soft)">${fmt(o.total)} ₴</b></p>
+    ${o.status >= 0 ? `
     <div class="timeline">
       ${STATUSES.map((s, k) => `
         <div class="tl-step ${k <= o.status ? 'done' : ''}">
           <div class="tl-dot"></div>
           <div><span>${s}</span>${k === 1 && o.ttn ? `<small>Новая Почта</small>` : ''}</div>
         </div>`).join('')}
-    </div>
+    </div>` : `
+    <p class="note" style="margin-bottom:10px">${o.status === -1
+      ? '⏳ Заказ ждёт подтверждения оплаты.'
+      : 'Заказ отменён — оплата не поступила или не прошла проверку.'}</p>`}
     ${o.ttn ? `<div class="ttn"><span>ТТН Новой Почты</span><b>${o.ttn}</b></div>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
     ${o.ship ? `<p class="note">Получатель: ${o.ship.name} · ${o.ship.city}, отд. ${o.ship.np}</p>` : ''}
     ${o.status === 3 ? `
@@ -983,7 +1039,7 @@ function renderInvoice(b) {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         <span style="word-break:break-all">${INV.address}</span>
       </div>
-      <div style="margin-top:12px;font-size:13px;color:var(--muted)">Счёт на <b style="color:var(--txt)">${fmt(INV.amount_uah)} ₴</b> · осталось <b id="invLeft" style="color:var(--gold-soft)">—</b></div>
+      <div style="margin-top:12px;font-size:13px;color:var(--muted)">${INV.order ? `Заказ <b style="color:var(--txt)">${INV.order}</b> · ` : ''}Счёт на <b style="color:var(--txt)">${fmt(INV.amount_uah)} ₴</b> · осталось <b id="invLeft" style="color:var(--gold-soft)">—</b></div>
       <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <button class="btn btn-ghost" style="padding:12px" onclick="cancelInvoice()">Отменить платёж</button>
         <button class="btn btn-gold" style="padding:12px" onclick="checkInvoice(true)">Проверить</button>
@@ -1015,12 +1071,23 @@ async function checkInvoice(manual) {
   try {
     const r = await API.call('/api/invoice/status', { id: INV.id });
     if (r.status === 1) {
+      const wasOrder = INV.order;
       INV = false; clearInterval(invPoll);
       await serverSync();
-      if (document.getElementById('view-topup').classList.contains('active')) renderTopup();
-      haptic('medium'); toast('Оплата получена — баланс пополнен ✅');
+      haptic('medium');
+      if (wasOrder) {
+        closeSheets(true);
+        toast(`Заказ ${wasOrder} оплачен ✅`);
+        go('history');
+      } else {
+        if (document.getElementById('view-topup').classList.contains('active')) renderTopup();
+        toast('Оплата получена — баланс пополнен ✅');
+      }
     } else if (r.status === 2) {
-      INV = false; renderTuBody();
+      const wasOrder = INV.order;
+      INV = false;
+      if (wasOrder) { closeSheets(true); serverSync(); }
+      else renderTuBody();
     } else if (manual) {
       toast('Платёж пока не найден — сеть подтверждает до 30 минут');
     }
@@ -1028,10 +1095,12 @@ async function checkInvoice(manual) {
 }
 async function cancelInvoice() {
   clearInterval(invPoll);
+  const wasOrder = INV?.order;
   if (INV?.id) { try { await API.call('/api/invoice/cancel', { id: INV.id }); } catch (e) {} }
   INV = false;
   haptic('light'); toast('Платёж отменён');
-  renderTuBody();
+  if (wasOrder) { closeSheets(true); serverSync(); go('history'); }
+  else renderTuBody();
 }
 function copyText(t) { navigator.clipboard?.writeText(t); haptic('medium'); toast('Скопировано'); }
 function compressFile(file, maxSide, quality, cb) {
@@ -1186,17 +1255,24 @@ function renderAdmin(tab) {
   } else if (tab === 'orders') {
     b.innerHTML = AD.orders.length ? AD.orders.map(o => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
-        <div class="order-top"><b>${o.id}</b><span class="status ${o.status >= 3 ? 'st-done' : o.status >= 1 ? 'st-ship' : 'st-paid'}">${STATUSES[o.status]}</span></div>
+        <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
         <div style="font-size:12px;color:var(--muted);line-height:1.65">
-          ${o.product} · ${o.grams} г · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}<br>
+          ${o.product} · ${o.grams} г · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}${o.pay ? ' · ' + (TU_LABELS[o.pay] || o.pay) : ''}<br>
           ${o.user}${o.username ? ' · @' + o.username : ''}
           ${o.ship ? `<br>${o.ship.name} · ${o.ship.phone}<br>${o.ship.city}, НП №${o.ship.np}` : ''}
         </div>
-        ${o.ttn ? `<div class="ttn"><span>ТТН</span><b>${o.ttn}</b></div>` : `
+        ${o.status === -1 && o.receipt ? `
+          <img src="${o.receipt}" style="width:100%;border-radius:12px;margin:10px 0;border:1px solid var(--line)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <button class="btn btn-gold" style="padding:12px" onclick="decideOrder('${o.id}', true)">Подтвердить</button>
+            <button class="btn btn-ghost" style="padding:12px" onclick="decideOrder('${o.id}', false)">Отклонить</button>
+          </div>` : ''}
+        ${o.status === -1 && !o.receipt ? `<p class="note" style="margin-top:8px">⏳ Ждёт крипто-оплату</p>` : ''}
+        ${o.ttn ? `<div class="ttn"><span>ТТН</span><b>${o.ttn}</b></div>` : o.status >= 0 ? `
           <div style="display:flex;gap:8px;margin-top:10px">
             <input class="mini-input" id="ttn-${o.id}" placeholder="ТТН Новой Почты" inputmode="numeric" style="flex:1">
             <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
-          </div>`}
+          </div>` : ''}
       </div></div>`).join('') : '<div class="empty"><p>Заказов пока нет</p></div>';
   } else if (tab === 'topups') {
     b.innerHTML = AD.topups.length ? AD.topups.map(t => `
@@ -1325,6 +1401,12 @@ async function deleteProduct() {
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Товар удалён');
   openSheet('admin'); renderAdmin('products');
+}
+async function decideOrder(code, approve) {
+  try { AD.orders = (await API.call('/api/admin/order', { order: code, approve })).orders; }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); toast(approve ? 'Оплата подтверждена ✓' : 'Заказ отклонён');
+  renderAdmin('orders');
 }
 async function saveTtn(code) {
   const ttn = document.getElementById('ttn-' + code).value.trim();

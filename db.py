@@ -74,6 +74,8 @@ async def init():
             ALTER TABLE products ADD COLUMN IF NOT EXISTS photos TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt TEXT;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
             CREATE TABLE IF NOT EXISTS topups(
                 id      BIGSERIAL PRIMARY KEY,
@@ -95,6 +97,7 @@ async def init():
                 txid          TEXT,
                 created       TIMESTAMPTZ NOT NULL DEFAULT now(),
                 expires       TIMESTAMPTZ NOT NULL);
+            ALTER TABLE invoices ADD COLUMN IF NOT EXISTS order_id BIGINT;
             CREATE TABLE IF NOT EXISTS ratings(
                 order_id   BIGINT PRIMARY KEY,
                 user_id    BIGINT NOT NULL,
@@ -285,35 +288,102 @@ async def payments_history(tg_id: int, c) -> list:
 
 
 # ── заказы ───────────────────────────────────────────────────────────────────
-async def create_order(tg_id: int, product_id: int, grams: int, pay: str, ship: dict) -> dict:
+# статусы: -2 отменён, -1 ждёт оплаты/проверки, 0 оплачен, 1 отправлен, 2 в пути, 3 получен
+async def _ref_bonus(c, buyer_id: int, total: int):
+    """5% рефереру — начисляется только после фактической оплаты."""
+    ref_by = await c.fetchval("SELECT ref_by FROM users WHERE tg_id=$1", buyer_id)
+    if ref_by:
+        bonus = round(total * REF_PERCENT)
+        await c.execute("""
+            UPDATE users SET balance=balance+$1, ref_earned=ref_earned+$1 WHERE tg_id=$2
+        """, bonus, ref_by)
+
+
+async def _order_product_total(c, product_id: int, grams: int):
+    p = await c.fetchrow("SELECT * FROM products WHERE id=$1 AND active", product_id)
+    if not p:
+        raise ValueError("Товар не найден")
+    if not 1 <= grams <= 1000:
+        raise ValueError("Вес — от 1 до 1000 грамм")
+    return p, price_for(_product_row(p, {}), grams)
+
+
+async def order_total(product_id: int, grams: int) -> int:
+    async with _pool.acquire() as c:
+        _, total = await _order_product_total(c, product_id, grams)
+    return total
+
+
+async def _insert_order(c, tg_id, p, grams, total, status, pay, ship, receipt=None) -> int:
+    return await c.fetchval("""
+        INSERT INTO orders(user_id, product_id, product, grams, total, status, pay, receipt, ship, date)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id
+    """, tg_id, p["id"], p["name"], grams, total, status, pay, receipt,
+        json.dumps(ship, ensure_ascii=False), datetime.now().strftime("%d.%m.%Y"))
+
+
+async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
+                       ship: dict, receipt: str | None = None) -> dict:
+    """Оплата с баланса (сразу оплачен) или картой (квитанция на проверку)."""
     async with _pool.acquire() as c, c.transaction():
-        p = await c.fetchrow("SELECT * FROM products WHERE id=$1 AND active", product_id)
-        if not p:
-            raise ValueError("Товар не найден")
-        if not 1 <= grams <= 1000:
-            raise ValueError("Вес — от 1 до 1000 грамм")
-        product = _product_row(p, {})
-        total = price_for(product, grams)
+        p, total = await _order_product_total(c, product_id, grams)
         u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         if pay == "balance":
             if u["balance"] < total:
                 raise ValueError("Недостаточно средств — пополните баланс")
             await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", total, tg_id)
-        oid = await c.fetchval("""
-            INSERT INTO orders(user_id, product_id, product, grams, total, status, ship, date)
-            VALUES($1,$2,$3,$4,$5,0,$6,$7) RETURNING id
-        """, tg_id, product_id, p["name"], grams, total,
-            json.dumps(ship, ensure_ascii=False),
-            datetime.now().strftime("%d.%m.%Y"))
-        if u["ref_by"]:
-            bonus = round(total * REF_PERCENT)
-            await c.execute("""
-                UPDATE users SET balance=balance+$1, ref_earned=ref_earned+$1 WHERE tg_id=$2
-            """, bonus, u["ref_by"])
+            oid = await _insert_order(c, tg_id, p, grams, total, 0, "balance", ship)
+            await _ref_bonus(c, tg_id, total)
+        elif pay == "card":
+            oid = await _insert_order(c, tg_id, p, grams, total, -1, "card", ship, receipt)
+        else:
+            raise ValueError("Неизвестный способ оплаты")
         snap = await snapshot(tg_id, c)
         snap["order_code"] = f"MM-{oid + ORDER_CODE_BASE}"
         snap["order_total"] = total
         return snap
+
+
+async def create_order_invoice(tg_id: int, product_id: int, grams: int, currency: str,
+                               ship: dict, amount_crypto: str, address: str) -> tuple:
+    """Заказ с оплатой криптой: заказ «ждёт оплаты» + привязанный счёт."""
+    async with _pool.acquire() as c, c.transaction():
+        p, total = await _order_product_total(c, product_id, grams)
+        oid = await _insert_order(c, tg_id, p, grams, total, -1, currency, ship)
+        # новый счёт отменяет прежний неоплаченный (и его заказ, если был)
+        await c.execute("""
+            UPDATE orders SET status=-2 WHERE status=-1 AND id IN
+                (SELECT order_id FROM invoices WHERE user_id=$1 AND status=0 AND order_id IS NOT NULL)
+        """, tg_id)
+        await c.execute("UPDATE invoices SET status=2 WHERE user_id=$1 AND status=0", tg_id)
+        inv = await c.fetchrow("""
+            INSERT INTO invoices(user_id, amount_uah, currency, amount_crypto, address, order_id, expires)
+            VALUES($1,$2,$3,$4,$5,$6, now() + make_interval(secs => $7))
+            RETURNING *
+        """, tg_id, total, currency, amount_crypto, address, oid, INVOICE_TTL)
+        snap = await snapshot(tg_id, c)
+        code = f"MM-{oid + ORDER_CODE_BASE}"
+        snap["order_code"] = code
+        snap["order_total"] = total
+        return snap, code, dict(inv)
+
+
+async def order_decide(order_code: str, approve: bool) -> dict:
+    """Подтверждение/отклонение оплаты заказа картой (статус -1)."""
+    try:
+        oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
+    except (IndexError, ValueError):
+        raise ValueError("Неверный номер заказа")
+    async with _pool.acquire() as c, c.transaction():
+        o = await c.fetchrow("SELECT * FROM orders WHERE id=$1 AND status=-1 FOR UPDATE", oid)
+        if not o:
+            raise ValueError("Заказ не найден или уже обработан")
+        if approve:
+            await c.execute("UPDATE orders SET status=0 WHERE id=$1", oid)
+            await _ref_bonus(c, o["user_id"], o["total"])
+        else:
+            await c.execute("UPDATE orders SET status=-2 WHERE id=$1", oid)
+        return {"user_id": o["user_id"], "code": order_code, "approved": approve}
 
 
 async def rate_order(tg_id: int, order_code: str, stars: int) -> dict:
@@ -391,6 +461,8 @@ async def admin_orders() -> list:
         "user": r["name"] or "?", "username": r["username"], "user_id": r["user_id"],
         "product": r["product"], "grams": r["grams"], "total": r["total"],
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
+        "pay": r["pay"],
+        "receipt": r["receipt"] if r["status"] == -1 else None,
         "ship": json.loads(r["ship"]) if r["ship"] else None,
     } for r in rows]
 
@@ -414,6 +486,12 @@ async def set_ttn(order_code: str, ttn: str) -> dict:
 
 # ── крипто-счета (автопроверка оплаты) ───────────────────────────────────────
 async def _expire_invoices(c):
+    # истёкший счёт отменяет и привязанный неоплаченный заказ
+    await c.execute("""
+        UPDATE orders SET status=-2 WHERE status=-1 AND id IN
+            (SELECT order_id FROM invoices
+             WHERE status=0 AND expires < now() AND order_id IS NOT NULL)
+    """)
     await c.execute("UPDATE invoices SET status=2 WHERE status=0 AND expires < now()")
 
 
@@ -461,23 +539,36 @@ async def pending_invoices() -> list:
 
 
 async def invoice_cancel(inv_id: int, tg_id: int):
-    async with _pool.acquire() as c:
-        await c.execute(
-            "UPDATE invoices SET status=2 WHERE id=$1 AND user_id=$2 AND status=0",
-            inv_id, tg_id)
+    async with _pool.acquire() as c, c.transaction():
+        inv = await c.fetchrow(
+            "SELECT * FROM invoices WHERE id=$1 AND user_id=$2 AND status=0", inv_id, tg_id)
+        if not inv:
+            return
+        await c.execute("UPDATE invoices SET status=2 WHERE id=$1", inv_id)
+        if inv["order_id"]:
+            await c.execute(
+                "UPDATE orders SET status=-2 WHERE id=$1 AND status=-1", inv["order_id"])
 
 
 async def invoice_paid(inv_id: int, txid: str) -> dict | None:
-    """Помечает счёт оплаченным и зачисляет баланс. None — уже обработан."""
+    """Помечает счёт оплаченным: пополнение баланса или оплата заказа."""
     async with _pool.acquire() as c, c.transaction():
         inv = await c.fetchrow(
             "SELECT * FROM invoices WHERE id=$1 AND status=0 FOR UPDATE", inv_id)
         if not inv:
             return None
         await c.execute("UPDATE invoices SET status=1, txid=$2 WHERE id=$1", inv_id, txid)
-        await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
-                        inv["amount_uah"], inv["user_id"])
-        return {"user_id": inv["user_id"], "amount": inv["amount_uah"]}
+        res = {"user_id": inv["user_id"], "amount": inv["amount_uah"], "order_code": None}
+        if inv["order_id"]:
+            upd = await c.execute(
+                "UPDATE orders SET status=0 WHERE id=$1 AND status=-1", inv["order_id"])
+            if upd.endswith("1"):
+                await _ref_bonus(c, inv["user_id"], inv["amount_uah"])
+            res["order_code"] = f"MM-{inv['order_id'] + ORDER_CODE_BASE}"
+        else:
+            await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                            inv["amount_uah"], inv["user_id"])
+        return res
 
 
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
