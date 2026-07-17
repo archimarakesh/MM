@@ -647,8 +647,9 @@ const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 const TIERS = [
   { from: 1, k: 1.00 }, { from: 10, k: 0.90 }, { from: 25, k: 0.80 },
   { from: 50, k: 0.70 }, { from: 100, k: 0.60 }, { from: 250, k: 0.55 },
+  { from: 500, k: 0.50 },
 ];
-const WEIGHTS = [5, 10, 25, 50, 100, 250];
+const WEIGHTS = [5, 10, 25, 50, 100, 250, 500];
 const GRADS = [
   'linear-gradient(140deg,#3a2d0e,#1c1506)', 'linear-gradient(140deg,#23211d,#0e0d0b)',
   'linear-gradient(140deg,#3d2c12,#241505)', 'linear-gradient(140deg,#1f1d2b,#0d0c14)',
@@ -1471,16 +1472,16 @@ function openPedit(id) {
   document.getElementById('peTag').value = curPe?.tag || '';
   peDelReset();
   const ts = curPe ? [...curPe.tiers] : [...TIERS];
-  while (ts.length < 6) {
+  while (ts.length < 7) {
     const last = ts[ts.length - 1];
-    ts.push({ from: Math.round(last.from * 2.5), k: +(last.k * 0.92).toFixed(4) });
+    ts.push({ from: Math.round(last.from * 2), k: +(last.k * 0.92).toFixed(4) });
   }
   const basePrice = curPe ? curPe.base : 100;
   pePhotos = curPe
     ? Array.from({ length: curPe.photos || 0 }, (_, i) => ({ url: `/photo/${curPe.id}/${i}?size=t&v=${curPe.pv || 0}`, payload: { old: i } }))
     : [];
   renderPePhotos();
-  document.getElementById('peTiers').innerHTML = ts.slice(0, 6).map((t, i) => `
+  document.getElementById('peTiers').innerHTML = ts.slice(0, 7).map((t, i) => `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--muted-2)">от</span>
@@ -1519,7 +1520,7 @@ async function savePedit() {
   const name = document.getElementById('peName').value.trim();
   if (!name) return toast('Укажите название');
   const rows = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 7; i++) {
     const from = parseInt(document.getElementById('peFrom' + i).value, 10);
     const price = parseFloat(document.getElementById('pePrice' + i).value);
     if (!from || !price || price <= 0) return toast('Проверьте градацию цен');

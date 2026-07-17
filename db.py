@@ -19,6 +19,7 @@ AUTO_DELIVER_DAYS = 5       # через сколько дней после от
 DEFAULT_TIERS = [
     {"from": 1, "k": 1.00}, {"from": 10, "k": 0.90}, {"from": 25, "k": 0.80},
     {"from": 50, "k": 0.70}, {"from": 100, "k": 0.60}, {"from": 250, "k": 0.55},
+    {"from": 500, "k": 0.50},
 ]
 MAX_PHOTO_LEN = 400_000   # ~300 КБ картинки в base64
 MAX_PHOTOS = 4
