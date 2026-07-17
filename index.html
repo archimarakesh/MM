@@ -447,7 +447,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div id="tuBody"></div>
     <div class="section-head"><h2>История оплат</h2></div>
     <div id="payHistory"></div>
-    <input type="file" id="tuFile" accept="image/*" style="display:none">
+    <input type="file" id="tuFile" accept="image/*,application/pdf" style="display:none">
   </section>
 
   <!-- ══ ПОДДЕРЖКА ══ -->
@@ -505,7 +505,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
   </button>
   <p class="note">После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.</p>
-  <input type="file" id="coFile" accept="image/*" style="display:none">
+  <input type="file" id="coFile" accept="image/*,application/pdf" style="display:none">
 </div>
 
 <div class="sheet" id="sheet-invoice">
@@ -596,6 +596,10 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
   </button>
   <button class="btn btn-ghost" id="peDelete" style="margin-top:10px;color:var(--danger);display:none" onclick="deleteProduct()">Удалить товар</button>
+</div>
+
+<div id="viewer" style="position:fixed;inset:0;z-index:96;background:rgba(3,3,3,.93);display:none;align-items:center;justify-content:center;padding:16px" onclick="closeViewer()">
+  <div id="viewerBody"></div>
 </div>
 
 <div id="toast"></div>
@@ -852,7 +856,7 @@ function renderCoPays() {
       ${cardBlock()}
       <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('coFile').click()">
         ${coReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
-      ${coReceipt ? `<img src="${coReceipt}" style="width:100%;border-radius:14px;margin-bottom:12px;border:1px solid var(--line)">` : ''}`;
+      ${coReceipt ? receiptChip('coReceipt', coReceipt) : ''}`;
   } else if (payMethod === 'trc20' || payMethod === 'btc') {
     ex.innerHTML = `<p class="note" style="margin:0 0 12px">После подтверждения появится счёт с QR-кодом, адресом и точной суммой — оплатите его в течение 30 минут, заказ подтвердится автоматически.</p>`;
   } else ex.innerHTML = '';
@@ -861,7 +865,7 @@ function selPay(k) { haptic('light'); payMethod = k; renderCoPays(); }
 document.getElementById('coFile').addEventListener('change', e => {
   const f = e.target.files[0];
   if (!f) return;
-  compressFile(f, 1280, 0.8, d => { coReceipt = d; renderCoPays(); });
+  readReceipt(f, d => { coReceipt = d; renderCoPays(); });
   e.target.value = '';
 });
 async function placeOrder() {
@@ -1041,7 +1045,7 @@ function renderTuBody() {
       ${cardBlock()}
       <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('tuFile').click()">
         ${tuReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
-      ${tuReceipt ? `<img src="${tuReceipt}" style="width:100%;border-radius:14px;margin-bottom:12px;border:1px solid var(--line)">` : ''}
+      ${tuReceipt ? receiptChip('tuReceipt', tuReceipt) : ''}
       <button class="btn btn-gold" onclick="submitCard()">Отправить на проверку
         <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
       </button>
@@ -1141,6 +1145,37 @@ function cardBlock() {
     <div style="font-size:10.5px;color:var(--muted-2);margin-top:3px">Нажмите — скопируется только номер карты</div>
   </div>`;
 }
+/* просмотрщик квитанций */
+function openViewer(src) {
+  if (!src) return;
+  const b = document.getElementById('viewerBody');
+  b.innerHTML = src.startsWith('data:application/pdf')
+    ? `<iframe src="${src}" style="width:92vw;height:80vh;border:none;border-radius:12px;background:#fff"></iframe>`
+    : `<img src="${src}" style="max-width:92vw;max-height:82vh;border-radius:12px">`;
+  document.getElementById('viewer').style.display = 'flex';
+  haptic('light');
+}
+function closeViewer() {
+  document.getElementById('viewer').style.display = 'none';
+  document.getElementById('viewerBody').innerHTML = '';
+}
+function receiptChip(expr, src) {
+  const pdf = src.startsWith('data:application/pdf');
+  return `<div class="ref-link" style="margin-bottom:12px" onclick="event.stopPropagation();openViewer(${expr})">
+    <svg style="width:18px;height:18px;flex:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+    <span>Квитанция.${pdf ? 'pdf' : 'jpg'} · нажмите, чтобы открыть</span>
+  </div>`;
+}
+function readReceipt(f, cb) {
+  if (f.type === 'application/pdf') {
+    if (f.size > 4 * 1024 * 1024) return toast('PDF слишком большой — до 4 МБ');
+    const r = new FileReader();
+    r.onload = () => cb(r.result);
+    r.readAsDataURL(f);
+  } else {
+    compressFile(f, 1280, 0.8, cb);
+  }
+}
 function compressFile(file, maxSide, quality, cb) {
   const img = new Image();
   img.onload = () => {
@@ -1156,7 +1191,7 @@ function compressFile(file, maxSide, quality, cb) {
 document.getElementById('tuFile').addEventListener('change', e => {
   const f = e.target.files[0];
   if (!f) return;
-  compressFile(f, 1280, 0.8, d => { tuReceipt = d; renderTuBody(); });
+  readReceipt(f, d => { tuReceipt = d; renderTuBody(); });
   e.target.value = '';
 });
 async function submitCard() {
@@ -1291,7 +1326,7 @@ function renderAdmin(tab) {
       </div>`).join('') +
       `<button class="btn btn-gold" style="margin-top:14px" onclick="openPedit(null)">+ Добавить товар</button>`;
   } else if (tab === 'orders') {
-    b.innerHTML = AD.orders.length ? AD.orders.map(o => `
+    b.innerHTML = AD.orders.length ? AD.orders.map((o, i) => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
         <div style="font-size:12px;color:var(--muted);line-height:1.65">
@@ -1300,7 +1335,7 @@ function renderAdmin(tab) {
           ${o.ship ? `<br>${o.ship.name} · ${o.ship.phone}<br>${o.ship.city}, НП №${o.ship.np}` : ''}
         </div>
         ${o.status === -1 && o.receipt ? `
-          <img src="${o.receipt}" style="width:100%;border-radius:12px;margin:10px 0;border:1px solid var(--line)">
+          <div style="margin-top:10px">${receiptChip(`AD.orders[${i}].receipt`, o.receipt)}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <button class="btn btn-gold" style="padding:12px" onclick="decideOrder('${o.id}', true)">Подтвердить</button>
             <button class="btn btn-ghost" style="padding:12px" onclick="decideOrder('${o.id}', false)">Отклонить</button>
@@ -1314,12 +1349,12 @@ function renderAdmin(tab) {
           </div>` : ''}
       </div></div>`).join('') : '<div class="empty"><p>Заказов пока нет</p></div>';
   } else if (tab === 'topups') {
-    b.innerHTML = AD.topups.length ? AD.topups.map(t => `
+    b.innerHTML = AD.topups.length ? AD.topups.map((t, i) => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${fmt(t.amount)} ₴ · ${t.method}</b>
           <span style="font-size:11px;color:var(--muted-2)">${dt(t.created)}</span></div>
-        <div style="font-size:12px;color:var(--muted)">${t.user}${t.username ? ' · @' + t.username : ''} · ID ${t.user_id}</div>
-        <img src="${t.receipt}" style="width:100%;border-radius:12px;margin:10px 0;border:1px solid var(--line)">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${t.user}${t.username ? ' · @' + t.username : ''} · ID ${t.user_id}</div>
+        ${receiptChip(`AD.topups[${i}].receipt`, t.receipt || '')}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <button class="btn btn-gold" style="padding:12px" onclick="decideTopup(${t.id}, true)">Зачислить</button>
           <button class="btn btn-ghost" style="padding:12px" onclick="decideTopup(${t.id}, false)">Отклонить</button>

@@ -26,7 +26,12 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0") or 0)
 _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 APP_URL = os.getenv("APP_URL", "") or (f"https://{_railway_domain}" if _railway_domain else "")
 
-MAX_RECEIPT_LEN = 6_000_000  # ~4.5 МБ картинки в base64
+MAX_RECEIPT_LEN = 6_000_000  # ~4.5 МБ файла в base64
+
+
+def _receipt_ok(receipt: str) -> bool:
+    return (receipt.startswith(("data:image/", "data:application/pdf"))
+            and len(receipt) <= MAX_RECEIPT_LEN)
 
 # ── криптовалюты для авто-счетов ─────────────────────────────────────────────
 USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
@@ -361,8 +366,8 @@ async def api_order(request: Request):
             snap["invoice"]["order"] = code
         elif pay == "card":
             receipt = str(b.get("receipt", ""))
-            if not receipt.startswith("data:image/") or len(receipt) > MAX_RECEIPT_LEN:
-                raise ValueError("Приложите фото квитанции об оплате")
+            if not _receipt_ok(receipt):
+                raise ValueError("Приложите квитанцию об оплате (фото или PDF)")
             snap = await db.create_order(
                 u["id"], int(b["product_id"]), int(b["grams"]), "card", ship, receipt)
             await notify(ADMIN_ID,
@@ -402,8 +407,8 @@ async def api_topup_receipt(request: Request):
         raise HTTPException(400, "Неверная сумма")
     if b.get("method") != "card":
         raise HTTPException(400, "Квитанция — только для оплаты картой")
-    if not receipt.startswith("data:image/") or len(receipt) > MAX_RECEIPT_LEN:
-        raise HTTPException(400, "Приложите фото квитанции")
+    if not _receipt_ok(receipt):
+        raise HTTPException(400, "Приложите квитанцию (фото или PDF)")
     tid = await db.topup_receipt(u["id"], amount, "card", receipt)
     await notify(ADMIN_ID,
                  f"💳 <b>Квитанция #{tid} на проверку</b>\n"
