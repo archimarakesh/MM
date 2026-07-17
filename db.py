@@ -1,11 +1,14 @@
 """Magic Market — хранилище PostgreSQL (asyncpg, Railway DATABASE_URL)."""
+import base64
 import json
 import os
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
 import asyncpg
+from PIL import Image
 
 REF_PERCENT = 0.05          # доля реферера с покупки приглашённого
 TRANSFER_TTL = 15 * 60      # код переноса живёт 15 минут
@@ -139,6 +142,19 @@ async def upsert_user(tg_id: int, name: str, username: str | None, ref_by: int |
 
 
 # ── товары ───────────────────────────────────────────────────────────────────
+def _make_thumb(data_url: str) -> str:
+    """Миниатюра 420px для каталога — грузится в разы быстрее полного фото."""
+    try:
+        _, b64 = data_url.split(",", 1)
+        im = Image.open(BytesIO(base64.b64decode(b64))).convert("RGB")
+        im.thumbnail((420, 420), Image.LANCZOS)
+        buf = BytesIO()
+        im.save(buf, "JPEG", quality=75)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return data_url
+
+
 def _product_row(r, rating) -> dict:
     try:
         photos = len(json.loads(r["photos"])) if r["photos"] else 0
@@ -149,17 +165,23 @@ def _product_row(r, rating) -> dict:
         "tag": r["tag"], "base": r["base"],
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
         "active": r["active"], "photos": photos,
+        "pv": len(r["photos"] or ""),  # версия фото для кэш-бастинга
         "rating": rating.get(r["id"], {"avg": 0, "count": 0}),
     }
 
 
-async def product_photo(pid: int, idx: int) -> str | None:
+async def product_photo(pid: int, idx: int, size: str = "f") -> str | None:
     async with _pool.acquire() as c:
         val = await c.fetchval("SELECT photos FROM products WHERE id=$1", pid)
     if not val:
         return None
     arr = json.loads(val)
-    return arr[idx] if 0 <= idx < len(arr) else None
+    if not 0 <= idx < len(arr):
+        return None
+    item = arr[idx]
+    if isinstance(item, dict):
+        return item.get(size) or item.get("f")
+    return item  # старый формат — одна строка
 
 
 async def get_products(include_inactive: bool = False, conn=None) -> list:
@@ -187,7 +209,7 @@ async def save_product(d: dict) -> int:
                 if 0 <= i < len(old):
                     photos.append(old[i])
             elif isinstance(ph, str) and ph.startswith("data:image/") and len(ph) <= MAX_PHOTO_LEN:
-                photos.append(ph)
+                photos.append({"f": ph, "t": _make_thumb(ph)})
         pj = json.dumps(photos)
         if d.get("id"):
             await c.execute("""

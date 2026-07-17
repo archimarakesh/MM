@@ -315,14 +315,15 @@ async def logo_webp():
 
 
 @app.get("/photo/{pid}/{idx}")
-async def product_photo(pid: int, idx: int):
-    data = await db.product_photo(pid, idx)
+async def product_photo(pid: int, idx: int, size: str = "f"):
+    data = await db.product_photo(pid, idx, "t" if size == "t" else "f")
     if not data:
         raise HTTPException(404, "Нет фото")
     header, b64 = data.split(",", 1)
     mime = header.split(":", 1)[1].split(";", 1)[0]
+    # URL содержит версию (?v=), поэтому кэшируем навсегда
     return Response(base64.b64decode(b64), media_type=mime,
-                    headers={"Cache-Control": "public, max-age=600"})
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 # ── пользовательское API ─────────────────────────────────────────────────────
