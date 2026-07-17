@@ -253,6 +253,8 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str, ship: 
         p = await c.fetchrow("SELECT * FROM products WHERE id=$1 AND active", product_id)
         if not p:
             raise ValueError("Товар не найден")
+        if not 1 <= grams <= 1000:
+            raise ValueError("Вес — от 1 до 1000 грамм")
         product = _product_row(p, {})
         total = price_for(product, grams)
         u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
@@ -419,6 +421,13 @@ async def pending_invoices() -> list:
         await _expire_invoices(c)
         rows = await c.fetch("SELECT * FROM invoices WHERE status=0 ORDER BY id LIMIT 100")
     return [dict(r) for r in rows]
+
+
+async def invoice_cancel(inv_id: int, tg_id: int):
+    async with _pool.acquire() as c:
+        await c.execute(
+            "UPDATE invoices SET status=2 WHERE id=$1 AND user_id=$2 AND status=0",
+            inv_id, tg_id)
 
 
 async def invoice_paid(inv_id: int, txid: str) -> dict | None:

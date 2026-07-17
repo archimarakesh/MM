@@ -363,6 +363,14 @@ async def api_invoice_status(request: Request):
     return {"status": inv["status"]}
 
 
+@app.post("/api/invoice/cancel")
+async def api_invoice_cancel(request: Request):
+    u = tg_user(request)
+    b = await request.json()
+    await db.invoice_cancel(int(b.get("id", 0)), u["id"])
+    return {"ok": True}
+
+
 @app.post("/api/transfer/create")
 async def api_transfer_create(request: Request):
     u = tg_user(request)
