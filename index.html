@@ -429,11 +429,11 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div class="section-head"><h2>Реферальная программа</h2></div>
     <div class="bezel reveal">
       <div class="bezel-core">
-        <p style="font-size:12.5px;color:var(--muted);line-height:1.6">Приглашайте друзей — с каждой их покупки на ваш баланс капает <b style="color:var(--gold-soft)" id="refPercent">5%</b>. Чем больше приглашённых — тем выше процент.</p>
+        <p style="font-size:12.5px;color:var(--muted);line-height:1.6">Приглашайте друзей — с каждой их покупки на ваш баланс капает <b style="color:var(--gold-soft)">бонус</b>. Чем больше приглашённых — тем выше процент.</p>
         <div id="refLevels" style="margin-top:4px"></div>
         <div class="ref-stats">
           <div class="ref-stat"><b id="refCount">0</b><span>Приглашено</span></div>
-          <div class="ref-stat"><b id="refEarned">0 ₴</b><span>Заработано</span></div>
+          <div class="ref-stat"><b id="refEarned">0 ₴</b><span>Бонус</span></div>
         </div>
         <div class="ref-link" onclick="copyRef()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -1045,8 +1045,6 @@ function syncBalance() {
   document.getElementById('refCount').textContent = S.refCount;
   document.getElementById('refEarned').textContent = fmt(S.refEarned) + ' ₴';
   const n = S.refCount || 0;
-  const pct = S.refPercent || refPct(n);
-  document.getElementById('refPercent').textContent = pct + '%';
   let li = 0;
   REF_LEVELS.forEach(([from], i) => { if (n >= from) li = i; });
   const next = li < REF_LEVELS.length - 1 ? REF_LEVELS[li + 1][0] : null;
