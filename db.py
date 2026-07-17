@@ -203,6 +203,12 @@ async def save_product(d: dict) -> int:
             d.get("tag", ""), int(d["base"]), tiers, pj)
 
 
+async def delete_product(pid: int):
+    async with _pool.acquire() as c:
+        await c.execute("DELETE FROM ratings WHERE product_id=$1", pid)
+        await c.execute("DELETE FROM products WHERE id=$1", pid)
+
+
 def price_for(product: dict, grams: int) -> int:
     tier = product["tiers"][0]
     for t in product["tiers"]:

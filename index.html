@@ -127,20 +127,20 @@ h1.page-title em{font-style:normal;color:inherit}
 .reveal.in{opacity:1;transform:none;filter:none}
 
 /* ── магазин: товары ── */
-.goods{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.goods{display:grid;grid-template-columns:1fr;gap:14px}
 .good{cursor:pointer;transition:transform .5s var(--ease)}
 .good:active{transform:scale(.965)}
 .good .bezel-core{padding:12px;display:flex;flex-direction:column;gap:10px}
-.good-img{aspect-ratio:1/.86;border-radius:14px;display:grid;place-items:center;font-size:38px;position:relative;overflow:hidden;
+.good-img{aspect-ratio:1.9/1;border-radius:14px;display:grid;place-items:center;position:relative;overflow:hidden;
   border:1px solid rgba(255,255,255,.05)}
 .good-img::after{content:'';position:absolute;inset:0;
   background:radial-gradient(circle at 30% 22%,rgba(255,255,255,.14),transparent 55%)}
 .good-tag{position:absolute;top:8px;left:8px;z-index:1;font-size:8.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
   padding:4px 8px;border-radius:999px;background:rgba(5,5,5,.55);border:1px solid rgba(255,255,255,.14);color:var(--txt);backdrop-filter:blur(4px)}
-.good h3{font-size:14px;font-weight:700;letter-spacing:.01em}
-.good .good-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.good h3{font-size:16.5px;font-weight:800;letter-spacing:.01em}
+.good .good-sub{font-size:12px;color:var(--muted);margin-top:3px}
 .good-price{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
-.good-price b{font-size:15.5px;color:var(--txt)}
+.good-price b{font-size:17px;color:var(--txt)}
 .good-price span{font-size:10.5px;color:var(--muted-2)}
 
 /* ── шторки (bottom sheets) ── */
@@ -558,10 +558,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <p class="sheet-sub">Название, цена за грамм и градация скидок по весу.</p>
   <div class="field"><label>Название</label><input id="peName" placeholder="Golden Reserve"></div>
   <div class="field"><label>Описание</label><input id="peSub" placeholder="Флагманская позиция"></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-    <div class="field"><label>Эмодзи</label><input id="peEmoji" placeholder="🏆"></div>
-    <div class="field"><label>Бейдж</label><input id="peTag" placeholder="ХИТ / NEW / пусто"></div>
-  </div>
+  <div class="field"><label>Бейдж</label><input id="peTag" placeholder="ХИТ / NEW / пусто"></div>
   <div class="field"><label>Фото товара · до 4 шт</label><div id="pePhotos" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div></div>
   <div class="field"><label>Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
   <input type="file" id="peFile" accept="image/*" style="display:none">
@@ -571,6 +568,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <button class="btn btn-gold" onclick="savePedit()">Сохранить товар
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
   </button>
+  <button class="btn btn-ghost" id="peDelete" style="margin-top:10px;color:var(--danger);display:none" onclick="deleteProduct()">Удалить товар</button>
 </div>
 
 <div id="toast"></div>
@@ -725,7 +723,7 @@ function renderGoods() {
       <div class="bezel-core">
         <div class="good-img" style="background:${p.grad}">
           ${p.tag ? `<span class="good-tag">${p.tag}</span>` : ''}
-          ${p.photos ? `<img src="/photo/${p.id}/0" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : p.emoji}
+          ${p.photos ? `<img src="/photo/${p.id}/0" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : `<img src="logo.webp" alt="" style="width:58px;opacity:.28">`}
         </div>
         <div>
           <h3>${p.name}</h3>
@@ -751,9 +749,11 @@ function renderProductSheet() {
     <div style="display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;margin-bottom:14px;border-radius:18px">
       ${Array.from({ length: p.photos }, (_, i) =>
         `<img src="/photo/${p.id}/${i}" alt="" style="width:${p.photos > 1 ? '88%' : '100%'};flex:none;aspect-ratio:1.25;object-fit:cover;border-radius:18px;scroll-snap-align:center;border:1px solid var(--line)">`).join('')}
-    </div>` : ''}
+    </div>` : `
+    <div class="good-img" style="background:${p.grad};width:100%;margin-bottom:14px">
+      <img src="logo.webp" alt="" style="width:64px;opacity:.28">
+    </div>`}
     <div class="p-hero">
-      ${p.photos ? '' : `<div class="good-img" style="background:${p.grad}">${p.emoji}</div>`}
       <div>
         <h2>${p.name}</h2>
         <p class="sheet-sub" style="margin:2px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}${p.sub} · базово ${fmt(p.base)} ₴/г</p>
@@ -1176,7 +1176,9 @@ function renderAdmin(tab) {
   if (tab === 'products') {
     b.innerHTML = AD.products.map(p => `
       <div class="set-row" onclick="openPedit(${p.id})">
-        <div class="link-ico">${p.emoji}</div>
+        <div class="link-ico" style="overflow:hidden">${p.photos
+          ? `<img src="/photo/${p.id}/0" style="width:100%;height:100%;object-fit:cover">`
+          : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>`}</div>
         <div><h3 style="${p.active ? '' : 'opacity:.45'}">${p.name}${p.active ? '' : ' · скрыт'}</h3>
         <p>${fmt(p.base)} ₴/г${p.rating.count ? ` · ★ ${p.rating.avg} (${p.rating.count})` : ''}</p></div>
       </div>`).join('') +
@@ -1225,8 +1227,8 @@ function openPedit(id) {
   document.getElementById('peTitle').textContent = curPe ? 'Редактировать товар' : 'Новый товар';
   document.getElementById('peName').value = curPe?.name || '';
   document.getElementById('peSub').value = curPe?.sub || '';
-  document.getElementById('peEmoji').value = curPe?.emoji || '';
   document.getElementById('peTag').value = curPe?.tag || '';
+  peDelReset();
   const ts = curPe ? [...curPe.tiers] : [...TIERS];
   while (ts.length < 6) {
     const last = ts[ts.length - 1];
@@ -1288,7 +1290,6 @@ async function savePedit() {
     const r = await API.call('/api/admin/product', {
       id: curPe?.id || null, name,
       sub: document.getElementById('peSub').value.trim(),
-      emoji: document.getElementById('peEmoji').value.trim() || '📦',
       tag: document.getElementById('peTag').value.trim(),
       base, tiers: rows.map(x => ({ from: x.from, k: +(x.price / base).toFixed(4) })),
       active: peActiveVal,
@@ -1299,6 +1300,30 @@ async function savePedit() {
     renderGoods();
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Товар сохранён');
+  openSheet('admin'); renderAdmin('products');
+}
+let peDelArmed = false;
+function peDelReset() {
+  peDelArmed = false;
+  const b = document.getElementById('peDelete');
+  b.textContent = 'Удалить товар';
+  b.style.display = curPe ? '' : 'none';
+}
+async function deleteProduct() {
+  const b = document.getElementById('peDelete');
+  if (!peDelArmed) {
+    peDelArmed = true;
+    b.textContent = 'Точно удалить? Нажмите ещё раз';
+    haptic('heavy');
+    return;
+  }
+  try {
+    const r = await API.call('/api/admin/product/delete', { id: curPe.id });
+    AD.products = r.products;
+    P = r.products.filter(x => x.active).map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
+    renderGoods();
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Товар удалён');
   openSheet('admin'); renderAdmin('products');
 }
 async function saveTtn(code) {

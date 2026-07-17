@@ -421,6 +421,14 @@ async def api_admin_product(request: Request):
     return {"id": pid, "products": await db.get_products(include_inactive=True)}
 
 
+@app.post("/api/admin/product/delete")
+async def api_admin_product_delete(request: Request):
+    admin_user(request)
+    b = await request.json()
+    await db.delete_product(int(b.get("id", 0)))
+    return {"products": await db.get_products(include_inactive=True)}
+
+
 @app.post("/api/admin/settings")
 async def api_admin_settings(request: Request):
     admin_user(request)
