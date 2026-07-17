@@ -26,6 +26,7 @@
   --warn:#e0b24d;
   --danger:#e07a5f;
   --ease:cubic-bezier(.32,.72,0,1);
+  --tg-top:0px;
   --r-xl:1.75rem;
   --r-lg:1.25rem;
 }
@@ -55,7 +56,7 @@ body{
 
 /* ── шапка ── */
 header{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  padding:calc(14px + env(safe-area-inset-top)) 2px 6px}
+  padding:calc(14px + max(env(safe-area-inset-top), var(--tg-top))) 2px 6px}
 .brand{display:flex;align-items:center;gap:10px}
 .brand-mark{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
   background:linear-gradient(135deg,#f0d47a,#b8860b);color:#100c04;
@@ -309,7 +310,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   box-shadow:0 8px 20px rgba(212,175,55,.3),inset 0 1px 1px rgba(255,255,255,.5)}
 
 /* toast */
-#toast{position:fixed;top:calc(14px + env(safe-area-inset-top));left:50%;transform:translate(-50%,-160%);z-index:95;
+#toast{position:fixed;top:calc(14px + max(env(safe-area-inset-top), var(--tg-top)));left:50%;transform:translate(-50%,-160%);z-index:95;
   padding:12px 20px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap;
   background:rgba(22,21,18,.92);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.12);color:var(--txt);
   transition:transform .6s var(--ease)}
@@ -529,7 +530,24 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 <script>
 /* ═══════════ Telegram ═══════════ */
 const tg = window.Telegram?.WebApp;
-if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#050505'); tg.setBackgroundColor('#050505'); }
+if (tg) {
+  tg.ready(); tg.expand();
+  tg.setHeaderColor('#050505'); tg.setBackgroundColor('#050505');
+  /* полноэкранный режим (Bot API 8.0+) */
+  if (parseFloat(tg.version) >= 8 && tg.requestFullscreen) {
+    try { tg.requestFullscreen(); } catch (e) {}
+  }
+  tg.disableVerticalSwipes?.();
+  /* отступ под системные панели в fullscreen */
+  const applyInsets = () => {
+    const top = Math.max(tg.safeAreaInset?.top || 0, 0) + (tg.contentSafeAreaInset?.top || 0);
+    document.documentElement.style.setProperty('--tg-top', top + 'px');
+  };
+  tg.onEvent('safeAreaChanged', applyInsets);
+  tg.onEvent('contentSafeAreaChanged', applyInsets);
+  tg.onEvent('fullscreenChanged', applyInsets);
+  applyInsets();
+}
 const tgUser = tg?.initDataUnsafe?.user;
 const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 
