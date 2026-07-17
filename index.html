@@ -395,7 +395,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
         </div>
         <div class="ref-link" onclick="copyRef()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          <span id="refLink">t.me/mm_shop_bot?start=ref…</span>
+          <span id="refLink">t.me/Magic_Marketplace_bot?start=ref…</span>
         </div>
         <button class="btn btn-gold" style="margin-top:12px" onclick="shareRef()">Пригласить друга
           <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
@@ -523,6 +523,9 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <button class="btn btn-gold" style="margin-top:14px" onclick="genTransfer()">Сгенерировать код
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>
   </button>
+  <div class="hr"></div>
+  <div class="field"><label>Или введите код со старого аккаунта</label><input id="redeemCode" placeholder="A1B2C3" autocapitalize="characters"></div>
+  <button class="btn btn-ghost" onclick="redeemTransfer()">Перенести сюда</button>
 </div>
 
 <div id="toast"></div>
@@ -589,6 +592,33 @@ let S = JSON.parse(localStorage.getItem(DB_KEY) || 'null') || {
   ],
 };
 const save = () => localStorage.setItem(DB_KEY, JSON.stringify(S));
+
+/* ═══════════ API (Railway-бэкенд; без него — демо-режим) ═══════════ */
+const API = {
+  ok: false,
+  async call(path, body) {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Init-Data': tg?.initData || '' },
+      body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => null);
+      throw new Error(e?.detail || 'Ошибка сервера');
+    }
+    return r.json();
+  },
+};
+function applySnapshot(d) {
+  S.balance = d.balance; S.orders = d.orders;
+  S.refCount = d.ref_count; S.refEarned = d.ref_earned;
+  save(); syncBalance(); renderOrders();
+}
+async function serverSync() {
+  if (!tg?.initData || location.protocol === 'file:') return;
+  try { applySnapshot(await API.call('/api/auth')); API.ok = true; }
+  catch (e) { /* сервера нет — остаёмся в демо-режиме */ }
+}
 const fmt = n => n.toLocaleString('ru-RU');
 const STATUSES = ['Оплачен', 'Отправлен', 'В пути', 'Доставлен'];
 
@@ -691,25 +721,34 @@ function selPay(el) {
   document.querySelectorAll('[data-pay]').forEach(x => x.classList.remove('sel'));
   el.classList.add('sel'); payMethod = el.dataset.pay;
 }
-function placeOrder() {
+async function placeOrder() {
   const name = document.getElementById('coName').value.trim();
   const phone = document.getElementById('coPhone').value.trim();
   const city = document.getElementById('coCity').value.trim();
   const np = document.getElementById('coNP').value.trim();
   if (!name || !phone || !city || !np) return toast('Заполните все поля доставки');
   const total = priceFor(curProduct, curGrams);
-  if (payMethod === 'balance') {
-    if (S.balance < total) return toast('Недостаточно средств — пополните баланс');
-    S.balance -= total;
+  const ship = { name, phone, city, np };
+  if (API.ok) {
+    try {
+      applySnapshot(await API.call('/api/order', {
+        product: curProduct.name, grams: curGrams, total, pay: payMethod, ship,
+      }));
+    } catch (e) { return toast(e.message); }
+  } else {
+    if (payMethod === 'balance') {
+      if (S.balance < total) return toast('Недостаточно средств — пополните баланс');
+      S.balance -= total;
+    }
+    S.orders.unshift({
+      id: 'MM-' + (1043 + S.orders.length),
+      product: curProduct.name, grams: curGrams, total,
+      date: new Date().toLocaleDateString('ru-RU'),
+      status: 0, ttn: null, ship,
+    });
+    save(); syncBalance();
   }
-  S.orders.unshift({
-    id: 'MM-' + (1043 + S.orders.length),
-    product: curProduct.name, grams: curGrams, total,
-    date: new Date().toLocaleDateString('ru-RU'),
-    status: 0, ttn: null,
-    ship: { name, phone, city, np },
-  });
-  save(); syncBalance(); closeSheets(true);
+  closeSheets(true);
   haptic('medium');
   toast('Заказ оформлен ✦');
   go('history');
@@ -762,11 +801,16 @@ function selTu(el) {
   document.querySelectorAll('[data-tu]').forEach(x => x.classList.remove('sel'));
   el.classList.add('sel'); tuMethod = el.dataset.tu;
 }
-function topUp() {
+async function topUp() {
   const v = parseInt(document.getElementById('tuSum').value, 10);
   if (!v || v <= 0) return toast('Укажите сумму');
-  /* демо: мгновенное зачисление; в проде — счёт на оплату */
-  S.balance += v; save(); syncBalance();
+  if (API.ok) {
+    try { applySnapshot(await API.call('/api/topup', { amount: v, method: tuMethod })); }
+    catch (e) { return toast(e.message); }
+  } else {
+    /* демо: мгновенное зачисление; в проде — счёт на оплату */
+    S.balance += v; save(); syncBalance();
+  }
   document.getElementById('tuSum').value = '';
   closeSheets(true); haptic('medium');
   toast(`Баланс пополнен на ${fmt(v)} ₴`);
@@ -783,7 +827,7 @@ function initProfile() {
   else av.textContent = (name[0] || 'M').toUpperCase();
   document.getElementById('refLink').textContent = refUrl(id);
 }
-const refUrl = id => `t.me/mm_shop_bot?start=ref_${id}`;
+const refUrl = id => `t.me/Magic_Marketplace_bot?start=ref_${id}`;
 function copyRef() {
   navigator.clipboard?.writeText('https://' + refUrl(tgUser?.id || '000000'));
   haptic('medium'); toast('Ссылка скопирована');
@@ -821,10 +865,27 @@ function openTransfer() {
   document.getElementById('transferCode').textContent = '— — — —';
   openSheet('transfer');
 }
-function genTransfer() {
-  const code = Array.from({ length: 4 }, () => Math.floor(Math.random() * 10)).join(' ');
+async function genTransfer() {
+  let code;
+  if (API.ok) {
+    try { code = (await API.call('/api/transfer/create')).code; }
+    catch (e) { return toast(e.message); }
+  } else {
+    code = Array.from({ length: 6 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('');
+  }
   document.getElementById('transferCode').textContent = code;
   haptic('medium'); toast('Код создан · действует 15 минут');
+}
+async function redeemTransfer() {
+  const code = document.getElementById('redeemCode').value.trim();
+  if (!code) return toast('Введите код');
+  if (!API.ok) return toast('Доступно после подключения сервера');
+  try {
+    applySnapshot(await API.call('/api/transfer/redeem', { code }));
+    document.getElementById('redeemCode').value = '';
+    closeSheets(true); haptic('medium');
+    toast('Аккаунт перенесён ✦');
+  } catch (e) { toast(e.message); }
 }
 
 /* ═══════════ PIN ═══════════ */
@@ -923,6 +984,7 @@ function observeReveals() {
 renderGoods(); renderOrders(); renderSupport();
 initProfile(); syncBalance(); syncSettings(); initLock();
 observeReveals();
+serverSync();
 </script>
 </body>
 </html>
