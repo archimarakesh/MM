@@ -314,8 +314,9 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 #toast{position:fixed;top:calc(14px + max(env(safe-area-inset-top), var(--tg-top)));left:50%;transform:translate(-50%,-160%);z-index:95;
   padding:12px 20px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap;
   background:rgba(22,21,18,.92);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.12);color:var(--txt);
-  transition:transform .6s var(--ease)}
-#toast.show{transform:translate(-50%,0)}
+  opacity:0;pointer-events:none;visibility:hidden;
+  transition:transform .6s var(--ease),opacity .6s var(--ease),visibility .6s}
+#toast.show{transform:translate(-50%,0);opacity:1;visibility:visible}
 .hr{height:1px;background:var(--line);margin:18px 0}
 .note{font-size:11.5px;color:var(--muted-2);line-height:1.6;margin-top:10px}
 </style>
