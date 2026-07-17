@@ -184,6 +184,9 @@ h1.page-title em{font-style:normal;color:inherit}
 .field input:focus,.field select:focus{border-color:var(--gold-line);background:rgba(212,175,55,.05)}
 .field select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%239a927f' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L2 5h12z'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 16px center}
+.mini-input{width:100%;padding:11px 13px;border-radius:13px;font-family:'Manrope',sans-serif;font-size:13.5px;color:var(--txt);
+  background:rgba(255,255,255,.045);border:1px solid var(--line);outline:none}
+.mini-input:focus{border-color:var(--gold-line)}
 .pay-opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
 .pay-opt{padding:13px;border-radius:16px;text-align:center;cursor:pointer;font-size:12.5px;font-weight:700;
   border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--muted);
@@ -476,21 +479,27 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 <div class="sheet" id="sheet-topup">
   <div class="sheet-grip"></div>
   <h2>Пополнение баланса</h2>
-  <p class="sheet-sub">Средства зачисляются на внутренний кошелёк и доступны для оплаты заказов.</p>
+  <p class="sheet-sub">Переведите сумму по реквизитам, приложите фото квитанции — зачислим после проверки.</p>
   <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="500"></div>
-  <div class="pay-opts">
-    <div class="pay-opt sel" data-tu="card" onclick="selTu(this)">Карта<small>Visa / MC</small></div>
-    <div class="pay-opt" data-tu="crypto" onclick="selTu(this)">Крипта<small>USDT TRC-20</small></div>
-  </div>
-  <button class="btn btn-gold" onclick="topUp()">Пополнить
-    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+  <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
+  <div id="tuReq"></div>
+  <div id="tuAttach"></div>
+  <button class="btn btn-gold" onclick="topUp()">Отправить
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
   </button>
+  <div id="tuPending"></div>
+  <input type="file" id="tuFile" accept="image/*" style="display:none">
 </div>
 
 <div class="sheet" id="sheet-settings">
   <div class="sheet-grip"></div>
   <h2>Настройки</h2>
   <p class="sheet-sub">Безопасность и управление аккаунтом.</p>
+  <div class="set-row" id="adminRow" style="display:none" onclick="openAdmin()">
+    <div class="link-ico">👑</div>
+    <div><h3>Админка</h3><p>Товары, заказы, оплаты</p></div>
+    <div class="arr" style="margin-left:auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.05);color:var(--muted)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></div>
+  </div>
   <div class="set-row" onclick="startPinChange()">
     <div class="link-ico">🔐</div>
     <div><h3>Пин-код</h3><p id="pinState">Не установлен</p></div>
@@ -533,6 +542,32 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <button class="btn btn-ghost" onclick="redeemTransfer()">Перенести сюда</button>
 </div>
 
+<div class="sheet" id="sheet-admin">
+  <div class="sheet-grip"></div>
+  <h2>Админка 👑</h2>
+  <div class="weight-chips" id="adminTabs" style="margin-top:12px"></div>
+  <div id="adminBody"></div>
+</div>
+
+<div class="sheet" id="sheet-pedit">
+  <div class="sheet-grip"></div>
+  <h2 id="peTitle">Товар</h2>
+  <p class="sheet-sub">Название, цена за грамм и градация скидок по весу.</p>
+  <div class="field"><label>Название</label><input id="peName" placeholder="Golden Reserve"></div>
+  <div class="field"><label>Описание</label><input id="peSub" placeholder="Флагманская позиция"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div class="field"><label>Эмодзи</label><input id="peEmoji" placeholder="🏆"></div>
+    <div class="field"><label>Бейдж</label><input id="peTag" placeholder="ХИТ / NEW / пусто"></div>
+  </div>
+  <div class="field"><label>Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
+  <div class="pay-opts" style="grid-template-columns:1fr">
+    <div class="pay-opt" id="peActive" onclick="peToggleActive()">Товар активен<small>показывается в каталоге</small></div>
+  </div>
+  <button class="btn btn-gold" onclick="savePedit()">Сохранить товар
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+  </button>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -562,13 +597,17 @@ const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 /* ═══════════ Данные ═══════════ */
 /* Товары легко заменить: базовая цена за грамм + пороги скидок */
 const TIERS = [
-  { from: 1,   k: 1.00, label: '1–9 г' },
-  { from: 10,  k: 0.90, label: '10–24 г' },
-  { from: 25,  k: 0.80, label: '25–49 г' },
-  { from: 50,  k: 0.70, label: '50–99 г' },
-  { from: 100, k: 0.60, label: '100 г+' },
+  { from: 1, k: 1.00 }, { from: 10, k: 0.90 }, { from: 25, k: 0.80 },
+  { from: 50, k: 0.70 }, { from: 100, k: 0.60 },
 ];
 const WEIGHTS = [5, 10, 25, 50, 100];
+const GRADS = [
+  'linear-gradient(140deg,#3a2d0e,#1c1506)', 'linear-gradient(140deg,#23211d,#0e0d0b)',
+  'linear-gradient(140deg,#3d2c12,#241505)', 'linear-gradient(140deg,#1f1d2b,#0d0c14)',
+  'linear-gradient(140deg,#463108,#201602)', 'linear-gradient(140deg,#2e2418,#161009)',
+];
+let P = null;   // товары с сервера; null — демо-набор PRODUCTS
+let PAY = {};   // реквизиты оплаты из админки
 const PRODUCTS = [
   { id: 'p1', name: 'Golden Reserve', sub: 'Флагманская позиция', emoji: '🏆', base: 120, tag: 'ХИТ',   grad: 'linear-gradient(140deg,#3a2d0e,#1c1506)' },
   { id: 'p2', name: 'Black Label',    sub: 'Тёмная классика',     emoji: '🖤', base: 95,  tag: '',      grad: 'linear-gradient(140deg,#23211d,#0e0d0b)' },
@@ -617,7 +656,14 @@ const API = {
 function applySnapshot(d) {
   S.balance = d.balance; S.orders = d.orders;
   S.refCount = d.ref_count; S.refEarned = d.ref_earned;
-  save(); syncBalance(); renderOrders();
+  S.topupsPending = d.topups_pending || [];
+  if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
+  if (d.payment) PAY = d.payment;
+  if ('is_admin' in d) {
+    S.isAdmin = d.is_admin;
+    document.getElementById('adminRow').style.display = d.is_admin ? '' : 'none';
+  }
+  save(); syncBalance(); renderOrders(); renderGoods();
 }
 async function serverSync() {
   if (!tg?.initData || location.protocol === 'file:') return;
@@ -625,7 +671,7 @@ async function serverSync() {
   catch (e) { /* сервера нет — остаёмся в демо-режиме */ }
 }
 const fmt = n => n.toLocaleString('ru-RU');
-const STATUSES = ['Оплачен', 'Отправлен', 'В пути', 'Доставлен'];
+const STATUSES = ['Оплачен', 'Отправлен', 'В пути', 'Получен'];
 
 /* ═══════════ Навигация ═══════════ */
 function go(v) {
@@ -645,6 +691,7 @@ function openSheet(name) {
   document.getElementById('veil').classList.add('open');
   document.getElementById('sheet-' + name).classList.add('open');
   if (name === 'settings') syncSettings();
+  if (name === 'topup') renderTopup();
 }
 function closeSheets(silent) {
   if (!silent) haptic('soft');
@@ -661,11 +708,14 @@ function toast(msg) {
 }
 
 /* ═══════════ Магазин ═══════════ */
-function tierFor(g) { let t = TIERS[0]; for (const x of TIERS) if (g >= x.from) t = x; return t; }
-function priceFor(p, g) { return Math.round(p.base * tierFor(g).k * g); }
+const tiersOf = p => p.tiers || TIERS;
+function tierFor(p, g) { const ts = tiersOf(p); let t = ts[0]; for (const x of ts) if (g >= x.from) t = x; return t; }
+function priceFor(p, g) { return Math.round(p.base * tierFor(p, g).k * g); }
+function tierLabel(ts, i) { return i < ts.length - 1 ? `${ts[i].from}–${ts[i + 1].from - 1} г` : `${ts[i].from} г+`; }
+const goodsList = () => P || PRODUCTS;
 
 function renderGoods() {
-  document.getElementById('goods').innerHTML = PRODUCTS.map((p, i) => `
+  document.getElementById('goods').innerHTML = goodsList().map((p, i) => `
     <div class="good bezel reveal" style="transition-delay:${i * 60}ms" onclick="openProduct('${p.id}')">
       <div class="bezel-core">
         <div class="good-img" style="background:${p.grad}">
@@ -673,9 +723,9 @@ function renderGoods() {
         </div>
         <div>
           <h3>${p.name}</h3>
-          <div class="good-sub">${p.sub}</div>
+          <div class="good-sub">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> · ` : ''}${p.sub}</div>
         </div>
-        <div class="good-price"><b>от ${fmt(Math.round(p.base * 0.6))} ₴</b><span>за грамм</span></div>
+        <div class="good-price"><b>от ${fmt(Math.round(p.base * Math.min(...tiersOf(p).map(t => t.k))))} ₴</b><span>за грамм</span></div>
       </div>
     </div>`).join('');
   observeReveals();
@@ -683,19 +733,19 @@ function renderGoods() {
 
 let curProduct = null, curGrams = 10;
 function openProduct(id) {
-  curProduct = PRODUCTS.find(p => p.id === id);
+  curProduct = goodsList().find(p => String(p.id) === String(id));
   curGrams = 10;
   renderProductSheet();
   openSheet('product');
 }
 function renderProductSheet() {
-  const p = curProduct, t = tierFor(curGrams);
+  const p = curProduct, t = tierFor(p, curGrams), ts = tiersOf(p);
   document.getElementById('productBody').innerHTML = `
     <div class="p-hero">
       <div class="good-img" style="background:${p.grad}">${p.emoji}</div>
       <div>
         <h2>${p.name}</h2>
-        <p class="sheet-sub" style="margin:2px 0 0">${p.sub} · базово ${fmt(p.base)} ₴/г</p>
+        <p class="sheet-sub" style="margin:2px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}${p.sub} · базово ${fmt(p.base)} ₴/г</p>
       </div>
     </div>
     <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес</label>
@@ -703,7 +753,7 @@ function renderProductSheet() {
       ${WEIGHTS.map(w => `<div class="wchip ${w === curGrams ? 'sel' : ''}" onclick="setGrams(${w})">${w} г</div>`).join('')}
     </div>
     <div class="tier-table">
-      ${TIERS.map(x => `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${x.label}</span><b>${fmt(Math.round(p.base * x.k))} ₴/г</b></div>`).join('')}
+      ${ts.map((x, i) => `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${tierLabel(ts, i)}</span><b>${fmt(Math.round(p.base * x.k))} ₴/г</b></div>`).join('')}
     </div>
     <div class="total-row"><span>Итого · ${curGrams} г</span><b>${fmt(priceFor(p, curGrams))} ₴</b></div>
     <button class="btn btn-gold" onclick="openCheckout()">Оформить заказ
@@ -737,7 +787,8 @@ async function placeOrder() {
   if (API.ok) {
     try {
       applySnapshot(await API.call('/api/order', {
-        product: curProduct.name, grams: curGrams, total, pay: payMethod, ship,
+        product_id: curProduct.id, product_name: curProduct.name,
+        grams: curGrams, pay: payMethod, ship,
       }));
     } catch (e) { return toast(e.message); }
   } else {
@@ -776,7 +827,9 @@ function renderOrders() {
     </div>`).join('');
   observeReveals();
 }
+let curOrderIdx = 0;
 function openOrder(i) {
+  curOrderIdx = i;
   const o = S.orders[i];
   document.getElementById('orderBody').innerHTML = `
     <h2>${o.id}</h2>
@@ -789,8 +842,30 @@ function openOrder(i) {
         </div>`).join('')}
     </div>
     ${o.ttn ? `<div class="ttn"><span>ТТН Новой Почты</span><b>${o.ttn}</b></div>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
-    ${o.ship ? `<p class="note">Получатель: ${o.ship.name} · ${o.ship.city}, отд. ${o.ship.np}</p>` : ''}`;
+    ${o.ship ? `<p class="note">Получатель: ${o.ship.name} · ${o.ship.city}, отд. ${o.ship.np}</p>` : ''}
+    ${o.status === 3 ? `
+      <div class="hr"></div>
+      <div style="text-align:center;padding-bottom:6px">
+        <div style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin-bottom:8px">
+          ${o.stars ? 'Ваша оценка' : 'Оцените товар'}</div>
+        <div style="font-size:34px;letter-spacing:10px;cursor:pointer;user-select:none">
+          ${[1, 2, 3, 4, 5].map(n => `<span onclick="rateOrder(${n})" style="color:${(o.stars || 0) >= n ? 'var(--gold)' : 'rgba(255,255,255,.18)'}">★</span>`).join('')}
+        </div>
+      </div>` : ''}`;
   openSheet('order');
+}
+async function rateOrder(n) {
+  const o = S.orders[curOrderIdx];
+  haptic('medium');
+  if (API.ok) {
+    try { applySnapshot(await API.call('/api/rate', { order: o.id, stars: n })); }
+    catch (e) { return toast(e.message); }
+    curOrderIdx = Math.max(0, S.orders.findIndex(x => x.id === o.id));
+  } else {
+    o.stars = n; save();
+  }
+  openOrder(curOrderIdx);
+  toast('Спасибо за оценку ★');
 }
 
 /* ═══════════ Баланс / пополнение ═══════════ */
@@ -800,25 +875,78 @@ function syncBalance() {
   document.getElementById('refCount').textContent = S.refCount;
   document.getElementById('refEarned').textContent = fmt(S.refEarned) + ' ₴';
 }
-let tuMethod = 'card';
-function selTu(el) {
-  haptic('light');
-  document.querySelectorAll('[data-tu]').forEach(x => x.classList.remove('sel'));
-  el.classList.add('sel'); tuMethod = el.dataset.tu;
+let tuMethod = '', tuReceipt = '';
+function tuOptions() {
+  if (!API.ok) return [{ key: 'demo', label: 'Демо-зачисление', req: '' }];
+  const o = [];
+  if (PAY.card_number) o.push({ key: 'card', label: 'Карта',
+    req: PAY.card_number + (PAY.card_holder ? '\n' + PAY.card_holder : '') });
+  if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20', req: PAY.wallet_trc20 });
+  if (PAY.wallet_ton) o.push({ key: 'ton', label: 'TON', req: PAY.wallet_ton });
+  if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC', req: PAY.wallet_btc });
+  return o;
 }
+function renderTopup() {
+  const opts = tuOptions();
+  if (!opts.find(o => o.key === tuMethod)) tuMethod = opts[0]?.key || '';
+  document.getElementById('tuMethods').innerHTML = opts.length
+    ? opts.map(o => `<div class="wchip ${o.key === tuMethod ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('')
+    : '<p class="note" style="margin:0">Способы оплаты пока не настроены — загляните позже.</p>';
+  const cur = opts.find(o => o.key === tuMethod);
+  document.getElementById('tuReq').innerHTML = cur?.req ? `
+    <div class="ref-link" style="margin-bottom:12px" onclick="copyReq()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span id="tuReqText" style="white-space:pre-line">${cur.req}</span>
+    </div>` : '';
+  document.getElementById('tuAttach').innerHTML = API.ok ? `
+    <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('tuFile').click()">
+      ${tuReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
+    ${tuReceipt ? `<img src="${tuReceipt}" style="width:100%;border-radius:14px;margin-bottom:12px;border:1px solid var(--line)">` : ''}` : '';
+  const pend = S.topupsPending || [];
+  document.getElementById('tuPending').innerHTML = pend.length ? `
+    <div class="hr"></div>
+    ${pend.map(t => `<p class="note" style="margin-top:4px">⏳ На проверке: <b style="color:var(--txt)">${fmt(t.amount)} ₴</b> · ${new Date(t.created).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>`).join('')}` : '';
+}
+function tuSel(k) { haptic('light'); tuMethod = k; renderTopup(); }
+function copyReq() {
+  navigator.clipboard?.writeText(document.getElementById('tuReqText').textContent);
+  haptic('medium'); toast('Реквизиты скопированы');
+}
+document.getElementById('tuFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    tuReceipt = cv.toDataURL('image/jpeg', 0.8);
+    URL.revokeObjectURL(img.src);
+    renderTopup();
+  };
+  img.src = URL.createObjectURL(f);
+  e.target.value = '';
+});
 async function topUp() {
   const v = parseInt(document.getElementById('tuSum').value, 10);
   if (!v || v <= 0) return toast('Укажите сумму');
   if (API.ok) {
-    try { applySnapshot(await API.call('/api/topup', { amount: v, method: tuMethod })); }
+    if (!tuMethod) return toast('Способы оплаты пока не настроены');
+    if (!tuReceipt) return toast('Приложите фото квитанции');
+    try { applySnapshot(await API.call('/api/topup/receipt', { amount: v, method: tuMethod, receipt: tuReceipt })); }
     catch (e) { return toast(e.message); }
+    tuReceipt = '';
+    document.getElementById('tuSum').value = '';
+    closeSheets(true); haptic('medium');
+    toast('Квитанция отправлена на проверку ⏳');
   } else {
-    /* демо: мгновенное зачисление; в проде — счёт на оплату */
+    /* демо-режим без сервера */
     S.balance += v; save(); syncBalance();
+    document.getElementById('tuSum').value = '';
+    closeSheets(true); haptic('medium');
+    toast(`Баланс пополнен на ${fmt(v)} ₴`);
   }
-  document.getElementById('tuSum').value = '';
-  closeSheets(true); haptic('medium');
-  toast(`Баланс пополнен на ${fmt(v)} ₴`);
 }
 
 /* ═══════════ Профиль / рефералка ═══════════ */
@@ -891,6 +1019,152 @@ async function redeemTransfer() {
     closeSheets(true); haptic('medium');
     toast('Аккаунт перенесён ✦');
   } catch (e) { toast(e.message); }
+}
+
+/* ═══════════ Админка ═══════════ */
+let AD = null, adminTab = 'products', curPe = null, peActiveVal = true;
+async function openAdmin() {
+  if (!API.ok) return toast('Админка доступна только на сервере');
+  try { AD = await API.call('/api/admin/data'); } catch (e) { return toast(e.message); }
+  openSheet('admin');
+  renderAdmin('products');
+}
+function renderAdmin(tab) {
+  adminTab = tab;
+  const tabs = [
+    ['products', 'Товары'], ['orders', 'Заказы'],
+    ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}` : '')], ['pay', 'Оплата'],
+  ];
+  document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
+    `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
+  const b = document.getElementById('adminBody');
+  const dt = s => new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (tab === 'products') {
+    b.innerHTML = AD.products.map(p => `
+      <div class="set-row" onclick="openPedit(${p.id})">
+        <div class="link-ico">${p.emoji}</div>
+        <div><h3 style="${p.active ? '' : 'opacity:.45'}">${p.name}${p.active ? '' : ' · скрыт'}</h3>
+        <p>${fmt(p.base)} ₴/г${p.rating.count ? ` · ★ ${p.rating.avg} (${p.rating.count})` : ''}</p></div>
+      </div>`).join('') +
+      `<button class="btn btn-gold" style="margin-top:14px" onclick="openPedit(null)">+ Добавить товар</button>`;
+  } else if (tab === 'orders') {
+    b.innerHTML = AD.orders.length ? AD.orders.map(o => `
+      <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
+        <div class="order-top"><b>${o.id}</b><span class="status ${o.status >= 3 ? 'st-done' : o.status >= 1 ? 'st-ship' : 'st-paid'}">${STATUSES[o.status]}</span></div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.65">
+          ${o.product} · ${o.grams} г · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}<br>
+          ${o.user}${o.username ? ' · @' + o.username : ''}
+          ${o.ship ? `<br>${o.ship.name} · ${o.ship.phone}<br>${o.ship.city}, НП №${o.ship.np}` : ''}
+        </div>
+        ${o.ttn ? `<div class="ttn"><span>ТТН</span><b>${o.ttn}</b></div>` : `
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <input class="mini-input" id="ttn-${o.id}" placeholder="ТТН Новой Почты" inputmode="numeric" style="flex:1">
+            <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
+          </div>`}
+      </div></div>`).join('') : '<div class="empty"><p>Заказов пока нет</p></div>';
+  } else if (tab === 'topups') {
+    b.innerHTML = AD.topups.length ? AD.topups.map(t => `
+      <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
+        <div class="order-top"><b>${fmt(t.amount)} ₴ · ${t.method}</b>
+          <span style="font-size:11px;color:var(--muted-2)">${dt(t.created)}</span></div>
+        <div style="font-size:12px;color:var(--muted)">${t.user}${t.username ? ' · @' + t.username : ''} · ID ${t.user_id}</div>
+        <img src="${t.receipt}" style="width:100%;border-radius:12px;margin:10px 0;border:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <button class="btn btn-gold" style="padding:12px" onclick="decideTopup(${t.id}, true)">Зачислить</button>
+          <button class="btn btn-ghost" style="padding:12px" onclick="decideTopup(${t.id}, false)">Отклонить</button>
+        </div>
+      </div></div>`).join('') : '<div class="empty"><p>Нет квитанций на проверке</p></div>';
+  } else {
+    const s = AD.settings;
+    b.innerHTML = `
+      <p class="note" style="margin:0 0 12px">Заполненные реквизиты видны покупателям при пополнении. Пустое поле — способ отключён.</p>
+      <div class="field"><label>Номер карты</label><input id="payCard" value="${s.card_number || ''}" placeholder="0000 0000 0000 0000"></div>
+      <div class="field"><label>Получатель (для карты)</label><input id="payHolder" value="${s.card_holder || ''}" placeholder="Иван И."></div>
+      <div class="field"><label>Кошелёк USDT TRC-20</label><input id="payTrc" value="${s.wallet_trc20 || ''}" placeholder="T..."></div>
+      <div class="field"><label>Кошелёк TON</label><input id="payTon" value="${s.wallet_ton || ''}" placeholder="UQ..."></div>
+      <div class="field"><label>Кошелёк BTC</label><input id="payBtc" value="${s.wallet_btc || ''}" placeholder="bc1..."></div>
+      <button class="btn btn-gold" onclick="savePay()">Сохранить реквизиты</button>`;
+  }
+}
+function openPedit(id) {
+  curPe = id ? AD.products.find(p => p.id === id) : null;
+  peActiveVal = curPe ? curPe.active : true;
+  document.getElementById('peTitle').textContent = curPe ? 'Редактировать товар' : 'Новый товар';
+  document.getElementById('peName').value = curPe?.name || '';
+  document.getElementById('peSub').value = curPe?.sub || '';
+  document.getElementById('peEmoji').value = curPe?.emoji || '';
+  document.getElementById('peTag').value = curPe?.tag || '';
+  const ts = curPe ? curPe.tiers : TIERS;
+  const basePrice = curPe ? curPe.base : 100;
+  document.getElementById('peTiers').innerHTML = ts.map((t, i) => `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--muted-2)">от</span>
+        <input class="mini-input" id="peFrom${i}" inputmode="numeric" value="${t.from}">
+        <span style="font-size:11px;color:var(--muted-2)">г</span></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input class="mini-input" id="pePrice${i}" inputmode="numeric" value="${Math.round(basePrice * t.k)}">
+        <span style="font-size:11px;color:var(--muted-2)">₴/г</span></div>
+    </div>`).join('');
+  syncPeActive();
+  openSheet('pedit');
+}
+function peToggleActive() { peActiveVal = !peActiveVal; syncPeActive(); haptic('light'); }
+function syncPeActive() { document.getElementById('peActive').classList.toggle('sel', peActiveVal); }
+async function savePedit() {
+  const name = document.getElementById('peName').value.trim();
+  if (!name) return toast('Укажите название');
+  const rows = [];
+  for (let i = 0; i < 5; i++) {
+    const from = parseInt(document.getElementById('peFrom' + i).value, 10);
+    const price = parseFloat(document.getElementById('pePrice' + i).value);
+    if (!from || !price || price <= 0) return toast('Проверьте градацию цен');
+    rows.push({ from, price });
+  }
+  rows.sort((a, b) => a.from - b.from);
+  const base = rows[0].price;
+  try {
+    const r = await API.call('/api/admin/product', {
+      id: curPe?.id || null, name,
+      sub: document.getElementById('peSub').value.trim(),
+      emoji: document.getElementById('peEmoji').value.trim() || '📦',
+      tag: document.getElementById('peTag').value.trim(),
+      base, tiers: rows.map(x => ({ from: x.from, k: +(x.price / base).toFixed(4) })),
+      active: peActiveVal,
+    });
+    AD.products = r.products;
+    P = r.products.filter(x => x.active).map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
+    renderGoods();
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Товар сохранён');
+  openSheet('admin'); renderAdmin('products');
+}
+async function saveTtn(code) {
+  const ttn = document.getElementById('ttn-' + code).value.trim();
+  if (!ttn) return toast('Введите ТТН');
+  try { AD.orders = (await API.call('/api/admin/ttn', { order: code, ttn })).orders; }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); toast('ТТН сохранён — покупатель уведомлён');
+  renderAdmin('orders');
+}
+async function decideTopup(id, approve) {
+  try { AD.topups = (await API.call('/api/admin/topup', { id, approve })).topups; }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); toast(approve ? 'Зачислено ✓' : 'Отклонено');
+  renderAdmin('topups');
+}
+async function savePay() {
+  try {
+    AD.settings = (await API.call('/api/admin/settings', {
+      card_number: document.getElementById('payCard').value,
+      card_holder: document.getElementById('payHolder').value,
+      wallet_trc20: document.getElementById('payTrc').value,
+      wallet_ton: document.getElementById('payTon').value,
+      wallet_btc: document.getElementById('payBtc').value,
+    })).settings;
+    PAY = Object.fromEntries(Object.entries(AD.settings).filter(([, v]) => v));
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Реквизиты сохранены');
 }
 
 /* ═══════════ PIN ═══════════ */
