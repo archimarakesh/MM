@@ -78,6 +78,7 @@ async def init():
                 date    TEXT);
             ALTER TABLE products ADD COLUMN IF NOT EXISTS photos TEXT;
             ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT;
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS genetics TEXT DEFAULT '';
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
@@ -165,6 +166,7 @@ def _product_row(r, rating) -> dict:
         photos = 0
     return {
         "id": r["id"], "name": r["name"], "sub": r["sub"], "emoji": r["emoji"],
+        "genetics": r["genetics"] or "",
         "tag": r["tag"], "base": r["base"],
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
         "active": r["active"], "photos": photos,
@@ -217,21 +219,23 @@ async def save_product(d: dict) -> int:
         pj = json.dumps(photos)
         stock = d.get("stock")
         stock = None if stock in (None, "") else max(0, int(stock))
+        genetics = str(d.get("genetics", "")).strip()
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
-                                    active=$8, photos=$9, stock=$10
+                                    active=$8, photos=$9, stock=$10, genetics=$11
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-                d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)), pj, stock)
+                d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)),
+                pj, stock, genetics)
             return int(d["id"])
         return await c.fetchval("""
-            INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,
+            INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers, pj, stock)
+            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics)
 
 
 async def delete_product(pid: int):
