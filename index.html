@@ -1042,20 +1042,17 @@ let tuMethod = '', tuReceipt = '', INV = null, invTimer = null, invPoll = null;
 const TU_ST_CARD = ['⏳ Проверяется', '✅ Зачислено', '❌ Отклонено'];
 const TU_ST_CRYPTO = ['⏳ Ожидает оплаты', '✅ Зачислено', '⌛ Отменён'];
 const TU_LABELS = { card: 'Карта', trc20: 'USDT TRC-20', btc: 'BTC', demo: 'Демо' };
+function tuAmount() { return parseInt(document.getElementById('tuSum').value, 10) || 0; }
 function tuOptions() {
   if (!API.ok) return [{ key: 'demo', label: 'Демо-зачисление' }];
   const o = [];
-  if (PAY.card_number) o.push({ key: 'card', label: 'Карта' });
+  if (PAY.card_number && tuAmount() <= CARD_LIMIT) o.push({ key: 'card', label: 'Карта' });
   if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20' });
   if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC' });
   return o;
 }
 async function renderTopup() {
-  const opts = tuOptions();
-  if (!opts.find(o => o.key === tuMethod)) tuMethod = opts[0]?.key || '';
-  document.getElementById('tuMethods').innerHTML = opts.length
-    ? opts.map(o => `<div class="wchip ${o.key === tuMethod ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('')
-    : '<p class="note" style="margin:0">Способы оплаты пока не настроены — загляните позже.</p>';
+  renderTopupChips();
   renderTuBody();
   renderPayHistory();
   if (API.ok && INV === null) {
@@ -1068,9 +1065,16 @@ async function renderTopup() {
 function tuSel(k) { haptic('light'); tuMethod = k; renderTuBody(); renderTopupChips(); }
 function renderTopupChips() {
   const opts = tuOptions();
-  document.getElementById('tuMethods').innerHTML =
-    opts.map(o => `<div class="wchip ${o.key === tuMethod ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('');
+  if (!opts.find(o => o.key === tuMethod)) { tuMethod = opts[0]?.key || ''; renderTuBody(); }
+  document.getElementById('tuMethods').innerHTML = (opts.length
+    ? opts.map(o => `<div class="wchip ${o.key === tuMethod ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('')
+    : '<p class="note" style="margin:0">Способы оплаты пока не настроены — загляните позже.</p>') +
+    (API.ok && PAY.card_number && tuAmount() > CARD_LIMIT
+      ? `<p class="note" style="width:100%;margin:4px 0 0">💳 Картой — до ${fmt(CARD_LIMIT)} ₴. Для этой суммы используйте крипту.</p>` : '');
 }
+document.getElementById('tuSum').addEventListener('input', () => {
+  if (API.ok) renderTopupChips();
+});
 function renderTuBody() {
   const b = document.getElementById('tuBody');
   clearInterval(invTimer);
