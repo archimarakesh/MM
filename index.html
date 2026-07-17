@@ -292,7 +292,6 @@ h1.page-title em{font-style:normal;color:inherit}
 #lock{position:fixed;inset:0;z-index:90;background:var(--bg);display:none;flex-direction:column;
   align-items:center;justify-content:center;padding:20px}
 #lock.show{display:flex}
-#lock .brand-mark{width:56px;height:56px;font-size:24px;border-radius:18px;margin-bottom:18px}
 
 /* ── нижняя навигация ── */
 nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:70;
@@ -325,7 +324,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 
 <!-- экран блокировки -->
 <div id="lock">
-  <div class="brand-mark">MM</div>
+  <img src="logo.png" alt="Magic Market" style="width:150px;margin-bottom:26px">
   <div class="pin-title" id="lockTitle">Введите пин-код</div>
   <div class="pin-dots" id="lockDots"></div>
   <div class="pin-pad" id="lockPad"></div>
@@ -334,8 +333,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 <div id="app">
   <header>
     <div class="brand">
-      <div class="brand-mark">MM</div>
-      <div class="brand-name">Magic <em>Market</em></div>
+      <img src="logo.png" alt="Magic Market" style="height:42px;width:auto">
     </div>
     <div class="hdr-right">
       <div class="balance-chip" onclick="openSheet('topup')">

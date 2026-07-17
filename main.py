@@ -92,6 +92,11 @@ async def index():
     return FileResponse("index.html")
 
 
+@app.get("/logo.png")
+async def logo():
+    return FileResponse("logo.png")
+
+
 @app.post("/api/auth")
 async def api_auth(request: Request):
     u = tg_user(request)
