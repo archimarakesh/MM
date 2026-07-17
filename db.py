@@ -77,6 +77,7 @@ async def init():
                 ship    TEXT,
                 date    TEXT);
             ALTER TABLE products ADD COLUMN IF NOT EXISTS photos TEXT;
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
@@ -168,6 +169,7 @@ def _product_row(r, rating) -> dict:
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
         "active": r["active"], "photos": photos,
         "pv": len(r["photos"] or ""),  # версия фото для кэш-бастинга
+        "stock": r["stock"],           # None = не ограничено
         "rating": rating.get(r["id"], {"avg": 0, "count": 0}),
     }
 
@@ -213,21 +215,23 @@ async def save_product(d: dict) -> int:
             elif isinstance(ph, str) and ph.startswith("data:image/") and len(ph) <= MAX_PHOTO_LEN:
                 photos.append({"f": ph, "t": _make_thumb(ph)})
         pj = json.dumps(photos)
+        stock = d.get("stock")
+        stock = None if stock in (None, "") else max(0, int(stock))
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
-                                    active=$8, photos=$9
+                                    active=$8, photos=$9, stock=$10
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-                d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)), pj)
+                d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)), pj, stock)
             return int(d["id"])
         return await c.fetchval("""
-            INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,
+            INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers, pj)
+            d.get("tag", ""), int(d["base"]), tiers, pj, stock)
 
 
 async def delete_product(pid: int):
@@ -333,13 +337,27 @@ async def _ref_bonus(c, buyer_id: int, total: int):
         """, bonus, ref_by)
 
 
-async def _order_product_total(c, product_id: int, grams: int):
-    p = await c.fetchrow("SELECT * FROM products WHERE id=$1 AND active", product_id)
+async def _order_product_total(c, product_id: int, grams: int, lock: bool = False):
+    q = "SELECT * FROM products WHERE id=$1 AND active" + (" FOR UPDATE" if lock else "")
+    p = await c.fetchrow(q, product_id)
     if not p:
         raise ValueError("Товар не найден")
     if not 1 <= grams <= 1000:
         raise ValueError("Вес — от 1 до 1000 грамм")
+    if p["stock"] is not None and grams > p["stock"]:
+        raise ValueError("Такого количества нет в наличии — напишите админу")
     return p, price_for(_product_row(p, {}), grams)
+
+
+async def _take_stock(c, product_id: int, grams: int):
+    await c.execute(
+        "UPDATE products SET stock=stock-$1 WHERE id=$2 AND stock IS NOT NULL", grams, product_id)
+
+
+async def _restock(c, product_id, grams):
+    if product_id:
+        await c.execute(
+            "UPDATE products SET stock=stock+$1 WHERE id=$2 AND stock IS NOT NULL", grams, product_id)
 
 
 async def order_total(product_id: int, grams: int) -> int:
@@ -360,7 +378,7 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
                        ship: dict, receipt: str | None = None) -> dict:
     """Оплата с баланса (сразу оплачен) или картой (квитанция на проверку)."""
     async with _pool.acquire() as c, c.transaction():
-        p, total = await _order_product_total(c, product_id, grams)
+        p, total = await _order_product_total(c, product_id, grams, lock=True)
         u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         if pay == "balance":
             if u["balance"] < total:
@@ -372,6 +390,7 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
             oid = await _insert_order(c, tg_id, p, grams, total, -1, "card", ship, receipt)
         else:
             raise ValueError("Неизвестный способ оплаты")
+        await _take_stock(c, product_id, grams)
         snap = await snapshot(tg_id, c)
         snap["order_code"] = f"MM-{oid + ORDER_CODE_BASE}"
         snap["order_total"] = total
@@ -382,13 +401,21 @@ async def create_order_invoice(tg_id: int, product_id: int, grams: int, currency
                                ship: dict, amount_crypto: str, address: str) -> tuple:
     """Заказ с оплатой криптой: заказ «ждёт оплаты» + привязанный счёт."""
     async with _pool.acquire() as c, c.transaction():
-        p, total = await _order_product_total(c, product_id, grams)
+        p, total = await _order_product_total(c, product_id, grams, lock=True)
         oid = await _insert_order(c, tg_id, p, grams, total, -1, currency, ship)
-        # новый счёт отменяет прежний неоплаченный (и его заказ, если был)
+        await _take_stock(c, product_id, grams)
+        # новый счёт отменяет прежний неоплаченный (и его заказ, если был) с возвратом остатка
+        prev = await c.fetch("""
+            SELECT o.id, o.product_id, o.grams FROM orders o
+            JOIN invoices i ON i.order_id = o.id
+            WHERE i.user_id=$1 AND i.status=0 AND o.status=-1 AND o.id<>$2
+        """, tg_id, oid)
+        for r in prev:
+            await _restock(c, r["product_id"], r["grams"])
         await c.execute("""
-            UPDATE orders SET status=-2 WHERE status=-1 AND id IN
+            UPDATE orders SET status=-2 WHERE status=-1 AND id<>$2 AND id IN
                 (SELECT order_id FROM invoices WHERE user_id=$1 AND status=0 AND order_id IS NOT NULL)
-        """, tg_id)
+        """, tg_id, oid)
         await c.execute("UPDATE invoices SET status=2 WHERE user_id=$1 AND status=0", tg_id)
         inv = await c.fetchrow("""
             INSERT INTO invoices(user_id, amount_uah, currency, amount_crypto, address, order_id, expires)
@@ -417,6 +444,7 @@ async def order_decide(order_code: str, approve: bool) -> dict:
             await _ref_bonus(c, o["user_id"], o["total"])
         else:
             await c.execute("UPDATE orders SET status=-2 WHERE id=$1", oid)
+            await _restock(c, o["product_id"], o["grams"])
         return {"user_id": o["user_id"], "code": order_code, "approved": approve}
 
 
@@ -548,7 +576,14 @@ async def mark_delivered(oid: int) -> bool:
 
 # ── крипто-счета (автопроверка оплаты) ───────────────────────────────────────
 async def _expire_invoices(c):
-    # истёкший счёт отменяет и привязанный неоплаченный заказ
+    # истёкший счёт отменяет привязанный неоплаченный заказ и возвращает остаток
+    rows = await c.fetch("""
+        SELECT o.id, o.product_id, o.grams FROM orders o
+        JOIN invoices i ON i.order_id = o.id
+        WHERE i.status=0 AND i.expires < now() AND o.status=-1
+    """)
+    for r in rows:
+        await _restock(c, r["product_id"], r["grams"])
     await c.execute("""
         UPDATE orders SET status=-2 WHERE status=-1 AND id IN
             (SELECT order_id FROM invoices
@@ -608,8 +643,12 @@ async def invoice_cancel(inv_id: int, tg_id: int):
             return
         await c.execute("UPDATE invoices SET status=2 WHERE id=$1", inv_id)
         if inv["order_id"]:
-            await c.execute(
+            tag = await c.execute(
                 "UPDATE orders SET status=-2 WHERE id=$1 AND status=-1", inv["order_id"])
+            if tag == "UPDATE 1":
+                o = await c.fetchrow(
+                    "SELECT product_id, grams FROM orders WHERE id=$1", inv["order_id"])
+                await _restock(c, o["product_id"], o["grams"])
 
 
 async def invoice_paid(inv_id: int, txid: str) -> dict | None:

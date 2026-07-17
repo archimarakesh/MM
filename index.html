@@ -612,7 +612,10 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <p class="sheet-sub">Название, цена за грамм и градация скидок по весу.</p>
   <div class="field"><label>Название</label><input id="peName" placeholder="Golden Reserve"></div>
   <div class="field"><label>Описание</label><input id="peSub" placeholder="Флагманская позиция"></div>
-  <div class="field"><label>Бейдж</label><input id="peTag" placeholder="ХИТ / NEW / пусто"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div class="field"><label>Бейдж</label><input id="peTag" placeholder="ХИТ / NEW / пусто"></div>
+    <div class="field"><label>Наличие, г</label><input id="peStock" inputmode="numeric" placeholder="пусто — без лимита"></div>
+  </div>
   <div class="field"><label>Фото товара · до 4 шт</label><div id="pePhotos" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div></div>
   <div class="field"><label>Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
   <input type="file" id="peFile" accept="image/*" style="display:none">
@@ -810,6 +813,10 @@ function tierFor(p, g) { const ts = tiersOf(p); let t = ts[0]; for (const x of t
 function priceFor(p, g) { return Math.round(p.base * tierFor(p, g).k * g); }
 function tierLabel(ts, i) { return i < ts.length - 1 ? `${ts[i].from}–${ts[i + 1].from - 1} г` : `${ts[i].from} г+`; }
 const goodsList = () => P || PRODUCTS;
+const ADMIN_CHAT = 'https://t.me/magicmarket_boss';
+const stockLabel = p => p.stock === 0
+  ? '<span style="color:var(--danger)">● нет в наличии</span>'
+  : '<span style="color:var(--ok)">● в наличии</span>';
 
 function renderGoods() {
   document.getElementById('goods').innerHTML = goodsList().map((p, i) => `
@@ -821,7 +828,7 @@ function renderGoods() {
         </div>
         <div>
           <h3>${p.name}</h3>
-          <div class="good-sub">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> · ` : ''}${p.sub}</div>
+          <div class="good-sub">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> · ` : ''}${p.sub} · ${stockLabel(p)}</div>
         </div>
         <div class="good-price"><b>от ${fmt(Math.round(p.base * Math.min(...tiersOf(p).map(t => t.k))))} ₴</b><span>за грамм</span></div>
       </div>
@@ -850,7 +857,7 @@ function renderProductSheet() {
     <div class="p-hero">
       <div>
         <h2>${p.name}</h2>
-        <p class="sheet-sub" style="margin:2px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}${p.sub} · базово ${fmt(p.base)} ₴/г</p>
+        <p class="sheet-sub" style="margin:2px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}${p.sub} · базово ${fmt(p.base)} ₴/г · ${stockLabel(p)}</p>
       </div>
     </div>
     <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес · от 1 до 1000 г</label>
@@ -864,9 +871,7 @@ function renderProductSheet() {
     </div>
     <div class="tier-table" id="tierTable"></div>
     <div class="total-row"><span id="totalGrams"></span><b id="totalSum"></b></div>
-    <button class="btn btn-gold" onclick="openCheckout()">Оформить заказ
-      <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
-    </button>`;
+    <div id="orderAction"></div>`;
   updatePrice();
 }
 function updatePrice() {
@@ -877,6 +882,13 @@ function updatePrice() {
     `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${tierLabel(ts, i)}</span><b>${fmt(Math.round(p.base * x.k))} ₴/г</b></div>`).join('');
   document.getElementById('totalGrams').textContent = `Итого · ${curGrams} г`;
   document.getElementById('totalSum').textContent = fmt(priceFor(p, curGrams)) + ' ₴';
+  const short = p.stock != null && (p.stock === 0 || curGrams > p.stock);
+  document.getElementById('orderAction').innerHTML = short ? `
+    <a class="btn btn-ghost" style="text-decoration:none;color:var(--warn)" href="${ADMIN_CHAT}" target="_blank" rel="noopener">💬 Написать админу</a>
+    <p class="note" style="text-align:center">${p.stock === 0 ? 'Товара сейчас нет в наличии' : 'Такого количества сейчас нет'} — напишите админу, подскажем, когда будет.</p>` : `
+    <button class="btn btn-gold" onclick="openCheckout()">Оформить заказ
+      <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+    </button>`;
 }
 function setGrams(w) {
   haptic('light'); curGrams = w;
@@ -1458,7 +1470,7 @@ function renderAdmin(tab) {
           ? `<img src="/photo/${p.id}/0?size=t&v=${p.pv || 0}" style="width:100%;height:100%;object-fit:cover">`
           : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>`}</div>
         <div><h3 style="${p.active ? '' : 'opacity:.45'}">${p.name}${p.active ? '' : ' · скрыт'}</h3>
-        <p>${fmt(p.base)} ₴/г${p.rating.count ? ` · ★ ${p.rating.avg} (${p.rating.count})` : ''}</p></div>
+        <p>${fmt(p.base)} ₴/г${p.stock != null ? ` · склад ${fmt(p.stock)} г` : ''}${p.rating.count ? ` · ★ ${p.rating.avg} (${p.rating.count})` : ''}</p></div>
       </div>`).join('') +
       `<button class="btn btn-gold" style="margin-top:14px" onclick="openPedit(null)">+ Добавить товар</button>`;
   } else if (tab === 'orders') {
@@ -1514,6 +1526,7 @@ function openPedit(id) {
   document.getElementById('peName').value = curPe?.name || '';
   document.getElementById('peSub').value = curPe?.sub || '';
   document.getElementById('peTag').value = curPe?.tag || '';
+  document.getElementById('peStock').value = curPe ? (curPe.stock ?? '') : '';
   peDelReset();
   const ts = curPe ? [...curPe.tiers] : [...TIERS];
   while (ts.length < 7) {
@@ -1580,6 +1593,8 @@ async function savePedit() {
       base, tiers: rows.map(x => ({ from: x.from, k: +(x.price / base).toFixed(4) })),
       active: peActiveVal,
       photos: pePhotos.map(x => x.payload),
+      stock: document.getElementById('peStock').value.trim() === ''
+        ? null : Math.max(0, parseInt(document.getElementById('peStock').value, 10) || 0),
     });
     AD.products = r.products;
     P = r.products.filter(x => x.active).map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
