@@ -838,18 +838,24 @@ function openCheckout() {
   renderCoPays();
   openSheet('checkout');
 }
-function coOptions() {
+const CARD_LIMIT = 5000; // картой — до 5 000 ₴, свыше только крипта
+function coOptions(total) {
   const o = [{ key: 'balance', label: 'С баланса', small: `доступно ${fmt(S.balance)} ₴` }];
   if (API.ok) {
-    if (PAY.card_number) o.push({ key: 'card', label: 'Картой', small: 'перевод + квитанция' });
+    if (PAY.card_number && total <= CARD_LIMIT) o.push({ key: 'card', label: 'Картой', small: 'перевод + квитанция' });
     if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20', small: 'авто-счёт' });
     if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC', small: 'авто-счёт' });
   }
   return o;
 }
 function renderCoPays() {
-  document.getElementById('coPays').innerHTML = coOptions().map(o =>
-    `<div class="pay-opt ${payMethod === o.key ? 'sel' : ''}" onclick="selPay('${o.key}')">${o.label}<small>${o.small}</small></div>`).join('');
+  const total = priceFor(curProduct, curGrams);
+  const opts = coOptions(total);
+  if (!opts.find(o => o.key === payMethod)) payMethod = 'balance';
+  document.getElementById('coPays').innerHTML = opts.map(o =>
+    `<div class="pay-opt ${payMethod === o.key ? 'sel' : ''}" onclick="selPay('${o.key}')">${o.label}<small>${o.small}</small></div>`).join('') +
+    (API.ok && PAY.card_number && total > CARD_LIMIT
+      ? `<p class="note" style="grid-column:1/-1;margin:0">💳 Картой — до ${fmt(CARD_LIMIT)} ₴. Для этой суммы доступна оплата криптой.</p>` : '');
   const ex = document.getElementById('coExtra');
   if (payMethod === 'card') {
     ex.innerHTML = `
@@ -1197,7 +1203,8 @@ document.getElementById('tuFile').addEventListener('change', e => {
 async function submitCard() {
   const v = parseInt(document.getElementById('tuSum').value, 10);
   if (!v || v <= 0) return toast('Укажите сумму');
-  if (!tuReceipt) return toast('Приложите фото квитанции');
+  if (v > CARD_LIMIT) return toast(`Картой — до ${fmt(CARD_LIMIT)} ₴, для больших сумм используйте крипту`);
+  if (!tuReceipt) return toast('Приложите квитанцию');
   try { applySnapshot(await API.call('/api/topup/receipt', { amount: v, method: 'card', receipt: tuReceipt })); }
   catch (e) { return toast(e.message); }
   tuReceipt = '';

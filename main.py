@@ -27,6 +27,7 @@ _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 APP_URL = os.getenv("APP_URL", "") or (f"https://{_railway_domain}" if _railway_domain else "")
 
 MAX_RECEIPT_LEN = 6_000_000  # ~4.5 МБ файла в base64
+CARD_LIMIT = 5000            # оплата картой — до 5 000 ₴, свыше только крипта
 
 
 def _receipt_ok(receipt: str) -> bool:
@@ -368,6 +369,9 @@ async def api_order(request: Request):
             receipt = str(b.get("receipt", ""))
             if not _receipt_ok(receipt):
                 raise ValueError("Приложите квитанцию об оплате (фото или PDF)")
+            total = await db.order_total(int(b["product_id"]), int(b["grams"]))
+            if total > CARD_LIMIT:
+                raise ValueError(f"Картой — до {CARD_LIMIT} ₴, такой заказ оплатите криптой")
             snap = await db.create_order(
                 u["id"], int(b["product_id"]), int(b["grams"]), "card", ship, receipt)
             await notify(ADMIN_ID,
@@ -407,6 +411,8 @@ async def api_topup_receipt(request: Request):
         raise HTTPException(400, "Неверная сумма")
     if b.get("method") != "card":
         raise HTTPException(400, "Квитанция — только для оплаты картой")
+    if amount > CARD_LIMIT:
+        raise HTTPException(400, f"Картой — до {CARD_LIMIT} ₴, для больших сумм используйте крипту")
     if not _receipt_ok(receipt):
         raise HTTPException(400, "Приложите квитанцию (фото или PDF)")
     tid = await db.topup_receipt(u["id"], amount, "card", receipt)
