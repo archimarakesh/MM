@@ -1,9 +1,15 @@
 """Magic Market — FastAPI (фронт + API + админка) + aiogram-бот в одном процессе (Railway)."""
 import asyncio
+import base64
+import io
 import logging
 import os
+import random
+import time
 from contextlib import asynccontextmanager
 
+import aiohttp
+import qrcode
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 
@@ -20,6 +26,124 @@ _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 APP_URL = os.getenv("APP_URL", "") or (f"https://{_railway_domain}" if _railway_domain else "")
 
 MAX_RECEIPT_LEN = 6_000_000  # ~4.5 МБ картинки в base64
+
+# ── криптовалюты для авто-счетов ─────────────────────────────────────────────
+USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+CRYPTO = {
+    "trc20": {"gecko": "tether", "label": "USDT TRC-20", "wallet_key": "wallet_trc20"},
+    "btc": {"gecko": "bitcoin", "label": "BTC", "wallet_key": "wallet_btc"},
+}
+_rates: dict = {"ts": 0.0, "data": {}}
+
+
+async def get_rates() -> dict:
+    """Курс UAH за 1 монету (CoinGecko, кэш 2 минуты)."""
+    if time.time() - _rates["ts"] < 120 and _rates["data"]:
+        return _rates["data"]
+    async with aiohttp.ClientSession() as s:
+        async with s.get("https://api.coingecko.com/api/v3/simple/price",
+                         params={"ids": "bitcoin,tether", "vs_currencies": "uah"},
+                         timeout=aiohttp.ClientTimeout(total=15)) as r:
+            data = await r.json()
+    _rates["data"] = {"btc": float(data["bitcoin"]["uah"]),
+                      "trc20": float(data["tether"]["uah"])}
+    _rates["ts"] = time.time()
+    return _rates["data"]
+
+
+async def crypto_amount(currency: str, uah: int) -> str:
+    """Сумма в крипте с уникальным «хвостом» — по ней распознаём платёж."""
+    rate = (await get_rates())[currency]
+    taken = await db.pending_amounts(currency)
+    for _ in range(80):
+        if currency == "trc20":
+            amt = f"{round(uah / rate, 2) + random.randint(1, 99) / 10000:.4f}"
+        else:
+            amt = f"{round(uah / rate, 8) + random.randint(10, 999) / 1e8:.8f}"
+        if amt not in taken:
+            return amt
+    raise ValueError("Не удалось создать счёт, попробуйте ещё раз")
+
+
+def qr_data_url(text: str) -> str:
+    img = qrcode.make(text, box_size=8, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def invoice_public(inv: dict, with_qr: bool = True) -> dict:
+    cur = inv["currency"]
+    payload = inv["address"] if cur == "trc20" else \
+        f"bitcoin:{inv['address']}?amount={inv['amount_crypto']}"
+    d = {"id": inv["id"], "currency": cur, "label": CRYPTO[cur]["label"],
+         "amount_uah": inv["amount_uah"], "amount_crypto": inv["amount_crypto"],
+         "address": inv["address"], "status": inv["status"],
+         "expires": inv["expires"].isoformat()}
+    if with_qr and inv["status"] == 0:
+        d["qr"] = qr_data_url(payload)
+    return d
+
+
+async def _check_invoice(s: aiohttp.ClientSession, inv: dict) -> str | None:
+    """Ищет входящий платёж с точной суммой. Возвращает txid или None."""
+    try:
+        if inv["currency"] == "trc20":
+            url = f"https://api.trongrid.io/v1/accounts/{inv['address']}/transactions/trc20"
+            params = {"only_to": "true", "limit": "50",
+                      "contract_address": USDT_CONTRACT,
+                      "min_timestamp": str(int(inv["created"].timestamp() * 1000) - 60000)}
+            async with s.get(url, params=params,
+                             timeout=aiohttp.ClientTimeout(total=15)) as r:
+                data = (await r.json()).get("data", [])
+            want = int(round(float(inv["amount_crypto"]) * 1e6))
+            for t in data:
+                if t.get("to") == inv["address"] and int(t.get("value", 0)) == want:
+                    return t.get("transaction_id", "ok")
+        else:  # btc
+            url = f"https://mempool.space/api/address/{inv['address']}/txs"
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                txs = await r.json()
+            want = int(round(float(inv["amount_crypto"]) * 1e8))
+            t0 = inv["created"].timestamp() - 3600
+            for tx in txs:
+                st = tx.get("status", {})
+                if not st.get("confirmed") or st.get("block_time", 0) < t0:
+                    continue
+                for v in tx.get("vout", []):
+                    if v.get("scriptpubkey_address") == inv["address"] and v.get("value") == want:
+                        return tx.get("txid", "ok")
+    except Exception:
+        log.warning("Проверка счёта #%s не удалась", inv["id"])
+    return None
+
+
+async def _settle(inv: dict, txid: str) -> bool:
+    res = await db.invoice_paid(inv["id"], txid)
+    if not res:
+        return False
+    await notify(res["user_id"],
+                 f"✅ Оплата получена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+    await notify(ADMIN_ID,
+                 f"₿ Крипто-оплата: счёт #{inv['id']}, +{res['amount']} ₴ "
+                 f"({inv['amount_crypto']} {CRYPTO[inv['currency']]['label']}).")
+    return True
+
+
+async def invoice_checker():
+    """Фоновая проверка неоплаченных счетов раз в минуту."""
+    while True:
+        try:
+            pend = await db.pending_invoices()
+            if pend:
+                async with aiohttp.ClientSession() as s:
+                    for inv in pend:
+                        txid = await _check_invoice(s, inv)
+                        if txid:
+                            await _settle(inv, txid)
+        except Exception:
+            log.exception("Ошибка проверщика счетов")
+        await asyncio.sleep(60)
 
 # ── бот ──────────────────────────────────────────────────────────────────────
 bot = dp = None
@@ -90,7 +214,9 @@ async def lifespan(_: FastAPI):
         log.info("Бот запущен (polling)")
     else:
         log.warning("BOT_TOKEN не задан — бот не запущен, API без авторизации не работает")
+    checker = asyncio.create_task(invoice_checker())
     yield
+    checker.cancel()
     if task:
         task.cancel()
 
@@ -126,6 +252,11 @@ async def index():
 @app.get("/logo.png")
 async def logo():
     return FileResponse("logo.png")
+
+
+@app.get("/logo.webp")
+async def logo_webp():
+    return FileResponse("logo.webp")
 
 
 # ── пользовательское API ─────────────────────────────────────────────────────
@@ -175,14 +306,61 @@ async def api_topup_receipt(request: Request):
     receipt = str(b.get("receipt", ""))
     if amount <= 0:
         raise HTTPException(400, "Неверная сумма")
+    if b.get("method") != "card":
+        raise HTTPException(400, "Квитанция — только для оплаты картой")
     if not receipt.startswith("data:image/") or len(receipt) > MAX_RECEIPT_LEN:
         raise HTTPException(400, "Приложите фото квитанции")
-    tid = await db.topup_receipt(u["id"], amount, str(b.get("method", "")), receipt)
+    tid = await db.topup_receipt(u["id"], amount, "card", receipt)
     await notify(ADMIN_ID,
                  f"💳 <b>Квитанция #{tid} на проверку</b>\n"
                  f"{u.get('first_name', '')} (@{u.get('username', '—')}) · "
                  f"{amount} ₴ · {b.get('method', '')}\nОткройте админку → Пополнения.")
     return await _snap(u["id"])
+
+
+@app.post("/api/invoice")
+async def api_invoice(request: Request):
+    u = tg_user(request)
+    b = await request.json()
+    amount = int(b.get("amount", 0))
+    cur = str(b.get("currency", ""))
+    if amount < 10:
+        raise HTTPException(400, "Минимальная сумма — 10 ₴")
+    if cur not in CRYPTO:
+        raise HTTPException(400, "Неизвестная валюта")
+    address = (await db.get_settings()).get(CRYPTO[cur]["wallet_key"], "")
+    if not address:
+        raise HTTPException(400, "Этот способ оплаты сейчас недоступен")
+    try:
+        amt = await crypto_amount(cur, amount)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        raise HTTPException(400, "Не удалось получить курс — попробуйте через минуту")
+    inv = await db.create_invoice(u["id"], amount, cur, amt, address)
+    return invoice_public(inv)
+
+
+@app.post("/api/invoice/active")
+async def api_invoice_active(request: Request):
+    u = tg_user(request)
+    inv = await db.active_invoice(u["id"])
+    return {"invoice": invoice_public(inv) if inv else None}
+
+
+@app.post("/api/invoice/status")
+async def api_invoice_status(request: Request):
+    u = tg_user(request)
+    b = await request.json()
+    inv = await db.invoice_get(int(b.get("id", 0)), u["id"])
+    if not inv:
+        raise HTTPException(404, "Счёт не найден")
+    if inv["status"] == 0:
+        async with aiohttp.ClientSession() as s:
+            txid = await _check_invoice(s, inv)
+        if txid and await _settle(inv, txid):
+            inv["status"] = 1
+    return {"status": inv["status"]}
 
 
 @app.post("/api/transfer/create")

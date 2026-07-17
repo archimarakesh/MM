@@ -25,7 +25,8 @@ SEED_PRODUCTS = [
     ("Silk Road", "Восточная коллекция", "🐫", "", 105),
 ]
 # ключи реквизитов оплаты в settings
-PAYMENT_KEYS = ["card_number", "card_holder", "wallet_trc20", "wallet_ton", "wallet_btc"]
+PAYMENT_KEYS = ["card_number", "card_holder", "wallet_trc20", "wallet_btc"]
+INVOICE_TTL = 30 * 60       # крипто-счёт живёт 30 минут
 
 _pool: asyncpg.Pool | None = None
 
@@ -80,6 +81,17 @@ async def init():
                 status  INT NOT NULL DEFAULT 0,
                 created TIMESTAMPTZ NOT NULL DEFAULT now(),
                 decided TIMESTAMPTZ);
+            CREATE TABLE IF NOT EXISTS invoices(
+                id            BIGSERIAL PRIMARY KEY,
+                user_id       BIGINT NOT NULL,
+                amount_uah    BIGINT NOT NULL,
+                currency      TEXT NOT NULL,
+                amount_crypto TEXT NOT NULL,
+                address       TEXT NOT NULL,
+                status        INT NOT NULL DEFAULT 0,
+                txid          TEXT,
+                created       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                expires       TIMESTAMPTZ NOT NULL);
             CREATE TABLE IF NOT EXISTS ratings(
                 order_id   BIGINT PRIMARY KEY,
                 user_id    BIGINT NOT NULL,
@@ -210,20 +222,29 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "ship": json.loads(r["ship"]) if r["ship"] else None,
         "stars": stars.get(r["id"]),
     } for r in rows]
-    pending = await c.fetch("""
-        SELECT amount, method, created FROM topups
-        WHERE user_id=$1 AND status=0 ORDER BY id DESC
-    """, tg_id)
     return {
         "balance": u["balance"], "ref_count": cnt, "ref_earned": u["ref_earned"],
         "orders": orders,
         "products": await get_products(conn=c),
         "payment": payment_public(await get_settings(conn=c)),
-        "topups_pending": [{
-            "amount": p["amount"], "method": p["method"],
-            "created": p["created"].isoformat(),
-        } for p in pending],
+        "payments": await payments_history(tg_id, c),
     }
+
+
+async def payments_history(tg_id: int, c) -> list:
+    """История пополнений: карта (ручная проверка) + крипто-счета."""
+    await c.execute("UPDATE invoices SET status=2 WHERE status=0 AND expires < now()")
+    tt = await c.fetch("""
+        SELECT amount, method, status, created FROM topups
+        WHERE user_id=$1 ORDER BY id DESC LIMIT 30
+    """, tg_id)
+    inv = await c.fetch("""
+        SELECT amount_uah AS amount, currency AS method, status, created FROM invoices
+        WHERE user_id=$1 ORDER BY id DESC LIMIT 30
+    """, tg_id)
+    rows = [{**dict(r), "kind": "card"} for r in tt] + [{**dict(r), "kind": "crypto"} for r in inv]
+    rows.sort(key=lambda r: r["created"], reverse=True)
+    return [{**r, "created": r["created"].isoformat()} for r in rows[:40]]
 
 
 # ── заказы ───────────────────────────────────────────────────────────────────
@@ -352,6 +373,67 @@ async def set_ttn(order_code: str, ttn: str) -> dict:
         return {"user_id": o["user_id"], "code": order_code, "ttn": ttn.strip()}
 
 
+# ── крипто-счета (автопроверка оплаты) ───────────────────────────────────────
+async def _expire_invoices(c):
+    await c.execute("UPDATE invoices SET status=2 WHERE status=0 AND expires < now()")
+
+
+async def pending_amounts(currency: str) -> set:
+    async with _pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT amount_crypto FROM invoices WHERE currency=$1 AND status=0", currency)
+    return {r["amount_crypto"] for r in rows}
+
+
+async def create_invoice(tg_id: int, amount_uah: int, currency: str,
+                         amount_crypto: str, address: str) -> dict:
+    async with _pool.acquire() as c:
+        # новый счёт отменяет прежний неоплаченный
+        await c.execute("UPDATE invoices SET status=2 WHERE user_id=$1 AND status=0", tg_id)
+        row = await c.fetchrow("""
+            INSERT INTO invoices(user_id, amount_uah, currency, amount_crypto, address, expires)
+            VALUES($1,$2,$3,$4,$5, now() + make_interval(secs => $6))
+            RETURNING *
+        """, tg_id, amount_uah, currency, amount_crypto, address, INVOICE_TTL)
+    return dict(row)
+
+
+async def active_invoice(tg_id: int) -> dict | None:
+    async with _pool.acquire() as c:
+        await _expire_invoices(c)
+        r = await c.fetchrow(
+            "SELECT * FROM invoices WHERE user_id=$1 AND status=0 ORDER BY id DESC LIMIT 1", tg_id)
+    return dict(r) if r else None
+
+
+async def invoice_get(inv_id: int, tg_id: int) -> dict | None:
+    async with _pool.acquire() as c:
+        await _expire_invoices(c)
+        r = await c.fetchrow(
+            "SELECT * FROM invoices WHERE id=$1 AND user_id=$2", inv_id, tg_id)
+    return dict(r) if r else None
+
+
+async def pending_invoices() -> list:
+    async with _pool.acquire() as c:
+        await _expire_invoices(c)
+        rows = await c.fetch("SELECT * FROM invoices WHERE status=0 ORDER BY id LIMIT 100")
+    return [dict(r) for r in rows]
+
+
+async def invoice_paid(inv_id: int, txid: str) -> dict | None:
+    """Помечает счёт оплаченным и зачисляет баланс. None — уже обработан."""
+    async with _pool.acquire() as c, c.transaction():
+        inv = await c.fetchrow(
+            "SELECT * FROM invoices WHERE id=$1 AND status=0 FOR UPDATE", inv_id)
+        if not inv:
+            return None
+        await c.execute("UPDATE invoices SET status=1, txid=$2 WHERE id=$1", inv_id, txid)
+        await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                        inv["amount_uah"], inv["user_id"])
+        return {"user_id": inv["user_id"], "amount": inv["amount_uah"]}
+
+
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
 async def transfer_create(tg_id: int) -> str:
     code = secrets.token_hex(3).upper()
@@ -376,6 +458,7 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         """, old["balance"], old["ref_earned"], new_id)
         await c.execute("UPDATE orders SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE topups SET user_id=$1 WHERE user_id=$2", new_id, old_id)
+        await c.execute("UPDATE invoices SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE ratings SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2", new_id, old_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", old_id)

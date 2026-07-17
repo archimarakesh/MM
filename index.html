@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preload" href="logo.webp" as="image">
 <style>
 :root{
   --bg:#050505;
@@ -332,7 +333,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 
 <!-- экран блокировки -->
 <div id="lock">
-  <img src="logo.png" alt="" style="width:132px">
+  <img src="logo.webp" alt="" style="width:132px">
   <div style="margin:18px 0 5vh;font-size:15px;font-weight:700;letter-spacing:.34em;text-indent:.34em;text-transform:uppercase;text-align:center"><span class="w-magic">Magic</span> <span class="w-market">Market</span></div>
   <div class="pin-title" id="lockTitle">Введите пин-код</div>
   <div class="pin-dots" id="lockDots"></div>
@@ -342,11 +343,11 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 <div id="app">
   <header>
     <div class="brand">
-      <img src="logo.png" alt="" style="height:36px;width:auto">
+      <img src="logo.webp" alt="" style="height:36px;width:auto">
       <div class="brand-name"><span class="w-magic">Magic</span> <span class="w-market">Market</span></div>
     </div>
     <div class="hdr-right">
-      <div class="balance-chip" onclick="openSheet('topup')">
+      <div class="balance-chip" onclick="go('topup')">
         <div class="coin"></div><b id="hdrBalance">0 ₴</b>
       </div>
       <div class="icon-btn" onclick="openSheet('settings')" aria-label="Настройки">
@@ -385,7 +386,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
         <div class="b-label">Баланс кошелька</div>
         <div class="b-sum"><span id="profBalance">0</span> <small>₴</small></div>
         <div class="balance-actions">
-          <button class="btn btn-gold" onclick="openSheet('topup')">Пополнить
+          <button class="btn btn-gold" onclick="go('topup')">Пополнить
             <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
           </button>
           <button class="btn btn-ghost" onclick="go('history')">История</button>
@@ -410,6 +411,22 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
         </button>
       </div>
     </div>
+  </section>
+
+  <!-- ══ ПОПОЛНЕНИЕ ══ -->
+  <section class="view" id="view-topup">
+    <div style="display:flex;align-items:center;gap:12px;margin:8px 0 16px">
+      <div class="icon-btn" onclick="go('profile')" aria-label="Назад">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </div>
+      <h1 class="page-title" style="margin:0;font-size:22px">Пополнение баланса</h1>
+    </div>
+    <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="500"></div>
+    <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
+    <div id="tuBody"></div>
+    <div class="section-head"><h2>История оплат</h2></div>
+    <div id="payHistory"></div>
+    <input type="file" id="tuFile" accept="image/*" style="display:none">
   </section>
 
   <!-- ══ ПОДДЕРЖКА ══ -->
@@ -476,20 +493,6 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div id="orderBody"></div>
 </div>
 
-<div class="sheet" id="sheet-topup">
-  <div class="sheet-grip"></div>
-  <h2>Пополнение баланса</h2>
-  <p class="sheet-sub">Переведите сумму по реквизитам, приложите фото квитанции — зачислим после проверки.</p>
-  <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="500"></div>
-  <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
-  <div id="tuReq"></div>
-  <div id="tuAttach"></div>
-  <button class="btn btn-gold" onclick="topUp()">Отправить
-    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
-  </button>
-  <div id="tuPending"></div>
-  <input type="file" id="tuFile" accept="image/*" style="display:none">
-</div>
 
 <div class="sheet" id="sheet-settings">
   <div class="sheet-grip"></div>
@@ -656,7 +659,7 @@ const API = {
 function applySnapshot(d) {
   S.balance = d.balance; S.orders = d.orders;
   S.refCount = d.ref_count; S.refEarned = d.ref_earned;
-  S.topupsPending = d.topups_pending || [];
+  S.payments = d.payments || [];
   if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
   if (d.payment) PAY = d.payment;
   if ('is_admin' in d) {
@@ -680,6 +683,7 @@ function go(v) {
   document.getElementById('view-' + v).classList.add('active');
   document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.v === v));
   if (v === 'history') renderOrders();
+  if (v === 'topup') renderTopup();
   window.scrollTo({ top: 0 });
   requestAnimationFrame(observeReveals);
 }
@@ -691,7 +695,6 @@ function openSheet(name) {
   document.getElementById('veil').classList.add('open');
   document.getElementById('sheet-' + name).classList.add('open');
   if (name === 'settings') syncSettings();
-  if (name === 'topup') renderTopup();
 }
 function closeSheets(silent) {
   if (!silent) haptic('soft');
@@ -875,43 +878,124 @@ function syncBalance() {
   document.getElementById('refCount').textContent = S.refCount;
   document.getElementById('refEarned').textContent = fmt(S.refEarned) + ' ₴';
 }
-let tuMethod = '', tuReceipt = '';
+let tuMethod = '', tuReceipt = '', INV = null, invTimer = null, invPoll = null;
+const TU_ST_CARD = ['⏳ Проверяется', '✅ Зачислено', '❌ Отклонено'];
+const TU_ST_CRYPTO = ['⏳ Ожидает оплаты', '✅ Зачислено', '⌛ Истёк'];
+const TU_LABELS = { card: 'Карта', trc20: 'USDT TRC-20', btc: 'BTC', demo: 'Демо' };
 function tuOptions() {
-  if (!API.ok) return [{ key: 'demo', label: 'Демо-зачисление', req: '' }];
+  if (!API.ok) return [{ key: 'demo', label: 'Демо-зачисление' }];
   const o = [];
-  if (PAY.card_number) o.push({ key: 'card', label: 'Карта',
-    req: PAY.card_number + (PAY.card_holder ? '\n' + PAY.card_holder : '') });
-  if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20', req: PAY.wallet_trc20 });
-  if (PAY.wallet_ton) o.push({ key: 'ton', label: 'TON', req: PAY.wallet_ton });
-  if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC', req: PAY.wallet_btc });
+  if (PAY.card_number) o.push({ key: 'card', label: 'Карта' });
+  if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20' });
+  if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC' });
   return o;
 }
-function renderTopup() {
+async function renderTopup() {
   const opts = tuOptions();
   if (!opts.find(o => o.key === tuMethod)) tuMethod = opts[0]?.key || '';
   document.getElementById('tuMethods').innerHTML = opts.length
     ? opts.map(o => `<div class="wchip ${o.key === tuMethod ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('')
     : '<p class="note" style="margin:0">Способы оплаты пока не настроены — загляните позже.</p>';
-  const cur = opts.find(o => o.key === tuMethod);
-  document.getElementById('tuReq').innerHTML = cur?.req ? `
-    <div class="ref-link" style="margin-bottom:12px" onclick="copyReq()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-      <span id="tuReqText" style="white-space:pre-line">${cur.req}</span>
-    </div>` : '';
-  document.getElementById('tuAttach').innerHTML = API.ok ? `
-    <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('tuFile').click()">
-      ${tuReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
-    ${tuReceipt ? `<img src="${tuReceipt}" style="width:100%;border-radius:14px;margin-bottom:12px;border:1px solid var(--line)">` : ''}` : '';
-  const pend = S.topupsPending || [];
-  document.getElementById('tuPending').innerHTML = pend.length ? `
-    <div class="hr"></div>
-    ${pend.map(t => `<p class="note" style="margin-top:4px">⏳ На проверке: <b style="color:var(--txt)">${fmt(t.amount)} ₴</b> · ${new Date(t.created).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>`).join('')}` : '';
+  renderTuBody();
+  renderPayHistory();
+  if (API.ok && INV === null) {
+    /* восстановить активный счёт после переоткрытия */
+    try { INV = (await API.call('/api/invoice/active')).invoice || false; }
+    catch (e) { INV = false; }
+    if (INV && INV.status === 0) { tuMethod = INV.currency; renderTopup(); startInvPoll(); }
+  }
 }
-function tuSel(k) { haptic('light'); tuMethod = k; renderTopup(); }
-function copyReq() {
-  navigator.clipboard?.writeText(document.getElementById('tuReqText').textContent);
-  haptic('medium'); toast('Реквизиты скопированы');
+function tuSel(k) { haptic('light'); tuMethod = k; renderTuBody(); renderTopupChips(); }
+function renderTopupChips() {
+  const opts = tuOptions();
+  document.getElementById('tuMethods').innerHTML =
+    opts.map(o => `<div class="wchip ${o.key === tuMethod ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('');
 }
+function renderTuBody() {
+  const b = document.getElementById('tuBody');
+  clearInterval(invTimer);
+  if (!API.ok) {
+    b.innerHTML = `<button class="btn btn-gold" onclick="topUpDemo()">Пополнить (демо)</button>`;
+    return;
+  }
+  if (tuMethod === 'card') {
+    const req = (PAY.card_number || '') + (PAY.card_holder ? '\n' + PAY.card_holder : '');
+    b.innerHTML = `
+      <div class="ref-link" style="margin-bottom:12px" onclick="copyText(this.querySelector('span').textContent)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span style="white-space:pre-line">${req}</span>
+      </div>
+      <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('tuFile').click()">
+        ${tuReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
+      ${tuReceipt ? `<img src="${tuReceipt}" style="width:100%;border-radius:14px;margin-bottom:12px;border:1px solid var(--line)">` : ''}
+      <button class="btn btn-gold" onclick="submitCard()">Отправить на проверку
+        <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+      </button>
+      <p class="note">Переведите сумму на карту и приложите фото квитанции — зачислим после ручной проверки.</p>`;
+  } else if (tuMethod === 'trc20' || tuMethod === 'btc') {
+    if (INV && INV.status === 0 && INV.currency === tuMethod) renderInvoice(b);
+    else b.innerHTML = `
+      <p class="note" style="margin:0 0 12px">Счёт действует 30 минут: получите адрес и точную сумму в крипте по текущему курсу, оплатите — баланс пополнится автоматически после подтверждения сети.</p>
+      <button class="btn btn-gold" onclick="createInvoice()">Создать счёт
+        <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+      </button>`;
+  } else b.innerHTML = '';
+}
+function renderInvoice(b) {
+  b.innerHTML = `
+    <div class="bezel gold"><div class="bezel-core" style="text-align:center;padding:18px">
+      <img src="${INV.qr}" alt="QR" style="width:180px;border-radius:14px;background:#fff;padding:6px">
+      <div style="font-size:21px;font-weight:800;color:var(--gold-soft);margin:12px 0 2px;cursor:pointer" onclick="copyText('${INV.amount_crypto}')">${INV.amount_crypto} <span style="font-size:13px">${INV.label}</span></div>
+      <p class="note" style="margin:0 0 12px">Переведите ровно эту сумму — по ней распознаём ваш платёж. Нажмите, чтобы скопировать.</p>
+      <div class="ref-link" onclick="copyText('${INV.address}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span style="word-break:break-all">${INV.address}</span>
+      </div>
+      <div style="margin-top:12px;font-size:13px;color:var(--muted)">Счёт на <b style="color:var(--txt)">${fmt(INV.amount_uah)} ₴</b> · осталось <b id="invLeft" style="color:var(--gold-soft)">—</b></div>
+      <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <button class="btn btn-ghost" style="padding:12px" onclick="cancelInvoiceUi()">Новый счёт</button>
+        <button class="btn btn-gold" style="padding:12px" onclick="checkInvoice(true)">Проверить</button>
+      </div>
+    </div></div>
+    <p class="note">Зачисление автоматическое: USDT — обычно до минуты, BTC — после подтверждения сети (~10–30 мин).</p>`;
+  const tick = () => {
+    const left = Math.max(0, new Date(INV.expires) - Date.now());
+    const m = Math.floor(left / 60000), s = Math.floor(left % 60000 / 1000);
+    const el = document.getElementById('invLeft');
+    if (el) el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    if (!left) { clearInterval(invTimer); INV = false; renderTuBody(); serverSync(); }
+  };
+  tick(); invTimer = setInterval(tick, 1000);
+}
+async function createInvoice() {
+  const v = parseInt(document.getElementById('tuSum').value, 10);
+  if (!v || v < 10) return toast('Укажите сумму от 10 ₴');
+  try { INV = await API.call('/api/invoice', { amount: v, currency: tuMethod }); }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); renderTuBody(); startInvPoll();
+}
+function startInvPoll() {
+  clearInterval(invPoll);
+  invPoll = setInterval(() => checkInvoice(false), 20000);
+}
+async function checkInvoice(manual) {
+  if (!INV || INV.status !== 0) { clearInterval(invPoll); return; }
+  try {
+    const r = await API.call('/api/invoice/status', { id: INV.id });
+    if (r.status === 1) {
+      INV = false; clearInterval(invPoll);
+      await serverSync();
+      if (document.getElementById('view-topup').classList.contains('active')) renderTopup();
+      haptic('medium'); toast('Оплата получена — баланс пополнен ✅');
+    } else if (r.status === 2) {
+      INV = false; renderTuBody();
+    } else if (manual) {
+      toast('Платёж пока не найден — сеть подтверждает до 30 минут');
+    }
+  } catch (e) { if (manual) toast(e.message); }
+}
+function cancelInvoiceUi() { INV = false; clearInterval(invPoll); renderTuBody(); }
+function copyText(t) { navigator.clipboard?.writeText(t); haptic('medium'); toast('Скопировано'); }
 document.getElementById('tuFile').addEventListener('change', e => {
   const f = e.target.files[0];
   if (!f) return;
@@ -923,30 +1007,40 @@ document.getElementById('tuFile').addEventListener('change', e => {
     cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
     tuReceipt = cv.toDataURL('image/jpeg', 0.8);
     URL.revokeObjectURL(img.src);
-    renderTopup();
+    renderTuBody();
   };
   img.src = URL.createObjectURL(f);
   e.target.value = '';
 });
-async function topUp() {
+async function submitCard() {
   const v = parseInt(document.getElementById('tuSum').value, 10);
   if (!v || v <= 0) return toast('Укажите сумму');
-  if (API.ok) {
-    if (!tuMethod) return toast('Способы оплаты пока не настроены');
-    if (!tuReceipt) return toast('Приложите фото квитанции');
-    try { applySnapshot(await API.call('/api/topup/receipt', { amount: v, method: tuMethod, receipt: tuReceipt })); }
-    catch (e) { return toast(e.message); }
-    tuReceipt = '';
-    document.getElementById('tuSum').value = '';
-    closeSheets(true); haptic('medium');
-    toast('Квитанция отправлена на проверку ⏳');
-  } else {
-    /* демо-режим без сервера */
-    S.balance += v; save(); syncBalance();
-    document.getElementById('tuSum').value = '';
-    closeSheets(true); haptic('medium');
-    toast(`Баланс пополнен на ${fmt(v)} ₴`);
-  }
+  if (!tuReceipt) return toast('Приложите фото квитанции');
+  try { applySnapshot(await API.call('/api/topup/receipt', { amount: v, method: 'card', receipt: tuReceipt })); }
+  catch (e) { return toast(e.message); }
+  tuReceipt = '';
+  document.getElementById('tuSum').value = '';
+  haptic('medium'); toast('Квитанция отправлена на проверку ⏳');
+  renderTuBody(); renderPayHistory();
+}
+function topUpDemo() {
+  const v = parseInt(document.getElementById('tuSum').value, 10);
+  if (!v || v <= 0) return toast('Укажите сумму');
+  S.balance += v; save(); syncBalance();
+  document.getElementById('tuSum').value = '';
+  haptic('medium'); toast(`Баланс пополнен на ${fmt(v)} ₴`);
+}
+function renderPayHistory() {
+  const el = document.getElementById('payHistory');
+  const pays = S.payments || [];
+  el.innerHTML = pays.length ? pays.map(p => {
+    const st = (p.kind === 'card' ? TU_ST_CARD : TU_ST_CRYPTO)[p.status] || '';
+    return `<div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 15px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div><b style="font-size:14px">${fmt(p.amount)} ₴</b>
+        <div style="font-size:11px;color:var(--muted-2);margin-top:2px">${TU_LABELS[p.method] || p.method} · ${new Date(p.created).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>
+      <span style="font-size:11.5px;font-weight:600;white-space:nowrap">${st}</span>
+    </div></div>`;
+  }).join('') : '<div class="empty" style="padding:24px"><p>Пополнений пока не было</p></div>';
 }
 
 /* ═══════════ Профиль / рефералка ═══════════ */
@@ -1081,7 +1175,6 @@ function renderAdmin(tab) {
       <div class="field"><label>Номер карты</label><input id="payCard" value="${s.card_number || ''}" placeholder="0000 0000 0000 0000"></div>
       <div class="field"><label>Получатель (для карты)</label><input id="payHolder" value="${s.card_holder || ''}" placeholder="Иван И."></div>
       <div class="field"><label>Кошелёк USDT TRC-20</label><input id="payTrc" value="${s.wallet_trc20 || ''}" placeholder="T..."></div>
-      <div class="field"><label>Кошелёк TON</label><input id="payTon" value="${s.wallet_ton || ''}" placeholder="UQ..."></div>
       <div class="field"><label>Кошелёк BTC</label><input id="payBtc" value="${s.wallet_btc || ''}" placeholder="bc1..."></div>
       <button class="btn btn-gold" onclick="savePay()">Сохранить реквизиты</button>`;
   }
@@ -1159,7 +1252,6 @@ async function savePay() {
       card_number: document.getElementById('payCard').value,
       card_holder: document.getElementById('payHolder').value,
       wallet_trc20: document.getElementById('payTrc').value,
-      wallet_ton: document.getElementById('payTon').value,
       wallet_btc: document.getElementById('payBtc').value,
     })).settings;
     PAY = Object.fromEntries(Object.entries(AD.settings).filter(([, v]) => v));

@@ -2,3 +2,6 @@ fastapi
 uvicorn
 aiogram>=3.7
 asyncpg
+aiohttp
+qrcode
+Pillow
