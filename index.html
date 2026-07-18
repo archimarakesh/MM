@@ -659,8 +659,8 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div class="field"><label>Описание</label><input id="geSub" placeholder="Сортовая роза, теплица"></div>
   <div class="field"><label>Фото</label><div id="gePhoto"></div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-    <div class="field"><label>Цена куста (100%), ₴</label><input id="gePrice" inputmode="numeric" placeholder="1000"></div>
-    <div class="field"><label>Кол-во кустов</label><input id="geSlots" inputmode="numeric" placeholder="пусто — без лимита"></div>
+    <div class="field"><label>Цена куста (100%), ₴</label><input id="gePrice" inputmode="numeric" placeholder="10000"></div>
+    <div class="field"><label>Кол-во кустов</label><input id="geSlots" inputmode="numeric" placeholder="например 96"></div>
   </div>
   <div class="field"><label>Стадии · дни и % входа</label><div id="geStages"></div></div>
   <div class="field" id="geStageCtl" style="display:none">
@@ -1410,8 +1410,8 @@ const STAGE_META = [
   ['🌸', 'Предцвет'], ['🌹', 'Цветение'], ['🧺', 'Сбор урожая'],
 ];
 const DEFAULT_STAGES = [
-  { d: 5, p: 35 }, { d: 7, p: 30 }, { d: 14, p: 25 },
-  { d: 7, p: 20 }, { d: 10, p: 10 }, { d: 3, p: 0 },
+  { d: 7, p: 35 }, { d: 14, p: 28 }, { d: 45, p: 22 },
+  { d: 20, p: 15 }, { d: 28, p: 8 }, { d: 14, p: 0 },
 ];
 const selPct = {}; // выбранная доля по программе
 const planStages = p => (p.stages && p.stages.length === 6) ? p.stages : DEFAULT_STAGES;
