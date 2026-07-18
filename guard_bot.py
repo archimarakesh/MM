@@ -16,6 +16,8 @@ import asyncio
 import html
 import logging
 import os
+import re
+import time
 from datetime import datetime, timedelta, timezone
 
 logging.basicConfig(level=logging.INFO)
@@ -40,11 +42,79 @@ RULES_TEXT = (
     "Нажимая кнопку ниже, вы подтверждаете согласие с правилами."
 )
 
-_pending: dict = {}  # (chat_id, user_id) -> asyncio.Task
+_pending: dict = {}  # (chat_id, user_id) -> asyncio.Task (капча-таймер)
+
+# ── автомодерация: конфиг ────────────────────────────────────────────────────
+WARN_EXPIRE = 24 * 3600        # предупреждения сгорают через 1 день
+WARN_MUTE_AT = 3              # 3 предупреждения → мут
+MUTE_MINUTES = 60            # мут за предел предупреждений
+LINK_BAN_AT = 2              # 2-е нарушение по ссылкам → бан
+FLOOD_MAX = 5                # больше 5 сообщений...
+FLOOD_WINDOW = 7            # ...за 7 секунд → флуд
+CAPS_MIN_LEN = 10
+CAPS_RATIO = 0.7
+EMOJI_MAX = 10
+STICKER_MAX = 3              # 4-й стикер подряд — нарушение
+TEMP_MSG_TTL = 15           # авто-удаление предупреждений в чате, сек
+
+# наши ссылки/юзернеймы — не наказываются
+WHITELIST = ("magic_marketplace_bot", "magicmarket_boss",
+             "hjlpbvv65kq0yjay", "0_b77etkgvpizgy6")
+
+# состояние в памяти (сбрасывается при рестарте — мягко в пользу юзеров)
+_warns: dict = {}       # key -> [метки времени] общий счётчик
+_link_strikes: dict = {}  # key -> [метки времени] ссылки/реклама
+_msg_times: dict = {}   # key -> [метки времени] для флуда
+_stickers: dict = {}    # key -> счётчик подряд идущих стикеров
+
+_EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF"
+    "\U0001F1E6-\U0001F1FF\U00002190-\U000021FF\U00002B00-\U00002BFF\U0000FE00-\U0000FE0F\U00002700-\U000027BF]")
+_LINK_RE = re.compile(
+    r"(?:https?://|www\.|t\.me/|telegram\.me/)\S+"
+    r"|@\w{4,}"
+    r"|\b[\w-]+\.(?:com|net|org|ru|ua|io|me|xyz|top|shop|site|online|info|biz|link|click)\b",
+    re.I)
+# матные корни и явные оскорбления (рус/укр) — базовый список, ловит очевидное
+_BAD_RE = re.compile(
+    r"(ху[йяеё]|пизд|бля[дт]ь?|\bбля\b|еб[аеёу]|ёб|уеб|уёб|заеб|наеб|въеб|отъеб|разъеб"
+    r"|сук[аиуе]\b|сученьк|мудак|муд[ао]з|манда\b|залуп|гандон|гондон|пид[ао]р|педик"
+    r"|долбоёб|долбоеб|дебил|дегенерат|ублюдок|уёбок|уебок|мраз[ьи]|чмо\b|курв[аи]"
+    r"|придур|дол?боящер|шлюх|потаскух)",
+    re.I)
 
 
 def _esc(s) -> str:
     return html.escape(str(s or ""))
+
+
+def _prune(lst, window):
+    now = time.time()
+    return [t for t in lst if now - t < window]
+
+
+def has_profanity(text: str) -> bool:
+    return bool(text) and bool(_BAD_RE.search(text))
+
+
+def bad_link(text: str) -> bool:
+    for tok in _LINK_RE.findall(text or ""):
+        tl = tok.lower()
+        if not any(w in tl for w in WHITELIST):
+            return True
+    return False
+
+
+def is_caps(text: str) -> bool:
+    letters = [c for c in (text or "") if c.isalpha()]
+    if len(letters) < CAPS_MIN_LEN:
+        return False
+    up = sum(1 for c in letters if c.isupper())
+    return up / len(letters) >= CAPS_RATIO
+
+
+def emoji_count(text: str) -> int:
+    return len(_EMOJI_RE.findall(text or ""))
 
 
 def _now() -> str:
@@ -306,6 +376,141 @@ async def run():
     @dp.message(Command("chatid"))
     async def cmd_chatid(message: Message):
         await message.answer(f"ID этого чата: <code>{message.chat.id}</code>", parse_mode="HTML")
+
+    # ── автомодерация ─────────────────────────────────────────────────────────
+    async def send_temp(chat_id: int, text: str):
+        """Короткое предупреждение в чат с авто-удалением."""
+        try:
+            m = await bot.send_message(chat_id, text, parse_mode="HTML")
+        except Exception:
+            return
+
+        async def _rm():
+            await asyncio.sleep(TEMP_MSG_TTL)
+            try:
+                await bot.delete_message(chat_id, m.message_id)
+            except Exception:
+                pass
+        asyncio.create_task(_rm())
+
+    async def add_warn(message, target_name, reason):
+        """Общий счётчик: 3 предупреждения → мут. Возвращает None."""
+        key = (message.chat.id, message.from_user.id)
+        lst = _prune(_warns.get(key, []), WARN_EXPIRE)
+        lst.append(time.time())
+        _warns[key] = lst
+        n = len(lst)
+        uid, name = message.from_user.id, target_name
+        if n >= WARN_MUTE_AT:
+            _warns[key] = []
+            until = datetime.now(timezone.utc) + timedelta(minutes=MUTE_MINUTES)
+            try:
+                await bot.restrict_chat_member(message.chat.id, uid, permissions=MUTED, until_date=until)
+            except Exception:
+                pass
+            await send_temp(message.chat.id,
+                            f"🔇 <b>{_esc(name)}</b> получает мут на {MUTE_MINUTES} мин — "
+                            f"предел предупреждений ({_esc(reason)}).")
+            await log_action("🔇", f"Мут {MUTE_MINUTES} мин (авто)", message.chat,
+                             "автомодерация", name, uid, reason)
+        else:
+            await send_temp(message.chat.id,
+                            f"⚠️ <b>{_esc(name)}</b>, предупреждение {n}/{WARN_MUTE_AT} — {_esc(reason)}.")
+            await log_action("⚠️", f"Предупреждение {n}/{WARN_MUTE_AT} (авто)", message.chat,
+                             "автомодерация", name, uid, reason)
+
+    @dp.message()
+    async def moderate(message: Message):
+        if message.chat.type == "private":
+            return
+        if RULES_CHAT_ID and str(message.chat.id) != str(RULES_CHAT_ID):
+            return
+        if not message.from_user or message.sender_chat or message.from_user.is_bot:
+            return  # каналы/анонимные админы/боты не модерируем
+        uid = message.from_user.id
+        if await is_admin(message.chat.id, uid):
+            return
+        key = (message.chat.id, uid)
+        name = message.from_user.full_name
+
+        # спам стикерами: до 3 подряд, 4-й — нарушение
+        if message.sticker:
+            streak = _stickers.get(key, 0) + 1
+            _stickers[key] = streak
+            if streak > STICKER_MAX:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                await add_warn(message, name, "спам стикерами")
+            return
+        _stickers[key] = 0
+
+        text = message.text or message.caption or ""
+
+        # реклама/ссылки — отдельный 2-страйк → бан
+        if bad_link(text):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            lst = _prune(_link_strikes.get(key, []), WARN_EXPIRE)
+            lst.append(time.time())
+            _link_strikes[key] = lst
+            if len(lst) >= LINK_BAN_AT:
+                try:
+                    await bot.ban_chat_member(message.chat.id, uid)
+                except Exception:
+                    pass
+                await send_temp(message.chat.id,
+                                f"🚫 <b>{_esc(name)}</b> забанен(а) за рекламу/ссылки (повторно).")
+                await log_action("🚫", "Бан (реклама/ссылки, авто)", message.chat,
+                                 "автомодерация", name, uid, "реклама/ссылки, 2-е нарушение")
+            else:
+                await send_temp(message.chat.id,
+                                f"⚠️ <b>{_esc(name)}</b>, ссылки и реклама запрещены — сообщение удалено. "
+                                "Повтор — бан.")
+                await log_action("🔗", "Удаление (реклама/ссылки, авто)", message.chat,
+                                 "автомодерация", name, uid, "реклама/ссылки, 1-е предупреждение")
+            return
+
+        # мат/оскорбления
+        if has_profanity(text):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await add_warn(message, name, "мат/оскорбления")
+            return
+
+        # капс
+        if is_caps(text):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await add_warn(message, name, "капс")
+            return
+
+        # эмодзи-спам
+        if emoji_count(text) > EMOJI_MAX:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await add_warn(message, name, "эмодзи-спам")
+            return
+
+        # флуд
+        times = _prune(_msg_times.get(key, []), FLOOD_WINDOW)
+        times.append(time.time())
+        _msg_times[key] = times
+        if len(times) > FLOOD_MAX:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await add_warn(message, name, "флуд")
 
     log.info("Guard-бот запущен. RULES_CHAT_ID=%r, ADMIN=%s, таймаут=%s c",
              RULES_CHAT_ID, GUARD_ADMIN_ID, RULES_TIMEOUT)
