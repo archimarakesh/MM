@@ -402,7 +402,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <section class="view" id="view-egrow">
     <div class="eyebrow">Craudfarming</div>
     <h1 class="page-title">E-growing</h1>
-    <p class="page-sub">Посадите куст на старте, следите за цветением<br>и получите доход по завершении цикла.</p>
+    <p class="page-sub">Купите долю куста — чем раньше стадия, тем выше доходность.<br>Выплата после сбора урожая.</p>
     <div id="myGrows"></div>
     <div class="section-head"><h2>Программы выращивания</h2></div>
     <div id="growPlans"></div>
@@ -654,17 +654,20 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 <div class="sheet" id="sheet-gedit">
   <div class="sheet-grip"></div>
   <h2 id="geTitle">Программа выращивания</h2>
-  <p class="sheet-sub">Куст, который клиент «сажает» на старте и по завершении цикла получает выплату.</p>
+  <p class="sheet-sub">Клиенты покупают доли куста (кратно 10%). Чем раньше стадия входа — тем выше доходность. Цикл стартует с момента создания программы; выплаты — когда закончится стадия сбора урожая.</p>
   <div class="field"><label>Название</label><input id="geName" placeholder="Роза Premium"></div>
   <div class="field"><label>Описание</label><input id="geSub" placeholder="Сортовая роза, теплица"></div>
   <div class="field"><label>Фото</label><div id="gePhoto"></div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-    <div class="field"><label>Цена входа, ₴</label><input id="gePrice" inputmode="numeric" placeholder="1000"></div>
-    <div class="field"><label>Выплата в конце, ₴</label><input id="gePayout" inputmode="numeric" placeholder="1500"></div>
-    <div class="field"><label>Цикл, дней</label><input id="geDays" inputmode="numeric" placeholder="30"></div>
-    <div class="field"><label>Цветение, дней</label><input id="geBloom" inputmode="numeric" placeholder="10"></div>
+    <div class="field"><label>Цена куста (100%), ₴</label><input id="gePrice" inputmode="numeric" placeholder="1000"></div>
+    <div class="field"><label>Кол-во кустов</label><input id="geSlots" inputmode="numeric" placeholder="пусто — без лимита"></div>
   </div>
-  <div class="field"><label>Кол-во кустов (мест)</label><input id="geSlots" inputmode="numeric" placeholder="пусто — без лимита"></div>
+  <div class="field"><label>Стадии · дни и % входа</label><div id="geStages"></div></div>
+  <div class="field" id="geStageCtl" style="display:none">
+    <label>Текущая стадия · ручное переключение</label>
+    <div class="weight-chips" id="geStageChips" style="margin:0"></div>
+    <button class="btn btn-ghost" id="geFinishBtn" style="margin-top:10px;color:var(--ok)" onclick="finishGrow()">🧺 Завершить сбор и выплатить всем</button>
+  </div>
   <div class="pay-opts" style="grid-template-columns:1fr">
     <div class="pay-opt" id="geActive" onclick="geToggleActive()">Программа активна<small>показывается в E-growing</small></div>
   </div>
@@ -771,7 +774,7 @@ function applySnapshot(d) {
   if (d.ref_percent) S.refPercent = d.ref_percent;
   if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
   if (d.grow_plans) PLANS = d.grow_plans.map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
-  if (d.grows) GROWS = d.grows;
+  if (d.shares) SHARES = d.shares;
   if (document.getElementById('view-egrow').classList.contains('active')) renderEgrow();
   if (d.payment) PAY = d.payment;
   if ('is_admin' in d) {
@@ -865,7 +868,7 @@ function priceFor(p, g) { return Math.round(p.base * tierFor(p, g).k * g); }
 function tierLabel(ts, i) { return i < ts.length - 1 ? `${ts[i].from}–${ts[i + 1].from - 1} г` : `${ts[i].from} г+`; }
 const goodsList = () => P || PRODUCTS;
 const ADMIN_CHAT = 'https://t.me/magicmarket_boss';
-let GROWS = [], PLANS = [];   // мои кусты и программы выращивания
+let SHARES = [], PLANS = [];   // мои доли и программы выращивания
 const GROW_GRADS = [
   'linear-gradient(140deg,#3a1224,#1c0610)', 'linear-gradient(140deg,#2e1a08,#160c04)',
   'linear-gradient(140deg,#123a1e,#06160c)', 'linear-gradient(140deg,#2a1236,#140620)',
@@ -1402,91 +1405,128 @@ function shareRef() {
 
 /* ═══════════ E-growing ═══════════ */
 const DAY = 86400000;
-function growStage(g) {
-  const start = new Date(g.started).getTime();
-  const end = new Date(g.ends).getTime();
-  const now = Date.now();
-  if (g.status === 1) return { key: 'done', label: 'Завершён', prog: 100, daysLeft: 0 };
-  const total = Math.max(1, end - start);
-  const prog = Math.min(100, Math.max(0, Math.round((now - start) / total * 100)));
-  const daysLeft = Math.max(0, Math.ceil((end - now) / DAY));
-  const bloomStart = end - (g.bloom_days || 0) * DAY;
-  let key = 'grow', label = 'Рост 🌿';
-  if (now - start < DAY) { key = 'plant'; label = 'Посадка 🌱'; }
-  else if (g.bloom_days && now >= bloomStart && now < end) { key = 'bloom'; label = 'Цветение 🌹'; }
-  else if (now >= end) { key = 'harvest'; label = 'Сбор урожая 🧺'; }
-  return { key, label, prog, daysLeft };
+const STAGE_META = [
+  ['🌰', 'Семечко'], ['🌱', 'Саженец'], ['🌿', 'Вегетативная'],
+  ['🌸', 'Предцвет'], ['🌹', 'Цветение'], ['🧺', 'Сбор урожая'],
+];
+const DEFAULT_STAGES = [
+  { d: 5, p: 35 }, { d: 7, p: 30 }, { d: 14, p: 25 },
+  { d: 7, p: 20 }, { d: 10, p: 10 }, { d: 3, p: 0 },
+];
+const selPct = {}; // выбранная доля по программе
+const planStages = p => (p.stages && p.stages.length === 6) ? p.stages : DEFAULT_STAGES;
+function planAvail(p) {
+  return p.slots == null ? null : Math.max(0, p.slots * 100 - (p.sold_pct || 0));
+}
+function stageDaysLeft(p) {
+  const dur = (planStages(p)[p.stage]?.d || 0) * DAY;
+  return Math.max(0, Math.ceil((new Date(p.stage_at).getTime() + dur - Date.now()) / DAY));
+}
+function cycleProgress(stages, stage, stageAt, done) {
+  if (done) return 100;
+  const total = stages.reduce((a, s) => a + s.d, 0) * DAY || 1;
+  let el = stages.slice(0, stage).reduce((a, s) => a + s.d, 0) * DAY;
+  el += Math.min(Math.max(0, Date.now() - new Date(stageAt).getTime()), (stages[stage]?.d || 0) * DAY);
+  return Math.min(100, Math.round(el / total * 100));
+}
+function stepper(stage, done) {
+  return `<div style="display:flex;justify-content:space-between;margin:10px 0 4px">
+    ${STAGE_META.map(([e], i) => `<span style="font-size:17px;opacity:${done || i < stage ? '.45' : i === stage ? '1' : '.22'};${i === stage && !done ? 'transform:scale(1.25)' : ''}">${e}</span>`).join('')}
+  </div>`;
 }
 function renderEgrow() {
-  // мои кусты
+  /* мои доли */
   const my = document.getElementById('myGrows');
-  const active = GROWS.filter(g => g.status === 0);
-  const done = GROWS.filter(g => g.status === 1);
+  const active = SHARES.filter(s => s.status === 0);
+  const paid = SHARES.filter(s => s.status === 1);
   my.innerHTML = '';
   if (active.length) {
-    my.innerHTML = `<div class="section-head"><h2>Мои кусты</h2><span>${active.length} растёт</span></div>` +
-      active.map(g => {
-        const s = growStage(g);
-        const roi = Math.round((g.payout - g.price) / g.price * 100);
-        return `<div class="bezel gold reveal" style="margin-bottom:12px"><div class="bezel-core" style="padding:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <b style="font-size:15px">${g.name}</b>
-            <span class="status ${s.key === 'bloom' ? 'st-ship' : s.key === 'harvest' ? 'st-done' : 'st-paid'}">${s.label}</span>
+    my.innerHTML = `<div class="section-head"><h2>Мои доли</h2><span>${active.length} растёт</span></div>` +
+      active.map(s => {
+        const st = s.plan_stage, meta = STAGE_META[Math.min(st, 5)];
+        const prog = cycleProgress(s.plan_stages, st, s.plan_stage_at, s.plan_done);
+        return `<div class="bezel gold reveal" style="margin-bottom:12px"><div class="bezel-core" style="padding:15px 16px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <b style="font-size:14.5px">${s.plan_name} · ${s.pct}%</b>
+            <span class="status ${st >= 5 ? 'st-done' : 'st-ship'}">${meta[1]} ${meta[0]}</span>
           </div>
-          <div style="height:8px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--line);overflow:hidden">
-            <div style="height:100%;width:${s.prog}%;border-radius:99px;background:linear-gradient(90deg,#c9971d,#f0d47a);transition:width .6s var(--ease)"></div>
+          <div style="height:8px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--line);overflow:hidden;margin-top:10px">
+            <div style="height:100%;width:${prog}%;border-radius:99px;background:linear-gradient(90deg,#c9971d,#f0d47a)"></div>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:8px">
-            <span>${s.daysLeft > 0 ? `осталось ${s.daysLeft} дн.` : 'выплата вот-вот'}</span>
-            <span>выплата <b style="color:var(--gold-soft)">${fmt(g.payout)} ₴</b> · +${roi}%</span>
+            <span>вход ${fmt(s.invested)} ₴ (+${s.profit_pct}%)</span>
+            <span>выплата <b style="color:var(--gold-soft)">${fmt(s.payout)} ₴</b> после сбора</span>
           </div>
         </div></div>`;
       }).join('');
   }
-  if (done.length) {
-    my.innerHTML += `<p class="note" style="margin:2px 0 0">✓ Завершено циклов: ${done.length} · получено ${fmt(done.reduce((a, g) => a + g.payout, 0))} ₴</p>`;
+  if (paid.length) {
+    my.innerHTML += `<p class="note" style="margin:2px 0 10px">✓ Выплачено долей: ${paid.length} · получено ${fmt(paid.reduce((a, s) => a + s.payout, 0))} ₴</p>`;
   }
 
-  // программы
+  /* программы */
   const el = document.getElementById('growPlans');
   if (!PLANS.length) {
     el.innerHTML = `<div class="empty" style="padding:30px"><div class="e-ico">🌱</div><p>Программы скоро появятся.<br>Следите за анонсами в канале.</p></div>`;
     return;
   }
   el.innerHTML = PLANS.map((p, i) => {
-    const roi = Math.round((p.payout - p.price) / p.price * 100);
-    const soldOut = p.slots === 0;
+    const ts = planStages(p);
+    const closed = p.done || p.stage >= 5;
+    const avail = planAvail(p);
+    const maxPct = Math.min(100, avail == null ? 100 : avail);
+    let pct = selPct[p.id] || 10;
+    if (pct > maxPct) pct = maxPct - maxPct % 10 || 0;
+    selPct[p.id] = pct;
+    const enterP = ts[Math.min(p.stage, 5)].p;
+    const cost = Math.round(p.price * pct / 100);
+    const payout = cost + Math.round(cost * enterP / 100);
     return `<div class="bezel reveal" style="margin-bottom:14px;transition-delay:${i * 50}ms"><div class="bezel-core" style="padding:14px">
-      <div class="good-img" style="background:${p.grad};aspect-ratio:2/1;margin-bottom:12px">
+      <div class="good-img" style="background:${p.grad};aspect-ratio:2/1;margin-bottom:10px">
         ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : `<span style="font-size:40px">🌹</span>`}
       </div>
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <h3 style="font-size:16px;font-weight:800">${p.name}</h3>
-        <b style="color:var(--gold-soft);font-size:16px">+${roi}%</b>
+        ${closed ? '' : `<b style="color:var(--gold-soft);font-size:15px">вход +${enterP}%</b>`}
       </div>
       ${p.sub ? `<p style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">${p.sub}</p>` : ''}
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0">
-        <div class="ref-stat" style="padding:9px 8px"><b style="font-size:14px">${fmt(p.price)} ₴</b><span>вход</span></div>
-        <div class="ref-stat" style="padding:9px 8px"><b style="font-size:14px;color:var(--gold-soft)">${fmt(p.payout)} ₴</b><span>выплата</span></div>
-        <div class="ref-stat" style="padding:9px 8px"><b style="font-size:14px">${p.days} дн.</b><span>цикл</span></div>
+      ${stepper(p.stage, p.done)}
+      <p class="note" style="margin:0 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
+        : `Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}`}</p>
+      <div class="tier-table" style="margin-bottom:12px">
+        ${ts.map((s, k) => `<div class="tier-row ${k === p.stage && !p.done ? 'hit' : ''}">
+          <span>${STAGE_META[k][0]} ${STAGE_META[k][1]} · ${s.d} дн.</span>
+          <b>${k === 5 ? 'вход закрыт' : '+' + s.p + '%'}</b></div>`).join('')}
       </div>
-      <p class="note" style="margin:0 0 12px">🌹 Цветение ${p.bloom_days || p.days} дн.${p.slots != null ? ` · осталось мест: ${p.slots}` : ''}</p>
-      ${soldOut
-        ? `<a class="btn btn-ghost" style="text-decoration:none;color:var(--warn)" href="${ADMIN_CHAT}" target="_blank" rel="noopener">Мест нет — написать админу</a>`
-        : `<button class="btn btn-gold" onclick="buyGrow(${p.id})">Посадить куст за ${fmt(p.price)} ₴
-            <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4-3.2-7-8-7 0 4.5 3.2 7 8 7z"/></svg></span>
-          </button>`}
+      ${closed ? `<button class="btn btn-ghost" disabled>${p.done ? 'Программа завершена' : '🧺 Идёт сбор урожая — вход закрыт'}</button>` : `
+      <p class="note" style="margin:0 0 8px">Ваша доля куста (${fmt(p.price)} ₴ = 100%)${avail != null ? ` · свободно ${avail}%` : ''}</p>
+      <div class="weight-chips" style="margin:0 0 12px">
+        ${[10, 20, 30, 40, 50, 100].map(x => `<div class="wchip ${x === pct ? 'sel' : ''}" ${x > maxPct ? 'style="opacity:.3;pointer-events:none"' : ''} onclick="selShare(${p.id},${x})">${x}%</div>`).join('')}
+      </div>
+      ${pct ? `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div class="ref-stat" style="padding:9px 10px"><b style="font-size:14px">${fmt(cost)} ₴</b><span>вход · ${pct}%</span></div>
+        <div class="ref-stat" style="padding:9px 10px"><b style="font-size:14px;color:var(--gold-soft)">${fmt(payout)} ₴</b><span>выплата</span></div>
+      </div>
+      <button class="btn btn-gold" onclick="buyShare(${p.id})">Купить ${pct}% за ${fmt(cost)} ₴
+        <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4-3.2-7-8-7 0 4.5 3.2 7 8 7z"/></svg></span>
+      </button>` : `<a class="btn btn-ghost" style="text-decoration:none;color:var(--warn)" href="${ADMIN_CHAT}" target="_blank" rel="noopener">Все доли выкуплены — написать админу</a>`}`}
     </div></div>`;
   }).join('');
   observeReveals();
 }
-async function buyGrow(planId) {
+function selShare(planId, pct) { haptic('light'); selPct[planId] = pct; renderEgrow(); }
+async function buyShare(planId) {
   if (!API.ok) return toast('Доступно после подключения сервера');
   const p = PLANS.find(x => x.id === planId);
-  if (p && S.balance < p.price) { toast('Недостаточно средств — пополняем баланс'); return go('topup'); }
-  try { applySnapshot(await API.call('/api/grow/buy', { plan_id: planId })); }
+  const pct = selPct[planId] || 10;
+  if (p && S.balance < Math.round(p.price * pct / 100)) {
+    toast('Недостаточно средств — пополняем баланс');
+    return go('topup');
+  }
+  try { applySnapshot(await API.call('/api/grow/buy', { plan_id: planId, pct })); }
   catch (e) { return toast(e.message); }
-  haptic('medium'); toast('Куст посажен 🌱 Следите за ростом!');
+  haptic('medium'); toast(`Доля ${pct}% куплена 🌱`);
   renderEgrow();
 }
 
@@ -1630,8 +1670,8 @@ function renderAdmin(tab) {
         <div class="link-ico" style="overflow:hidden">${p.photo
           ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" style="width:100%;height:100%;object-fit:cover">`
           : '🌹'}</div>
-        <div><h3 style="${p.active ? '' : 'opacity:.45'}">${p.name}${p.active ? '' : ' · скрыт'}</h3>
-        <p>${fmt(p.price)}→${fmt(p.payout)} ₴ · ${p.days} дн.${p.slots != null ? ` · мест ${p.slots}` : ''}</p></div>
+        <div><h3 style="${p.active ? '' : 'opacity:.45'}">${p.name}${p.active ? '' : ' · скрыт'}${p.done ? ' · ✓' : ''}</h3>
+        <p>${fmt(p.price)} ₴/куст · ${STAGE_META[Math.min(p.stage, 5)][0]} ${STAGE_META[Math.min(p.stage, 5)][1]}${p.slots != null ? ` · свободно ${planAvail(p)}%` : ''}</p></div>
       </div>`).join('') +
       `<button class="btn btn-gold" style="margin-top:14px" onclick="openGedit(null)">+ Добавить программу</button>`;
   } else if (tab === 'orders') {
@@ -1803,7 +1843,7 @@ async function decideOrder(code, approve) {
   renderAdmin('orders');
 }
 /* ── админ: программы E-growing ── */
-let curGe = null, geActiveVal = true, gePhotoData = null, geDelArmed = false;
+let curGe = null, geActiveVal = true, gePhotoData = null, geDelArmed = false, geFinishArmed = false;
 function openGedit(id) {
   curGe = id ? AD.grow_plans.find(p => p.id === id) : null;
   geActiveVal = curGe ? curGe.active : true;
@@ -1812,16 +1852,59 @@ function openGedit(id) {
   document.getElementById('geName').value = curGe?.name || '';
   document.getElementById('geSub').value = curGe?.sub || '';
   document.getElementById('gePrice').value = curGe?.price ?? '';
-  document.getElementById('gePayout').value = curGe?.payout ?? '';
-  document.getElementById('geDays').value = curGe?.days ?? '';
-  document.getElementById('geBloom').value = curGe?.bloom_days ?? '';
   document.getElementById('geSlots').value = curGe ? (curGe.slots ?? '') : '';
+  const ts = curGe ? planStages(curGe) : DEFAULT_STAGES;
+  document.getElementById('geStages').innerHTML = ts.map((s, i) => `
+    <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px;margin-bottom:8px;align-items:center">
+      <span style="font-size:12px;color:var(--muted)">${STAGE_META[i][0]} ${STAGE_META[i][1]}</span>
+      <div style="display:flex;align-items:center;gap:5px">
+        <input class="mini-input" id="gsD${i}" inputmode="numeric" value="${s.d}"><span style="font-size:11px;color:var(--muted-2)">дн</span></div>
+      ${i === 5
+        ? '<span style="font-size:11px;color:var(--muted-2);text-align:center">вход закрыт</span>'
+        : `<div style="display:flex;align-items:center;gap:5px">
+             <input class="mini-input" id="gsP${i}" inputmode="numeric" value="${s.p}"><span style="font-size:11px;color:var(--muted-2)">%</span></div>`}
+    </div>`).join('');
+  const ctl = document.getElementById('geStageCtl');
+  if (curGe) {
+    ctl.style.display = '';
+    document.getElementById('geStageChips').innerHTML = STAGE_META.map(([e, l], i) => `
+      <div class="wchip ${!curGe.done && curGe.stage === i ? 'sel' : ''}" onclick="geSetStage(${i})">${e} ${l}</div>`).join('');
+    document.getElementById('geFinishBtn').style.display = curGe.done ? 'none' : '';
+    document.getElementById('geFinishBtn').textContent = '🧺 Завершить сбор и выплатить всем';
+    geFinishArmed = false;
+  } else ctl.style.display = 'none';
   document.getElementById('geActive').classList.toggle('sel', geActiveVal);
   document.getElementById('geDelete').style.display = curGe ? '' : 'none';
   document.getElementById('geDelete').textContent = 'Удалить программу';
   geDelArmed = false;
   renderGePhoto();
   openSheet('gedit');
+}
+async function geSetStage(i) {
+  if (!curGe) return;
+  try {
+    const r = await API.call('/api/admin/grow/stage', { id: curGe.id, stage: i });
+    AD.grow_plans = r.grow_plans;
+    PLANS = r.grow_plans.filter(x => x.active).map((p, k) => ({ ...p, grad: GROW_GRADS[k % GROW_GRADS.length] }));
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast(`Стадия: ${STAGE_META[i][1]} ${STAGE_META[i][0]}`);
+  openGedit(curGe.id);
+}
+async function finishGrow() {
+  const b = document.getElementById('geFinishBtn');
+  if (!geFinishArmed) {
+    geFinishArmed = true;
+    b.textContent = 'Выплатить всем дольщикам? Ещё раз';
+    haptic('heavy');
+    return;
+  }
+  try {
+    const r = await API.call('/api/admin/grow/stage', { id: curGe.id, stage: 6 });
+    AD.grow_plans = r.grow_plans;
+    PLANS = r.grow_plans.filter(x => x.active).map((p, k) => ({ ...p, grad: GROW_GRADS[k % GROW_GRADS.length] }));
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Урожай собран — выплаты отправлены 🧺');
+  closeSheets(true); renderAdmin('grow');
 }
 function renderGePhoto() {
   const src = gePhotoData || (curGe?.photo ? `/growphoto/${curGe.id}?size=t&v=${curGe.pv || 0}` : null);
@@ -1840,17 +1923,21 @@ function geToggleActive() { geActiveVal = !geActiveVal; document.getElementById(
 async function saveGedit() {
   const name = document.getElementById('geName').value.trim();
   const price = parseInt(document.getElementById('gePrice').value, 10);
-  const payout = parseInt(document.getElementById('gePayout').value, 10);
-  const days = parseInt(document.getElementById('geDays').value, 10);
-  const bloom = parseInt(document.getElementById('geBloom').value, 10) || 0;
   if (!name) return toast('Укажите название');
-  if (!price || !payout || !days) return toast('Заполните цену, выплату и цикл');
+  if (!price) return toast('Укажите цену куста');
+  const stages = [];
+  for (let i = 0; i < 6; i++) {
+    const d = parseInt(document.getElementById('gsD' + i).value, 10);
+    const p = i === 5 ? 0 : parseInt(document.getElementById('gsP' + i).value, 10);
+    if (isNaN(d) || d < 0 || (i < 5 && (isNaN(p) || p < 0))) return toast('Проверьте дни и % стадий');
+    stages.push({ d, p: p || 0 });
+  }
   const slotsRaw = document.getElementById('geSlots').value.trim();
   const photo = gePhotoData === 'remove' ? null : (gePhotoData || (curGe ? 'keep' : null));
   try {
     const r = await API.call('/api/admin/grow', {
       id: curGe?.id || null, name, sub: document.getElementById('geSub').value.trim(),
-      price, payout, days, bloom_days: Math.min(bloom, days),
+      price, stages,
       slots: slotsRaw === '' ? null : Math.max(0, parseInt(slotsRaw, 10) || 0),
       active: geActiveVal, photo,
     });

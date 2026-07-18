@@ -116,12 +116,30 @@ async def init():
                 sub        TEXT DEFAULT '',
                 photo      TEXT,
                 price      BIGINT NOT NULL,
-                payout     BIGINT NOT NULL,
-                days       INT NOT NULL,
+                payout     BIGINT NOT NULL DEFAULT 0,
+                days       INT NOT NULL DEFAULT 0,
                 bloom_days INT NOT NULL DEFAULT 0,
                 slots      INT,
                 active     BOOLEAN NOT NULL DEFAULT true,
                 pos        INT NOT NULL DEFAULT 0);
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stages TEXT;
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stage INT NOT NULL DEFAULT 0;
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stage_at TIMESTAMPTZ NOT NULL DEFAULT now();
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS sold_pct BIGINT NOT NULL DEFAULT 0;
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS done BOOLEAN NOT NULL DEFAULT false;
+            CREATE TABLE IF NOT EXISTS shares(
+                id         BIGSERIAL PRIMARY KEY,
+                user_id    BIGINT NOT NULL,
+                plan_id    BIGINT NOT NULL,
+                pct        INT NOT NULL,
+                invested   BIGINT NOT NULL,
+                profit_pct INT NOT NULL,
+                payout     BIGINT NOT NULL,
+                stage      INT NOT NULL,
+                created    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                status     INT NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS shares_user_idx ON shares(user_id);
+            CREATE INDEX IF NOT EXISTS shares_plan_idx ON shares(plan_id);
             CREATE TABLE IF NOT EXISTS grows(
                 id         BIGSERIAL PRIMARY KEY,
                 user_id    BIGINT NOT NULL,
@@ -327,7 +345,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "payment": payment_public(await get_settings(conn=c)),
         "payments": await payments_history(tg_id, c),
         "grow_plans": await get_grow_plans(conn=c),
-        "grows": await user_grows(tg_id, c),
+        "shares": await user_shares(tg_id, c),
     }
 
 
@@ -711,18 +729,37 @@ async def delete_account(tg_id: int):
         await c.execute("DELETE FROM invoices WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM ratings WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM grows WHERE user_id=$1", tg_id)
+        await c.execute("DELETE FROM shares WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", tg_id)
         await c.execute("UPDATE users SET ref_by=NULL WHERE ref_by=$1", tg_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", tg_id)
 
 
-# ── E-growing (краудфарминг) ─────────────────────────────────────────────────
+# ── E-growing (доли в кустах, стадии роста) ──────────────────────────────────
+# стадии: 0 семечко, 1 саженец, 2 вегетативная, 3 предцвет, 4 цветение, 5 сбор урожая
+GROW_STAGES_DEFAULT = [
+    {"d": 5, "p": 35}, {"d": 7, "p": 30}, {"d": 14, "p": 25},
+    {"d": 7, "p": 20}, {"d": 10, "p": 10}, {"d": 3, "p": 0},
+]
+HARVEST = 5  # на сборе урожая вход закрыт
+
+
+def _plan_stages(r) -> list:
+    try:
+        s = json.loads(r["stages"]) if r["stages"] else None
+    except (ValueError, TypeError):
+        s = None
+    return s if s and len(s) == 6 else [dict(x) for x in GROW_STAGES_DEFAULT]
+
+
 def _plan_row(r) -> dict:
     return {
         "id": r["id"], "name": r["name"], "sub": r["sub"] or "",
-        "price": r["price"], "payout": r["payout"],
-        "days": r["days"], "bloom_days": r["bloom_days"],
-        "slots": r["slots"], "active": r["active"],
+        "price": r["price"], "slots": r["slots"],
+        "stages": _plan_stages(r),
+        "stage": r["stage"], "stage_at": r["stage_at"].isoformat(),
+        "sold_pct": r["sold_pct"], "done": r["done"],
+        "active": r["active"],
         "photo": bool(r["photo"]),
         "pv": len(r["photo"] or ""),
     }
@@ -747,6 +784,11 @@ async def grow_plan_photo(pid: int, size: str = "f") -> str | None:
 
 
 async def save_grow_plan(d: dict) -> int:
+    stages = d.get("stages")
+    if not (isinstance(stages, list) and len(stages) == 6):
+        stages = GROW_STAGES_DEFAULT
+    stages = [{"d": max(0, int(s.get("d", 0))), "p": max(0, min(1000, int(s.get("p", 0))))}
+              for s in stages]
     async with _pool.acquire() as c:
         photo = None
         if d.get("photo") == "keep" and d.get("id"):
@@ -756,73 +798,150 @@ async def save_grow_plan(d: dict) -> int:
             photo = json.dumps({"f": d["photo"], "t": _make_thumb(d["photo"])})
         slots = d.get("slots")
         slots = None if slots in (None, "") else max(0, int(slots))
-        vals = (d["name"], d.get("sub", ""), photo, int(d["price"]), int(d["payout"]),
-                int(d["days"]), int(d.get("bloom_days", 0)), slots, bool(d.get("active", True)))
+        vals = (d["name"], d.get("sub", ""), photo, int(d["price"]), slots,
+                json.dumps(stages), bool(d.get("active", True)))
         if d.get("id"):
             await c.execute("""
-                UPDATE grow_plans SET name=$2, sub=$3, photo=$4, price=$5, payout=$6,
-                                      days=$7, bloom_days=$8, slots=$9, active=$10 WHERE id=$1
+                UPDATE grow_plans SET name=$2, sub=$3, photo=$4, price=$5, slots=$6,
+                                      stages=$7, active=$8 WHERE id=$1
             """, int(d["id"]), *vals)
             return int(d["id"])
+        # новая программа: цикл стартует с момента создания (стадия «семечко»)
         return await c.fetchval("""
-            INSERT INTO grow_plans(name, sub, photo, price, payout, days, bloom_days, slots, active, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE((SELECT MAX(pos)+1 FROM grow_plans), 0))
+            INSERT INTO grow_plans(name, sub, photo, price, slots, stages, active,
+                                   stage, stage_at, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7, 0, now(),
+                   COALESCE((SELECT MAX(pos)+1 FROM grow_plans), 0))
             RETURNING id
         """, *vals)
 
 
 async def delete_grow_plan(pid: int):
-    async with _pool.acquire() as c:
-        await c.execute("DELETE FROM grow_plans WHERE id=$1", pid)
-
-
-def _grow_row(r) -> dict:
-    return {
-        "id": r["id"], "plan_id": r["plan_id"], "name": r["name"],
-        "price": r["price"], "payout": r["payout"],
-        "days": r["days"], "bloom_days": r["bloom_days"],
-        "started": r["started"].isoformat(), "ends": r["ends"].isoformat(),
-        "status": r["status"],
-    }
-
-
-async def user_grows(tg_id: int, conn=None) -> list:
-    c = conn or _pool
-    rows = await c.fetch("SELECT * FROM grows WHERE user_id=$1 ORDER BY id DESC", tg_id)
-    return [_grow_row(r) for r in rows]
-
-
-async def buy_grow(tg_id: int, plan_id: int) -> dict:
-    """Покупка куста с баланса. Резервирует слот, стартует цикл выращивания."""
+    """Удаление программы: невыплаченные доли возвращаются на балансы."""
     async with _pool.acquire() as c, c.transaction():
-        p = await c.fetchrow("SELECT * FROM grow_plans WHERE id=$1 AND active FOR UPDATE", plan_id)
-        if not p:
+        rows = await c.fetch("SELECT * FROM shares WHERE plan_id=$1 AND status=0", pid)
+        for r in rows:
+            await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                            r["invested"], r["user_id"])
+        await c.execute("DELETE FROM shares WHERE plan_id=$1", pid)
+        await c.execute("DELETE FROM grow_plans WHERE id=$1", pid)
+        return [{"user_id": r["user_id"], "amount": r["invested"]} for r in rows]
+
+
+async def user_shares(tg_id: int, conn=None) -> list:
+    c = conn or _pool
+    rows = await c.fetch("""
+        SELECT s.*, p.name AS plan_name, p.stage AS p_stage, p.stage_at AS p_stage_at,
+               p.stages AS p_stages, p.done AS p_done
+        FROM shares s LEFT JOIN grow_plans p ON p.id = s.plan_id
+        WHERE s.user_id=$1 ORDER BY s.id DESC
+    """, tg_id)
+    out = []
+    for r in rows:
+        try:
+            st = json.loads(r["p_stages"]) if r["p_stages"] else GROW_STAGES_DEFAULT
+        except (ValueError, TypeError):
+            st = GROW_STAGES_DEFAULT
+        out.append({
+            "id": r["id"], "plan_id": r["plan_id"],
+            "plan_name": r["plan_name"] or "Программа удалена",
+            "pct": r["pct"], "invested": r["invested"], "payout": r["payout"],
+            "profit_pct": r["profit_pct"], "entry_stage": r["stage"],
+            "status": r["status"], "created": r["created"].isoformat(),
+            "plan_stage": r["p_stage"] if r["p_stage"] is not None else HARVEST,
+            "plan_stage_at": r["p_stage_at"].isoformat() if r["p_stage_at"] else None,
+            "plan_stages": st, "plan_done": bool(r["p_done"]),
+        })
+    return out
+
+
+async def buy_share(tg_id: int, plan_id: int, pct: int) -> dict:
+    """Покупка доли куста (кратно 10%) на текущей стадии программы."""
+    if pct < 10 or pct > 100 or pct % 10:
+        raise ValueError("Доля — от 10% до 100%, кратно 10")
+    async with _pool.acquire() as c, c.transaction():
+        p = await c.fetchrow(
+            "SELECT * FROM grow_plans WHERE id=$1 AND active FOR UPDATE", plan_id)
+        if not p or p["done"]:
             raise ValueError("Программа недоступна")
-        if p["slots"] is not None and p["slots"] <= 0:
-            raise ValueError("Мест больше нет — напишите админу")
-        u = await c.fetchrow("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
-        if u["balance"] < p["price"]:
-            raise ValueError("Недостаточно средств — пополните баланс")
-        await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", p["price"], tg_id)
+        if p["stage"] >= HARVEST:
+            raise ValueError("Идёт сбор урожая — вход закрыт до новой программы")
         if p["slots"] is not None:
-            await c.execute("UPDATE grow_plans SET slots=slots-1 WHERE id=$1", plan_id)
+            avail = p["slots"] * 100 - p["sold_pct"]
+            if pct > avail:
+                raise ValueError(f"Свободно только {avail}% — выберите долю меньше"
+                                 if avail > 0 else "Все доли выкуплены")
+        invested = round(p["price"] * pct / 100)
+        u = await c.fetchrow("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        if u["balance"] < invested:
+            raise ValueError("Недостаточно средств — пополните баланс")
+        profit = _plan_stages(p)[p["stage"]]["p"]
+        payout = invested + round(invested * profit / 100)
+        await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", invested, tg_id)
+        await c.execute("UPDATE grow_plans SET sold_pct=sold_pct+$2 WHERE id=$1", plan_id, pct)
         await c.execute("""
-            INSERT INTO grows(user_id, plan_id, name, price, payout, days, bloom_days, ends)
-            VALUES($1,$2,$3,$4,$5,$6,$7, now() + make_interval(days => $6))
-        """, tg_id, plan_id, p["name"], p["price"], p["payout"], p["days"], p["bloom_days"])
+            INSERT INTO shares(user_id, plan_id, pct, invested, profit_pct, payout, stage)
+            VALUES($1,$2,$3,$4,$5,$6,$7)
+        """, tg_id, plan_id, pct, invested, profit, payout, p["stage"])
         return await snapshot(tg_id, c)
 
 
-async def mature_grows() -> list:
-    """Созревшие кусты: выплата дохода на баланс. Возвращает список для уведомлений."""
+async def _payout_plan(c, plan_id: int) -> list:
+    """Выплата всех долей программы при сборе урожая."""
+    rows = await c.fetch(
+        "SELECT * FROM shares WHERE plan_id=$1 AND status=0 FOR UPDATE", plan_id)
+    name = await c.fetchval("SELECT name FROM grow_plans WHERE id=$1", plan_id)
+    for r in rows:
+        await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                        r["payout"], r["user_id"])
+        await c.execute("UPDATE shares SET status=1 WHERE id=$1", r["id"])
+    return [{"user_id": r["user_id"], "name": name, "payout": r["payout"]} for r in rows]
+
+
+async def set_grow_stage(plan_id: int, stage: int) -> list:
+    """Ручное переключение стадии админом.
+    stage 0..5 — просто ставит стадию; stage 6 — завершить сбор и выплатить."""
+    s = max(0, min(6, int(stage)))
     async with _pool.acquire() as c, c.transaction():
-        rows = await c.fetch(
-            "SELECT * FROM grows WHERE status=0 AND ends < now() FOR UPDATE")
-        for r in rows:
-            await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
-                            r["payout"], r["user_id"])
-            await c.execute("UPDATE grows SET status=1 WHERE id=$1", r["id"])
-        return [{"user_id": r["user_id"], "name": r["name"], "payout": r["payout"]} for r in rows]
+        if s >= 6:
+            await c.execute("""
+                UPDATE grow_plans SET stage=$2, stage_at=now(), done=true WHERE id=$1
+            """, plan_id, HARVEST)
+            return await _payout_plan(c, plan_id)
+        await c.execute("""
+            UPDATE grow_plans SET stage=$2, stage_at=now(), done=false WHERE id=$1
+        """, plan_id, s)
+        return []
+
+
+async def advance_grow_stages() -> list:
+    """Авто-смена стадий по дням. Выплаты — когда стадия сбора урожая закончилась."""
+    notes = []
+    async with _pool.acquire() as c, c.transaction():
+        plans = await c.fetch(
+            "SELECT * FROM grow_plans WHERE active AND NOT done FOR UPDATE")
+        now = datetime.now(timezone.utc)
+        for p in plans:
+            stages = _plan_stages(p)
+            stage, at = p["stage"], p["stage_at"]
+            changed = finished = False
+            while True:
+                dur = timedelta(days=max(0, stages[stage]["d"]))
+                if now - at < dur:
+                    break
+                if stage >= HARVEST:      # сбор урожая закончился — выплата
+                    finished = changed = True
+                    break
+                at += dur
+                stage += 1
+                changed = True
+            if changed:
+                await c.execute("""
+                    UPDATE grow_plans SET stage=$2, stage_at=$3, done=$4 WHERE id=$1
+                """, p["id"], stage, at, finished)
+                if finished:
+                    notes += await _payout_plan(c, p["id"])
+    return notes
 
 
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
@@ -852,6 +971,7 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         await c.execute("UPDATE invoices SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE ratings SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE grows SET user_id=$1 WHERE user_id=$2", new_id, old_id)
+        await c.execute("UPDATE shares SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2", new_id, old_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", old_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", old_id)

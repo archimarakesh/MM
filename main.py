@@ -196,15 +196,15 @@ async def invoice_checker():
 
 
 async def grow_harvester():
-    """Раз в 5 минут выплачивает доход по созревшим кустам."""
+    """Раз в 5 минут двигает стадии программ по расписанию; на сборе — выплаты."""
     while True:
         try:
-            for g in await db.mature_grows():
+            for g in await db.advance_grow_stages():
                 await notify(g["user_id"],
-                             f"🌹 Ваш куст «{g['name']}» отцвёл! "
-                             f"Доход <b>{g['payout']} ₴</b> зачислен на баланс.")
+                             f"🧺 Урожай «{g['name']}» собран! "
+                             f"Выплата <b>{g['payout']} ₴</b> зачислена на баланс.")
         except Exception:
-            log.exception("Ошибка выплат E-growing")
+            log.exception("Ошибка стадий E-growing")
         await asyncio.sleep(300)
 
 # ── бот ──────────────────────────────────────────────────────────────────────
@@ -516,12 +516,15 @@ async def api_account_delete(request: Request):
 async def api_grow_buy(request: Request):
     u = tg_user(request)
     b = await request.json()
+    pct = int(b.get("pct", 0))
     try:
-        snap = await db.buy_grow(u["id"], int(b.get("plan_id", 0)))
+        snap = await db.buy_share(u["id"], int(b.get("plan_id", 0)), pct)
     except ValueError as e:
         raise HTTPException(400, str(e))
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
-    await notify(ADMIN_ID, f"🌱 {u.get('first_name', '')} посадил куст (план #{b.get('plan_id')}).")
+    await notify(ADMIN_ID,
+                 f"🌱 {u.get('first_name', '')} (@{u.get('username', '—')}) купил долю "
+                 f"{pct}% в программе #{b.get('plan_id')}.")
     return snap
 
 
@@ -536,11 +539,26 @@ async def api_admin_grow(request: Request):
     return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
 
 
+@app.post("/api/admin/grow/stage")
+async def api_admin_grow_stage(request: Request):
+    admin_user(request)
+    b = await request.json()
+    notes = await db.set_grow_stage(int(b.get("id", 0)), int(b.get("stage", 0)))
+    for n in notes:
+        await notify(n["user_id"],
+                     f"🧺 Урожай «{n['name']}» собран! Выплата <b>{n['payout']} ₴</b> зачислена на баланс.")
+    return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
+
+
 @app.post("/api/admin/grow/delete")
 async def api_admin_grow_delete(request: Request):
     admin_user(request)
     b = await request.json()
-    await db.delete_grow_plan(int(b.get("id", 0)))
+    refunds = await db.delete_grow_plan(int(b.get("id", 0)))
+    for r in refunds:
+        await notify(r["user_id"],
+                     f"↩️ Программа выращивания закрыта — вложенные <b>{r['amount']} ₴</b> "
+                     "возвращены на баланс.")
     return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
 
 
