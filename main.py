@@ -224,15 +224,21 @@ async def invoice_checker():
         await asyncio.sleep(60)
 
 
+async def post_promo(path: str, caption: str):
+    """Публикация одного промо-поста в канал с кнопкой на мини-апп."""
+    from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL),
+    ]])
+    await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
+                         caption=caption, parse_mode="HTML", reply_markup=kb)
+
+
 async def promo_poster():
     """Автопостинг промо в канал: 4 слота в день, каждая картинка по 2 раза."""
     if not (bot and PROMO_CHANNEL_ID and PROMO_TIMES):
         log.warning("Промо-постинг выключен: нет бота или PROMO_CHANNEL_ID")
         return
-    from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL),
-    ]])
     while True:
         try:
             now = datetime.now(KYIV)
@@ -252,8 +258,7 @@ async def promo_poster():
                 continue  # уже постили в этот слот (например, после рестарта)
             path, caption = PROMO_POSTS[idx % len(PROMO_POSTS)]
             if os.path.exists(path):
-                await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
-                                     caption=caption, parse_mode="HTML", reply_markup=kb)
+                await post_promo(path, caption)
                 await db.set_kv("last_promo", slot_key)
                 log.info("Промо-пост отправлен: %s (%s)", path, slot_key)
             else:
@@ -316,6 +321,25 @@ if BOT_TOKEN:
     async def cmd_chatid(message: Message):
         await message.answer(f"ID этого чата: <code>{message.chat.id}</code>",
                              parse_mode="HTML")
+
+    @dp.message(Command("promo"))
+    async def cmd_promo(message: Message):
+        if not ADMIN_ID or message.from_user.id != ADMIN_ID:
+            return
+        if not PROMO_CHANNEL_ID:
+            await message.answer("Канал не задан: добавьте PROMO_CHANNEL_ID или BONUS_CHANNEL_ID.")
+            return
+        sent = 0
+        for path, caption in PROMO_POSTS:
+            if not os.path.exists(path):
+                await message.answer(f"Файл не найден: {path}")
+                continue
+            try:
+                await post_promo(path, caption)
+                sent += 1
+            except Exception as e:
+                await message.answer(f"Ошибка постинга {path}: {e}")
+        await message.answer(f"✅ Опубликовано постов: {sent}/{len(PROMO_POSTS)}")
 
     @dp.channel_post()
     async def channel_chatid(message: Message):
