@@ -40,7 +40,7 @@ KYIV = ZoneInfo("Europe/Kyiv")
 PROMO_CHANNEL_ID = os.getenv("PROMO_CHANNEL_ID", "") or BONUS_CHANNEL_ID
 # кнопка под постом: после /newapp в BotFather поставь https://t.me/Magic_Marketplace_bot/shop —
 # будет открывать мини-апп сразу (web_app-кнопки в каналах Telegram не разрешает)
-PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace_bot")
+PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace_bot/shop")
 # 4 поста в день: каждое из двух промо — по 2 раза (чередование по слотам)
 PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,18:00,21:00").split(",") if t.strip()]
 PROMO_POSTS = [
