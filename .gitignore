@@ -9,6 +9,9 @@ venv/
 node_modules/
 dist/
 
+# промо-материалы (локально)
+promo/
+
 # IDE / OS
 .idea/
 .vscode/
