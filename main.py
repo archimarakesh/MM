@@ -44,17 +44,8 @@ PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace
 # 4 поста в день: каждое из двух промо — по 2 раза (чередование по слотам)
 PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,18:00,21:00").split(",") if t.strip()]
 PROMO_POSTS = [
-    ("promo/egrow-1.png",
-     "🌹 <b>E-GROWING в Magic Market</b>\n\n"
-     "Купи долю куста розы — от 1 000 ₴, доли от 10%.\n"
-     "Чем раньше вход, тем выше доходность: <b>до +35% за цикл</b>.\n"
-     "Живые фото куста и стадии роста — прямо в приложении."),
-    ("promo/egrow-4.png",
-     "✨ <b>Magic Market — премиальный магазин в Telegram</b>\n\n"
-     "🛍 Товары на вес — чем больше, тем дешевле грамм\n"
-     "🌹 E-growing — доли кустов, до +35% за цикл\n"
-     "📦 Доставка Новой Почтой с трекингом\n"
-     "🤝 Рефералка до 10% с покупок друзей"),
+    ("promo/egrow-1.png", ""),
+    ("promo/egrow-4.png", ""),
 ]
 CARD_LIMIT = 5000            # оплата картой — до 5 000 ₴, свыше только крипта
 
@@ -231,7 +222,7 @@ async def post_promo(path: str, caption: str):
         InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL),
     ]])
     await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
-                         caption=caption, parse_mode="HTML", reply_markup=kb)
+                         caption=caption or None, parse_mode="HTML", reply_markup=kb)
 
 
 async def promo_poster():
