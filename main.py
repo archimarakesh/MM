@@ -194,6 +194,19 @@ async def invoice_checker():
             log.exception("Ошибка проверщика счетов")
         await asyncio.sleep(60)
 
+
+async def grow_harvester():
+    """Раз в 5 минут выплачивает доход по созревшим кустам."""
+    while True:
+        try:
+            for g in await db.mature_grows():
+                await notify(g["user_id"],
+                             f"🌹 Ваш куст «{g['name']}» отцвёл! "
+                             f"Доход <b>{g['payout']} ₴</b> зачислен на баланс.")
+        except Exception:
+            log.exception("Ошибка выплат E-growing")
+        await asyncio.sleep(300)
+
 # ── бот ──────────────────────────────────────────────────────────────────────
 bot = dp = None
 if BOT_TOKEN:
@@ -269,9 +282,11 @@ async def lifespan(_: FastAPI):
         log.warning("BOT_TOKEN не задан — бот не запущен, API без авторизации не работает")
     checker = asyncio.create_task(invoice_checker())
     tracker = asyncio.create_task(np_tracker())
+    harvester = asyncio.create_task(grow_harvester())
     yield
     checker.cancel()
     tracker.cancel()
+    harvester.cancel()
     if menu_task:
         menu_task.cancel()
     if task:
@@ -318,6 +333,17 @@ async def logo():
 @app.get("/logo.webp")
 async def logo_webp():
     return FileResponse("logo.webp", headers=_IMMUTABLE)
+
+
+@app.get("/growphoto/{pid}")
+async def grow_photo(pid: int, size: str = "f"):
+    data = await db.grow_plan_photo(pid, "t" if size == "t" else "f")
+    if not data:
+        raise HTTPException(404, "Нет фото")
+    header, b64 = data.split(",", 1)
+    mime = header.split(":", 1)[1].split(";", 1)[0]
+    return Response(base64.b64decode(b64), media_type=mime,
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @app.get("/photo/{pid}/{idx}")
@@ -486,6 +512,38 @@ async def api_account_delete(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/grow/buy")
+async def api_grow_buy(request: Request):
+    u = tg_user(request)
+    b = await request.json()
+    try:
+        snap = await db.buy_grow(u["id"], int(b.get("plan_id", 0)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
+    await notify(ADMIN_ID, f"🌱 {u.get('first_name', '')} посадил куст (план #{b.get('plan_id')}).")
+    return snap
+
+
+@app.post("/api/admin/grow")
+async def api_admin_grow(request: Request):
+    admin_user(request)
+    b = await request.json()
+    try:
+        await db.save_grow_plan(b)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(400, f"Проверьте поля программы: {e}")
+    return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
+
+
+@app.post("/api/admin/grow/delete")
+async def api_admin_grow_delete(request: Request):
+    admin_user(request)
+    b = await request.json()
+    await db.delete_grow_plan(int(b.get("id", 0)))
+    return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
+
+
 @app.post("/api/transfer/create")
 async def api_transfer_create(request: Request):
     u = tg_user(request)
@@ -508,6 +566,7 @@ async def api_admin_data(request: Request):
     admin_user(request)
     return {
         "products": await db.get_products(include_inactive=True),
+        "grow_plans": await db.get_grow_plans(include_inactive=True),
         "settings": await db.get_settings(),
         "topups": await db.admin_topups(),
         "orders": await db.admin_orders(),

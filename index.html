@@ -400,15 +400,12 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 
   <!-- ══ E-GROWING ══ -->
   <section class="view" id="view-egrow">
-    <div class="eyebrow">Growshop</div>
+    <div class="eyebrow">Craudfarming</div>
     <h1 class="page-title">E-growing</h1>
-    <p class="page-sub">Всё для домашнего выращивания — оборудование, расходники и знания.</p>
-    <div class="bezel reveal"><div class="bezel-core" style="text-align:center;padding:34px 20px">
-      <div style="font-size:34px;margin-bottom:10px">🌱</div>
-      <h3 style="font-size:15px;font-weight:800;margin-bottom:6px">Раздел готовится к запуску</h3>
-      <p style="font-size:12.5px;color:var(--muted);line-height:1.6;margin-bottom:16px">Скоро здесь появится ассортимент. Анонс — в нашем канале.</p>
-      <a class="btn btn-ghost" style="text-decoration:none" href="https://t.me/+HJLPBVv65kQ0YjAy" target="_blank" rel="noopener">📣 Подписаться на канал</a>
-    </div></div>
+    <p class="page-sub">Посадите куст на старте, следите за цветением<br>и получите доход по завершении цикла.</p>
+    <div id="myGrows"></div>
+    <div class="section-head"><h2>Программы выращивания</h2></div>
+    <div id="growPlans"></div>
   </section>
 
   <!-- ══ ИСТОРИЯ ══ -->
@@ -649,6 +646,30 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <button class="btn btn-ghost" id="peDelete" style="margin-top:10px;color:var(--danger);display:none" onclick="deleteProduct()">Удалить товар</button>
 </div>
 
+<div class="sheet" id="sheet-gedit">
+  <div class="sheet-grip"></div>
+  <h2 id="geTitle">Программа выращивания</h2>
+  <p class="sheet-sub">Куст, который клиент «сажает» на старте и по завершении цикла получает выплату.</p>
+  <div class="field"><label>Название</label><input id="geName" placeholder="Роза Premium"></div>
+  <div class="field"><label>Описание</label><input id="geSub" placeholder="Сортовая роза, теплица"></div>
+  <div class="field"><label>Фото</label><div id="gePhoto"></div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div class="field"><label>Цена входа, ₴</label><input id="gePrice" inputmode="numeric" placeholder="1000"></div>
+    <div class="field"><label>Выплата в конце, ₴</label><input id="gePayout" inputmode="numeric" placeholder="1500"></div>
+    <div class="field"><label>Цикл, дней</label><input id="geDays" inputmode="numeric" placeholder="30"></div>
+    <div class="field"><label>Цветение, дней</label><input id="geBloom" inputmode="numeric" placeholder="10"></div>
+  </div>
+  <div class="field"><label>Кол-во кустов (мест)</label><input id="geSlots" inputmode="numeric" placeholder="пусто — без лимита"></div>
+  <div class="pay-opts" style="grid-template-columns:1fr">
+    <div class="pay-opt" id="geActive" onclick="geToggleActive()">Программа активна<small>показывается в E-growing</small></div>
+  </div>
+  <button class="btn btn-gold" onclick="saveGedit()">Сохранить программу
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+  </button>
+  <button class="btn btn-ghost" id="geDelete" style="margin-top:10px;color:var(--danger);display:none" onclick="deleteGrowPlan()">Удалить программу</button>
+  <input type="file" id="geFile" accept="image/*" style="display:none">
+</div>
+
 <div id="viewer" style="position:fixed;inset:0;z-index:96;background:rgba(3,3,3,.93);display:none;align-items:center;justify-content:center;padding:16px" onclick="closeViewer()">
   <div id="viewerBody"></div>
 </div>
@@ -744,6 +765,9 @@ function applySnapshot(d) {
   S.payments = d.payments || [];
   if (d.ref_percent) S.refPercent = d.ref_percent;
   if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
+  if (d.grow_plans) PLANS = d.grow_plans.map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
+  if (d.grows) GROWS = d.grows;
+  if (document.getElementById('view-egrow').classList.contains('active')) renderEgrow();
   if (d.payment) PAY = d.payment;
   if ('is_admin' in d) {
     S.isAdmin = d.is_admin;
@@ -767,6 +791,7 @@ function go(v) {
   document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.v === v));
   if (v === 'history') renderOrders();
   if (v === 'topup') renderTopup();
+  if (v === 'egrow') renderEgrow();
   window.scrollTo({ top: 0 });
   requestAnimationFrame(observeReveals);
 }
@@ -835,6 +860,11 @@ function priceFor(p, g) { return Math.round(p.base * tierFor(p, g).k * g); }
 function tierLabel(ts, i) { return i < ts.length - 1 ? `${ts[i].from}–${ts[i + 1].from - 1} г` : `${ts[i].from} г+`; }
 const goodsList = () => P || PRODUCTS;
 const ADMIN_CHAT = 'https://t.me/magicmarket_boss';
+let GROWS = [], PLANS = [];   // мои кусты и программы выращивания
+const GROW_GRADS = [
+  'linear-gradient(140deg,#3a1224,#1c0610)', 'linear-gradient(140deg,#2e1a08,#160c04)',
+  'linear-gradient(140deg,#123a1e,#06160c)', 'linear-gradient(140deg,#2a1236,#140620)',
+];
 const stockLabel = p => p.stock === 0
   ? '<span style="color:var(--danger)">● нет в наличии</span>'
   : '<span style="color:var(--ok)">● в наличии</span>';
@@ -1365,6 +1395,96 @@ function shareRef() {
   else copyRef();
 }
 
+/* ═══════════ E-growing ═══════════ */
+const DAY = 86400000;
+function growStage(g) {
+  const start = new Date(g.started).getTime();
+  const end = new Date(g.ends).getTime();
+  const now = Date.now();
+  if (g.status === 1) return { key: 'done', label: 'Завершён', prog: 100, daysLeft: 0 };
+  const total = Math.max(1, end - start);
+  const prog = Math.min(100, Math.max(0, Math.round((now - start) / total * 100)));
+  const daysLeft = Math.max(0, Math.ceil((end - now) / DAY));
+  const bloomStart = end - (g.bloom_days || 0) * DAY;
+  let key = 'grow', label = 'Рост 🌿';
+  if (now - start < DAY) { key = 'plant'; label = 'Посадка 🌱'; }
+  else if (g.bloom_days && now >= bloomStart && now < end) { key = 'bloom'; label = 'Цветение 🌹'; }
+  else if (now >= end) { key = 'harvest'; label = 'Сбор урожая 🧺'; }
+  return { key, label, prog, daysLeft };
+}
+function renderEgrow() {
+  // мои кусты
+  const my = document.getElementById('myGrows');
+  const active = GROWS.filter(g => g.status === 0);
+  const done = GROWS.filter(g => g.status === 1);
+  my.innerHTML = '';
+  if (active.length) {
+    my.innerHTML = `<div class="section-head"><h2>Мои кусты</h2><span>${active.length} растёт</span></div>` +
+      active.map(g => {
+        const s = growStage(g);
+        const roi = Math.round((g.payout - g.price) / g.price * 100);
+        return `<div class="bezel gold reveal" style="margin-bottom:12px"><div class="bezel-core" style="padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <b style="font-size:15px">${g.name}</b>
+            <span class="status ${s.key === 'bloom' ? 'st-ship' : s.key === 'harvest' ? 'st-done' : 'st-paid'}">${s.label}</span>
+          </div>
+          <div style="height:8px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--line);overflow:hidden">
+            <div style="height:100%;width:${s.prog}%;border-radius:99px;background:linear-gradient(90deg,#c9971d,#f0d47a);transition:width .6s var(--ease)"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:8px">
+            <span>${s.daysLeft > 0 ? `осталось ${s.daysLeft} дн.` : 'выплата вот-вот'}</span>
+            <span>выплата <b style="color:var(--gold-soft)">${fmt(g.payout)} ₴</b> · +${roi}%</span>
+          </div>
+        </div></div>`;
+      }).join('');
+  }
+  if (done.length) {
+    my.innerHTML += `<p class="note" style="margin:2px 0 0">✓ Завершено циклов: ${done.length} · получено ${fmt(done.reduce((a, g) => a + g.payout, 0))} ₴</p>`;
+  }
+
+  // программы
+  const el = document.getElementById('growPlans');
+  if (!PLANS.length) {
+    el.innerHTML = `<div class="empty" style="padding:30px"><div class="e-ico">🌱</div><p>Программы скоро появятся.<br>Следите за анонсами в канале.</p></div>`;
+    return;
+  }
+  el.innerHTML = PLANS.map((p, i) => {
+    const roi = Math.round((p.payout - p.price) / p.price * 100);
+    const soldOut = p.slots === 0;
+    return `<div class="bezel reveal" style="margin-bottom:14px;transition-delay:${i * 50}ms"><div class="bezel-core" style="padding:14px">
+      <div class="good-img" style="background:${p.grad};aspect-ratio:2/1;margin-bottom:12px">
+        ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : `<span style="font-size:40px">🌹</span>`}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <h3 style="font-size:16px;font-weight:800">${p.name}</h3>
+        <b style="color:var(--gold-soft);font-size:16px">+${roi}%</b>
+      </div>
+      ${p.sub ? `<p style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">${p.sub}</p>` : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0">
+        <div class="ref-stat" style="padding:9px 8px"><b style="font-size:14px">${fmt(p.price)} ₴</b><span>вход</span></div>
+        <div class="ref-stat" style="padding:9px 8px"><b style="font-size:14px;color:var(--gold-soft)">${fmt(p.payout)} ₴</b><span>выплата</span></div>
+        <div class="ref-stat" style="padding:9px 8px"><b style="font-size:14px">${p.days} дн.</b><span>цикл</span></div>
+      </div>
+      <p class="note" style="margin:0 0 12px">🌹 Цветение ${p.bloom_days || p.days} дн.${p.slots != null ? ` · осталось мест: ${p.slots}` : ''}</p>
+      ${soldOut
+        ? `<a class="btn btn-ghost" style="text-decoration:none;color:var(--warn)" href="${ADMIN_CHAT}" target="_blank" rel="noopener">Мест нет — написать админу</a>`
+        : `<button class="btn btn-gold" onclick="buyGrow(${p.id})">Посадить куст за ${fmt(p.price)} ₴
+            <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4-3.2-7-8-7 0 4.5 3.2 7 8 7z"/></svg></span>
+          </button>`}
+    </div></div>`;
+  }).join('');
+  observeReveals();
+}
+async function buyGrow(planId) {
+  if (!API.ok) return toast('Доступно после подключения сервера');
+  const p = PLANS.find(x => x.id === planId);
+  if (p && S.balance < p.price) { toast('Недостаточно средств — пополняем баланс'); return go('topup'); }
+  try { applySnapshot(await API.call('/api/grow/buy', { plan_id: planId })); }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Куст посажен 🌱 Следите за ростом!');
+  renderEgrow();
+}
+
 /* ═══════════ Поддержка ═══════════ */
 const FAQ = [
   { q: 'Как сделать заказ?',
@@ -1481,7 +1601,7 @@ async function openAdmin() {
 function renderAdmin(tab) {
   adminTab = tab;
   const tabs = [
-    ['products', 'Товары'], ['orders', 'Заказы'],
+    ['products', 'Товары'], ['grow', 'E-grow'], ['orders', 'Заказы'],
     ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}` : '')], ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
@@ -1498,6 +1618,16 @@ function renderAdmin(tab) {
         <p>${fmt(p.base)} ₴/г${p.stock != null ? ` · склад ${fmt(p.stock)} г` : ''}${p.rating.count ? ` · ★ ${p.rating.avg} (${p.rating.count})` : ''}</p></div>
       </div>`).join('') +
       `<button class="btn btn-gold" style="margin-top:14px" onclick="openPedit(null)">+ Добавить товар</button>`;
+  } else if (tab === 'grow') {
+    b.innerHTML = (AD.grow_plans || []).map(p => `
+      <div class="set-row" onclick="openGedit(${p.id})">
+        <div class="link-ico" style="overflow:hidden">${p.photo
+          ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" style="width:100%;height:100%;object-fit:cover">`
+          : '🌹'}</div>
+        <div><h3 style="${p.active ? '' : 'opacity:.45'}">${p.name}${p.active ? '' : ' · скрыт'}</h3>
+        <p>${fmt(p.price)}→${fmt(p.payout)} ₴ · ${p.days} дн.${p.slots != null ? ` · мест ${p.slots}` : ''}</p></div>
+      </div>`).join('') +
+      `<button class="btn btn-gold" style="margin-top:14px" onclick="openGedit(null)">+ Добавить программу</button>`;
   } else if (tab === 'orders') {
     b.innerHTML = AD.orders.length ? AD.orders.map((o, i) => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
@@ -1665,6 +1795,75 @@ async function decideOrder(code, approve) {
   catch (e) { return toast(e.message); }
   haptic('medium'); toast(approve ? 'Оплата подтверждена ✓' : 'Заказ отклонён');
   renderAdmin('orders');
+}
+/* ── админ: программы E-growing ── */
+let curGe = null, geActiveVal = true, gePhotoData = null, geDelArmed = false;
+function openGedit(id) {
+  curGe = id ? AD.grow_plans.find(p => p.id === id) : null;
+  geActiveVal = curGe ? curGe.active : true;
+  gePhotoData = null;
+  document.getElementById('geTitle').textContent = curGe ? 'Редактировать программу' : 'Новая программа';
+  document.getElementById('geName').value = curGe?.name || '';
+  document.getElementById('geSub').value = curGe?.sub || '';
+  document.getElementById('gePrice').value = curGe?.price ?? '';
+  document.getElementById('gePayout').value = curGe?.payout ?? '';
+  document.getElementById('geDays').value = curGe?.days ?? '';
+  document.getElementById('geBloom').value = curGe?.bloom_days ?? '';
+  document.getElementById('geSlots').value = curGe ? (curGe.slots ?? '') : '';
+  document.getElementById('geActive').classList.toggle('sel', geActiveVal);
+  document.getElementById('geDelete').style.display = curGe ? '' : 'none';
+  document.getElementById('geDelete').textContent = 'Удалить программу';
+  geDelArmed = false;
+  renderGePhoto();
+  openSheet('gedit');
+}
+function renderGePhoto() {
+  const src = gePhotoData || (curGe?.photo ? `/growphoto/${curGe.id}?size=t&v=${curGe.pv || 0}` : null);
+  document.getElementById('gePhoto').innerHTML = src
+    ? `<div style="position:relative;width:120px"><img src="${src}" style="width:120px;aspect-ratio:2/1;object-fit:cover;border-radius:12px;border:1px solid var(--line)"><div onclick="geRemovePhoto()" style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--danger);color:#fff;display:grid;place-items:center;font-size:12px;cursor:pointer">✕</div></div>`
+    : `<div onclick="document.getElementById('geFile').click()" style="width:120px;aspect-ratio:2/1;border-radius:12px;border:1px dashed var(--gold-line);display:grid;place-items:center;font-size:24px;color:var(--muted);cursor:pointer">+</div>`;
+}
+function geRemovePhoto() { gePhotoData = 'remove'; if (curGe) curGe.photo = false; renderGePhoto(); }
+document.getElementById('geFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  compressFile(f, 900, 0.78, d => { gePhotoData = d; renderGePhoto(); });
+  e.target.value = '';
+});
+function geToggleActive() { geActiveVal = !geActiveVal; document.getElementById('geActive').classList.toggle('sel', geActiveVal); haptic('light'); }
+async function saveGedit() {
+  const name = document.getElementById('geName').value.trim();
+  const price = parseInt(document.getElementById('gePrice').value, 10);
+  const payout = parseInt(document.getElementById('gePayout').value, 10);
+  const days = parseInt(document.getElementById('geDays').value, 10);
+  const bloom = parseInt(document.getElementById('geBloom').value, 10) || 0;
+  if (!name) return toast('Укажите название');
+  if (!price || !payout || !days) return toast('Заполните цену, выплату и цикл');
+  const slotsRaw = document.getElementById('geSlots').value.trim();
+  const photo = gePhotoData === 'remove' ? null : (gePhotoData || (curGe ? 'keep' : null));
+  try {
+    const r = await API.call('/api/admin/grow', {
+      id: curGe?.id || null, name, sub: document.getElementById('geSub').value.trim(),
+      price, payout, days, bloom_days: Math.min(bloom, days),
+      slots: slotsRaw === '' ? null : Math.max(0, parseInt(slotsRaw, 10) || 0),
+      active: geActiveVal, photo,
+    });
+    AD.grow_plans = r.grow_plans;
+    PLANS = r.grow_plans.filter(x => x.active).map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Программа сохранена');
+  openSheet('admin'); renderAdmin('grow');
+}
+async function deleteGrowPlan() {
+  const b = document.getElementById('geDelete');
+  if (!geDelArmed) { geDelArmed = true; b.textContent = 'Точно удалить? Нажмите ещё раз'; haptic('heavy'); return; }
+  try {
+    const r = await API.call('/api/admin/grow/delete', { id: curGe.id });
+    AD.grow_plans = r.grow_plans;
+    PLANS = r.grow_plans.filter(x => x.active).map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Программа удалена');
+  openSheet('admin'); renderAdmin('grow');
 }
 async function saveTtn(code) {
   const ttn = document.getElementById('ttn-' + code).value.trim();

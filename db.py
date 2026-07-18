@@ -110,6 +110,31 @@ async def init():
                 user_id    BIGINT NOT NULL,
                 product_id BIGINT NOT NULL,
                 stars      INT NOT NULL);
+            CREATE TABLE IF NOT EXISTS grow_plans(
+                id         BIGSERIAL PRIMARY KEY,
+                name       TEXT NOT NULL,
+                sub        TEXT DEFAULT '',
+                photo      TEXT,
+                price      BIGINT NOT NULL,
+                payout     BIGINT NOT NULL,
+                days       INT NOT NULL,
+                bloom_days INT NOT NULL DEFAULT 0,
+                slots      INT,
+                active     BOOLEAN NOT NULL DEFAULT true,
+                pos        INT NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS grows(
+                id         BIGSERIAL PRIMARY KEY,
+                user_id    BIGINT NOT NULL,
+                plan_id    BIGINT,
+                name       TEXT,
+                price      BIGINT,
+                payout     BIGINT,
+                days       INT,
+                bloom_days INT,
+                started    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                ends       TIMESTAMPTZ NOT NULL,
+                status     INT NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS grows_user_idx ON grows(user_id);
             CREATE TABLE IF NOT EXISTS settings(
                 key   TEXT PRIMARY KEY,
                 value TEXT);
@@ -301,6 +326,8 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "products": await get_products(conn=c),
         "payment": payment_public(await get_settings(conn=c)),
         "payments": await payments_history(tg_id, c),
+        "grow_plans": await get_grow_plans(conn=c),
+        "grows": await user_grows(tg_id, c),
     }
 
 
@@ -683,9 +710,119 @@ async def delete_account(tg_id: int):
         await c.execute("DELETE FROM topups WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM invoices WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM ratings WHERE user_id=$1", tg_id)
+        await c.execute("DELETE FROM grows WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", tg_id)
         await c.execute("UPDATE users SET ref_by=NULL WHERE ref_by=$1", tg_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", tg_id)
+
+
+# ── E-growing (краудфарминг) ─────────────────────────────────────────────────
+def _plan_row(r) -> dict:
+    return {
+        "id": r["id"], "name": r["name"], "sub": r["sub"] or "",
+        "price": r["price"], "payout": r["payout"],
+        "days": r["days"], "bloom_days": r["bloom_days"],
+        "slots": r["slots"], "active": r["active"],
+        "photo": bool(r["photo"]),
+        "pv": len(r["photo"] or ""),
+    }
+
+
+async def get_grow_plans(include_inactive: bool = False, conn=None) -> list:
+    c = conn or _pool
+    q = "SELECT * FROM grow_plans" + ("" if include_inactive else " WHERE active") + " ORDER BY pos, id"
+    return [_plan_row(r) for r in await c.fetch(q)]
+
+
+async def grow_plan_photo(pid: int, size: str = "f") -> str | None:
+    async with _pool.acquire() as c:
+        val = await c.fetchval("SELECT photo FROM grow_plans WHERE id=$1", pid)
+    if not val:
+        return None
+    try:
+        d = json.loads(val)
+        return d.get(size) or d.get("f")
+    except (ValueError, TypeError):
+        return val
+
+
+async def save_grow_plan(d: dict) -> int:
+    async with _pool.acquire() as c:
+        photo = None
+        if d.get("photo") == "keep" and d.get("id"):
+            photo = await c.fetchval("SELECT photo FROM grow_plans WHERE id=$1", int(d["id"]))
+        elif isinstance(d.get("photo"), str) and d["photo"].startswith("data:image/") \
+                and len(d["photo"]) <= MAX_PHOTO_LEN:
+            photo = json.dumps({"f": d["photo"], "t": _make_thumb(d["photo"])})
+        slots = d.get("slots")
+        slots = None if slots in (None, "") else max(0, int(slots))
+        vals = (d["name"], d.get("sub", ""), photo, int(d["price"]), int(d["payout"]),
+                int(d["days"]), int(d.get("bloom_days", 0)), slots, bool(d.get("active", True)))
+        if d.get("id"):
+            await c.execute("""
+                UPDATE grow_plans SET name=$2, sub=$3, photo=$4, price=$5, payout=$6,
+                                      days=$7, bloom_days=$8, slots=$9, active=$10 WHERE id=$1
+            """, int(d["id"]), *vals)
+            return int(d["id"])
+        return await c.fetchval("""
+            INSERT INTO grow_plans(name, sub, photo, price, payout, days, bloom_days, slots, active, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE((SELECT MAX(pos)+1 FROM grow_plans), 0))
+            RETURNING id
+        """, *vals)
+
+
+async def delete_grow_plan(pid: int):
+    async with _pool.acquire() as c:
+        await c.execute("DELETE FROM grow_plans WHERE id=$1", pid)
+
+
+def _grow_row(r) -> dict:
+    return {
+        "id": r["id"], "plan_id": r["plan_id"], "name": r["name"],
+        "price": r["price"], "payout": r["payout"],
+        "days": r["days"], "bloom_days": r["bloom_days"],
+        "started": r["started"].isoformat(), "ends": r["ends"].isoformat(),
+        "status": r["status"],
+    }
+
+
+async def user_grows(tg_id: int, conn=None) -> list:
+    c = conn or _pool
+    rows = await c.fetch("SELECT * FROM grows WHERE user_id=$1 ORDER BY id DESC", tg_id)
+    return [_grow_row(r) for r in rows]
+
+
+async def buy_grow(tg_id: int, plan_id: int) -> dict:
+    """Покупка куста с баланса. Резервирует слот, стартует цикл выращивания."""
+    async with _pool.acquire() as c, c.transaction():
+        p = await c.fetchrow("SELECT * FROM grow_plans WHERE id=$1 AND active FOR UPDATE", plan_id)
+        if not p:
+            raise ValueError("Программа недоступна")
+        if p["slots"] is not None and p["slots"] <= 0:
+            raise ValueError("Мест больше нет — напишите админу")
+        u = await c.fetchrow("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        if u["balance"] < p["price"]:
+            raise ValueError("Недостаточно средств — пополните баланс")
+        await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", p["price"], tg_id)
+        if p["slots"] is not None:
+            await c.execute("UPDATE grow_plans SET slots=slots-1 WHERE id=$1", plan_id)
+        await c.execute("""
+            INSERT INTO grows(user_id, plan_id, name, price, payout, days, bloom_days, ends)
+            VALUES($1,$2,$3,$4,$5,$6,$7, now() + make_interval(days => $6))
+        """, tg_id, plan_id, p["name"], p["price"], p["payout"], p["days"], p["bloom_days"])
+        return await snapshot(tg_id, c)
+
+
+async def mature_grows() -> list:
+    """Созревшие кусты: выплата дохода на баланс. Возвращает список для уведомлений."""
+    async with _pool.acquire() as c, c.transaction():
+        rows = await c.fetch(
+            "SELECT * FROM grows WHERE status=0 AND ends < now() FOR UPDATE")
+        for r in rows:
+            await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                            r["payout"], r["user_id"])
+            await c.execute("UPDATE grows SET status=1 WHERE id=$1", r["id"])
+        return [{"user_id": r["user_id"], "name": r["name"], "payout": r["payout"]} for r in rows]
 
 
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
@@ -714,6 +851,7 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         await c.execute("UPDATE topups SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE invoices SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE ratings SET user_id=$1 WHERE user_id=$2", new_id, old_id)
+        await c.execute("UPDATE grows SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2", new_id, old_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", old_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", old_id)
