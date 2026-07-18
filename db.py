@@ -344,6 +344,19 @@ async def set_settings(d: dict):
                 """, k, str(d[k]).strip())
 
 
+async def get_kv(key: str) -> str | None:
+    async with _pool.acquire() as c:
+        return await c.fetchval("SELECT value FROM settings WHERE key=$1", key)
+
+
+async def set_kv(key: str, value: str):
+    async with _pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO settings(key, value) VALUES($1,$2)
+            ON CONFLICT (key) DO UPDATE SET value=$2
+        """, key, value)
+
+
 def payment_public(s: dict) -> dict:
     """Только заполненные реквизиты — что показывать покупателю."""
     return {k: v for k, v in s.items() if v}

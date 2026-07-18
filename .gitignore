@@ -9,8 +9,10 @@ venv/
 node_modules/
 dist/
 
-# промо-материалы (локально)
-promo/
+# промо-материалы (локально, кроме публикуемых ботом)
+promo/*
+!promo/egrow-1.png
+!promo/egrow-4.png
 
 # IDE / OS
 .idea/

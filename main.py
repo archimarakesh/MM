@@ -7,6 +7,8 @@ import os
 import random
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import qrcode
@@ -32,6 +34,25 @@ MAX_RECEIPT_LEN = 6_000_000  # ~4.5 МБ файла в base64
 BONUS_CHANNEL_ID = os.getenv("BONUS_CHANNEL_ID", "")
 BONUS_CHAT_ID = os.getenv("BONUS_CHAT_ID", "")
 BONUS_AMOUNT = int(os.getenv("BONUS_AMOUNT", "100") or 100)
+
+# автопостинг промо в канал (по умолчанию — в бонусный канал)
+KYIV = ZoneInfo("Europe/Kyiv")
+PROMO_CHANNEL_ID = os.getenv("PROMO_CHANNEL_ID", "") or BONUS_CHANNEL_ID
+# 4 поста в день: каждое из двух промо — по 2 раза (чередование по слотам)
+PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,18:00,21:00").split(",") if t.strip()]
+PROMO_POSTS = [
+    ("promo/egrow-1.png",
+     "🌹 <b>E-GROWING в Magic Market</b>\n\n"
+     "Купи долю куста розы — от 1 000 ₴, доли от 10%.\n"
+     "Чем раньше вход, тем выше доходность: <b>до +35% за цикл</b>.\n"
+     "Живые фото куста и стадии роста — прямо в приложении."),
+    ("promo/egrow-4.png",
+     "✨ <b>Magic Market — премиальный магазин в Telegram</b>\n\n"
+     "🛍 Товары на вес — чем больше, тем дешевле грамм\n"
+     "🌹 E-growing — доли кустов, до +35% за цикл\n"
+     "📦 Доставка Новой Почтой с трекингом\n"
+     "🤝 Рефералка до 10% с покупок друзей"),
+]
 CARD_LIMIT = 5000            # оплата картой — до 5 000 ₴, свыше только крипта
 
 
@@ -200,6 +221,46 @@ async def invoice_checker():
         await asyncio.sleep(60)
 
 
+async def promo_poster():
+    """Автопостинг промо в канал: 4 слота в день, каждая картинка по 2 раза."""
+    if not (bot and PROMO_CHANNEL_ID and PROMO_TIMES):
+        log.warning("Промо-постинг выключен: нет бота или PROMO_CHANNEL_ID")
+        return
+    from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🛍 Открыть Magic Market",
+                             url="https://t.me/Magic_Marketplace_bot"),
+    ]])
+    while True:
+        try:
+            now = datetime.now(KYIV)
+            slots = []
+            for i, t in enumerate(PROMO_TIMES):
+                hh, mm = map(int, t.split(":"))
+                slots.append((now.replace(hour=hh, minute=mm, second=0, microsecond=0), i))
+            future = [(dt, i) for dt, i in slots if dt > now]
+            if future:
+                nxt, idx = min(future)
+            else:
+                nxt = min(dt for dt, _ in slots) + timedelta(days=1)
+                idx = 0
+            await asyncio.sleep(max(5, (nxt - now).total_seconds()))
+            slot_key = nxt.strftime("%Y-%m-%d %H:%M")
+            if await db.get_kv("last_promo") == slot_key:
+                continue  # уже постили в этот слот (например, после рестарта)
+            path, caption = PROMO_POSTS[idx % len(PROMO_POSTS)]
+            if os.path.exists(path):
+                await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
+                                     caption=caption, parse_mode="HTML", reply_markup=kb)
+                await db.set_kv("last_promo", slot_key)
+                log.info("Промо-пост отправлен: %s (%s)", path, slot_key)
+            else:
+                log.warning("Промо-файл не найден: %s", path)
+        except Exception:
+            log.exception("Ошибка промо-постинга")
+            await asyncio.sleep(300)
+
+
 async def grow_harvester():
     """Раз в 5 минут двигает стадии программ по расписанию; на сборе — выплаты."""
     while True:
@@ -299,10 +360,12 @@ async def lifespan(_: FastAPI):
     checker = asyncio.create_task(invoice_checker())
     tracker = asyncio.create_task(np_tracker())
     harvester = asyncio.create_task(grow_harvester())
+    poster = asyncio.create_task(promo_poster())
     yield
     checker.cancel()
     tracker.cancel()
     harvester.cancel()
+    poster.cancel()
     if menu_task:
         menu_task.cancel()
     if task:
