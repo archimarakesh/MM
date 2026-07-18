@@ -17,10 +17,10 @@ ORDER_CODE_BASE = 1000      # MM-1001, MM-1002, ...
 AUTO_DELIVER_DAYS = 5       # через сколько дней после отправки заказ считается полученным
 
 DEFAULT_TIERS = [
-    {"from": 1, "k": 1.00}, {"from": 10, "k": 0.90}, {"from": 25, "k": 0.80},
-    {"from": 50, "k": 0.70}, {"from": 100, "k": 0.60}, {"from": 250, "k": 0.55},
-    {"from": 500, "k": 0.50},
+    {"from": 1, "k": 1.00}, {"from": 10, "k": 0.90},
+    {"from": 25, "k": 0.80}, {"from": 50, "k": 0.70},
 ]
+MAX_GRAMS = 100
 MAX_PHOTO_LEN = 400_000   # ~300 КБ картинки в base64
 MAX_PHOTOS = 4
 SEED_PRODUCTS = [
@@ -442,8 +442,8 @@ async def _order_product_total(c, product_id: int, grams: int, lock: bool = Fals
     p = await c.fetchrow(q, product_id)
     if not p:
         raise ValueError("Товар не найден")
-    if not 1 <= grams <= 1000:
-        raise ValueError("Вес — от 1 до 1000 грамм")
+    if not 1 <= grams <= MAX_GRAMS:
+        raise ValueError(f"Вес — от 1 до {MAX_GRAMS} грамм")
     if p["stock"] is not None and grams > p["stock"]:
         raise ValueError("Такого количества нет в наличии — напишите админу")
     return p, price_for(_product_row(p, {}), grams)

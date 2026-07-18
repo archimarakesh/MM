@@ -746,11 +746,11 @@ const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 /* ═══════════ Данные ═══════════ */
 /* Товары легко заменить: базовая цена за грамм + пороги скидок */
 const TIERS = [
-  { from: 1, k: 1.00 }, { from: 10, k: 0.90 }, { from: 25, k: 0.80 },
-  { from: 50, k: 0.70 }, { from: 100, k: 0.60 }, { from: 250, k: 0.55 },
-  { from: 500, k: 0.50 },
+  { from: 1, k: 1.00 }, { from: 10, k: 0.90 },
+  { from: 25, k: 0.80 }, { from: 50, k: 0.70 },
 ];
 const WEIGHTS = [1, 3, 5, 10, 50, 100];
+const MAX_GRAMS = 100;
 const GRADS = [
   'linear-gradient(140deg,#3a2d0e,#1c1506)', 'linear-gradient(140deg,#23211d,#0e0d0b)',
   'linear-gradient(140deg,#3d2c12,#241505)', 'linear-gradient(140deg,#1f1d2b,#0d0c14)',
@@ -987,15 +987,19 @@ function renderProductSheet() {
         <p class="sheet-sub" style="margin:5px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}базово ${fmt(p.base)} ₴/г · ${stockLabel(p)}</p>
       </div>
     </div>
-    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес · от 1 до 1000 г</label>
+    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес · от 1 до ${MAX_GRAMS} г</label>
     <div class="weight-chips">
       ${WEIGHTS.map(w => `<div class="wchip ${w === curGrams ? 'sel' : ''}" data-w="${w}" onclick="setGrams(${w})">${w} г</div>`).join('')}
     </div>
-    <div style="display:flex;align-items:center;gap:8px;margin:-4px 0 14px">
+    <div style="display:flex;align-items:center;gap:8px;margin:-4px 0 8px">
       <input class="mini-input" id="customGrams" inputmode="numeric" placeholder="Свой вес" style="flex:1"
         value="${WEIGHTS.includes(curGrams) ? '' : curGrams}" oninput="customGramsInput(this.value)">
       <span style="font-size:12px;color:var(--muted-2)">грамм</span>
     </div>
+    <a class="ref-link" style="margin:0 0 14px;justify-content:center;text-decoration:none" href="${ADMIN_CHAT}" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><path d="M4 18v-7a8 8 0 0 1 16 0v7"/><path d="M20 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM4 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H4z"/></svg>
+      <span>Нужно больше ${MAX_GRAMS} г? Напишите админу</span>
+    </a>
     <div class="tier-table" id="tierTable"></div>
     <div class="total-row"><span id="totalGrams"></span><b id="totalSum"></b></div>
     <div id="orderAction"></div>`;
@@ -1025,7 +1029,7 @@ function setGrams(w) {
 function customGramsInput(v) {
   let g = parseInt(v, 10);
   if (!g || g < 1) return;
-  if (g > 1000) { g = 1000; document.getElementById('customGrams').value = 1000; }
+  if (g > MAX_GRAMS) { g = MAX_GRAMS; document.getElementById('customGrams').value = MAX_GRAMS; }
   curGrams = g;
   updatePrice();
 }
@@ -1665,7 +1669,7 @@ async function buyShare(planId) {
 /* ═══════════ Поддержка ═══════════ */
 const FAQ = [
   { q: 'Как сделать заказ?',
-    a: 'Откройте <b>Магазин</b> → выберите товар → укажите вес: быстрые кнопки или своё число от 1 до 1000 г (чем больше вес — тем дешевле грамм) → <b>«Оформить заказ»</b> → заполните имя, телефон, город и отделение Новой Почты → выберите способ оплаты и подтвердите.' },
+    a: 'Откройте <b>Магазин</b> → выберите товар → укажите вес: быстрые кнопки или своё число от 1 до 100 г (чем больше вес — тем дешевле грамм; нужно больше — напишите админу) → <b>«Оформить заказ»</b> → заполните имя, телефон, город и отделение Новой Почты → выберите способ оплаты и подтвердите.' },
   { q: 'Какие есть способы оплаты?',
     a: '<b>С баланса</b> — списывается сразу.<br><b>Картой</b> — переводите на наши реквизиты и прикрепляете квитанцию (фото или PDF), заказ подтверждается после проверки. Лимит — до 5 000 ₴.<br><b>Криптой (USDT TRC-20 / BTC)</b> — создаётся счёт с QR-кодом и точной суммой на 30 минут, зачисление автоматическое после подтверждения сети.' },
   { q: 'Как пополнить баланс?',
@@ -1879,17 +1883,18 @@ function openPedit(id) {
   document.getElementById('peTag').value = curPe?.tag || '';
   document.getElementById('peStock').value = curPe ? (curPe.stock ?? '') : '';
   peDelReset();
-  const ts = curPe ? [...curPe.tiers] : [...TIERS];
-  while (ts.length < 7) {
+  let ts = curPe ? [...curPe.tiers] : [...TIERS];
+  while (ts.length < 4) {
     const last = ts[ts.length - 1];
-    ts.push({ from: Math.round(last.from * 2), k: +(last.k * 0.92).toFixed(4) });
+    ts.push({ from: Math.round(last.from * 2), k: +(last.k * 0.9).toFixed(4) });
   }
+  ts = ts.slice(0, 4);
   const basePrice = curPe ? curPe.base : 100;
   pePhotos = curPe
     ? Array.from({ length: curPe.photos || 0 }, (_, i) => ({ url: `/photo/${curPe.id}/${i}?size=t&v=${curPe.pv || 0}`, payload: { old: i } }))
     : [];
   renderPePhotos();
-  document.getElementById('peTiers').innerHTML = ts.slice(0, 7).map((t, i) => `
+  document.getElementById('peTiers').innerHTML = ts.slice(0, 4).map((t, i) => `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--muted-2)">от</span>
@@ -1928,7 +1933,7 @@ async function savePedit() {
   const name = document.getElementById('peName').value.trim();
   if (!name) return toast('Укажите название');
   const rows = [];
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 4; i++) {
     const from = parseInt(document.getElementById('peFrom' + i).value, 10);
     const price = parseFloat(document.getElementById('pePrice' + i).value);
     if (!from || !price || price <= 0) return toast('Проверьте градацию цен');
