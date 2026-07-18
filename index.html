@@ -746,8 +746,8 @@ const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 /* ═══════════ Данные ═══════════ */
 /* Товары легко заменить: базовая цена за грамм + пороги скидок */
 const TIERS = [
-  { from: 1, k: 1.00 }, { from: 10, k: 0.90 },
-  { from: 25, k: 0.80 }, { from: 50, k: 0.70 },
+  { from: 1, k: 1.00 }, { from: 10, k: 0.90 }, { from: 25, k: 0.80 },
+  { from: 50, k: 0.70 }, { from: 100, k: 0.60 },
 ];
 const WEIGHTS = [1, 3, 5, 10, 50, 100];
 const MAX_GRAMS = 100;
@@ -1884,17 +1884,17 @@ function openPedit(id) {
   document.getElementById('peStock').value = curPe ? (curPe.stock ?? '') : '';
   peDelReset();
   let ts = curPe ? [...curPe.tiers] : [...TIERS];
-  while (ts.length < 4) {
+  while (ts.length < 5) {
     const last = ts[ts.length - 1];
     ts.push({ from: Math.round(last.from * 2), k: +(last.k * 0.9).toFixed(4) });
   }
-  ts = ts.slice(0, 4);
+  ts = ts.slice(0, 5);
   const basePrice = curPe ? curPe.base : 100;
   pePhotos = curPe
     ? Array.from({ length: curPe.photos || 0 }, (_, i) => ({ url: `/photo/${curPe.id}/${i}?size=t&v=${curPe.pv || 0}`, payload: { old: i } }))
     : [];
   renderPePhotos();
-  document.getElementById('peTiers').innerHTML = ts.slice(0, 4).map((t, i) => `
+  document.getElementById('peTiers').innerHTML = ts.slice(0, 5).map((t, i) => `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--muted-2)">от</span>
@@ -1933,7 +1933,7 @@ async function savePedit() {
   const name = document.getElementById('peName').value.trim();
   if (!name) return toast('Укажите название');
   const rows = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     const from = parseInt(document.getElementById('peFrom' + i).value, 10);
     const price = parseFloat(document.getElementById('pePrice' + i).value);
     if (!from || !price || price <= 0) return toast('Проверьте градацию цен');
