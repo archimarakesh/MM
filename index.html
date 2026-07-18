@@ -2311,7 +2311,9 @@ function pinStep() {
    - не из Telegram (и не локальный file:// для разработки) — доступ закрыт;
    - первый вход — обязательное создание пин-кода;
    - дальше — вход по пину */
-let lockBuf = '', lockMode = 'enter', lockFirst = '';
+let lockBuf = '', lockMode = 'enter', lockFirst = '', lockTimer = null;
+const PIN_MAX_FAILS = 3;
+const PIN_LOCK_MS = 60 * 60 * 1000; // час
 function initLock() {
   const lock = document.getElementById('lock');
   const title = document.getElementById('lockTitle');
@@ -2325,12 +2327,40 @@ function initLock() {
   }
   lock.classList.add('show');
   lockMode = S.pin ? 'enter' : 'create';
-  title.textContent = lockMode === 'enter' ? 'Введите пин-код' : 'Придумайте пин-код';
   buildPad(document.getElementById('lockPad'), document.getElementById('lockDots'), lockDigit,
     () => { lockBuf = lockBuf.slice(0, -1); paintDots(document.getElementById('lockDots'), lockBuf.length); });
+  if (lockMode === 'enter' && S.pinLockUntil && S.pinLockUntil > Date.now()) {
+    showPinLockout();
+  } else {
+    title.textContent = lockMode === 'enter' ? 'Введите пин-код' : 'Придумайте пин-код';
+  }
+}
+function showPinLockout() {
+  const pad = document.getElementById('lockPad');
+  const dots = document.getElementById('lockDots');
+  const title = document.getElementById('lockTitle');
+  pad.style.pointerEvents = 'none'; pad.style.opacity = '.3';
+  dots.style.visibility = 'hidden';
+  clearInterval(lockTimer);
+  const tick = () => {
+    const left = S.pinLockUntil - Date.now();
+    if (left <= 0) {
+      clearInterval(lockTimer);
+      S.pinLockUntil = 0; S.pinFails = 0; save();
+      pad.style.pointerEvents = ''; pad.style.opacity = '';
+      dots.style.visibility = ''; paintDots(dots, 0);
+      title.textContent = 'Введите пин-код';
+      return;
+    }
+    const m = Math.floor(left / 60000), s = Math.floor(left % 60000 / 1000);
+    title.innerHTML = 'Слишком много попыток 🔒<br>Повторите через <b style="color:var(--gold-soft)">' +
+      `${m}:${String(s).padStart(2, '0')}</b>`;
+  };
+  tick(); lockTimer = setInterval(tick, 1000);
 }
 function lockDigit(d) {
   if (lockBuf.length >= PIN_LEN) return;
+  if (lockMode === 'enter' && S.pinLockUntil && S.pinLockUntil > Date.now()) return;
   lockBuf += d;
   paintDots(document.getElementById('lockDots'), lockBuf.length);
   if (lockBuf.length === PIN_LEN) setTimeout(lockStep, 240);
@@ -2344,8 +2374,19 @@ function lockStep() {
     title.textContent = msg; haptic('heavy');
   };
   if (lockMode === 'enter') {
-    if (lockBuf === S.pin) { lock.classList.remove('show'); haptic('medium'); }
-    else fail('Неверный пин-код');
+    if (lockBuf === S.pin) {
+      S.pinFails = 0; S.pinLockUntil = 0; save();
+      lock.classList.remove('show'); haptic('medium');
+    } else {
+      S.pinFails = (S.pinFails || 0) + 1;
+      if (S.pinFails >= PIN_MAX_FAILS) {
+        S.pinLockUntil = Date.now() + PIN_LOCK_MS; S.pinFails = 0; save();
+        lockBuf = ''; paintDots(dots, 0); showPinLockout();
+        return;
+      }
+      save();
+      fail(`Неверный пин-код · осталось попыток: ${PIN_MAX_FAILS - S.pinFails}`);
+    }
   } else if (lockMode === 'create') {
     lockFirst = lockBuf; lockMode = 'repeat';
     title.textContent = 'Повторите пин-код';
