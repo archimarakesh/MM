@@ -132,6 +132,7 @@ async def init():
                 active     BOOLEAN NOT NULL DEFAULT true,
                 pos        INT NOT NULL DEFAULT 0);
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stages TEXT;
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS genetics TEXT DEFAULT '';
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stage INT NOT NULL DEFAULT 0;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stage_at TIMESTAMPTZ NOT NULL DEFAULT now();
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS sold_pct BIGINT NOT NULL DEFAULT 0;
@@ -828,6 +829,7 @@ def _plan_stages(r) -> list:
 def _plan_row(r) -> dict:
     return {
         "id": r["id"], "name": r["name"], "sub": r["sub"] or "",
+        "genetics": r["genetics"] or "",
         "price": r["price"], "slots": r["slots"],
         "stages": _plan_stages(r),
         "stage": r["stage"], "stage_at": r["stage_at"].isoformat(),
@@ -907,19 +909,20 @@ async def save_grow_plan(d: dict) -> int:
             photo = json.dumps({"f": d["photo"], "t": _make_thumb(d["photo"])})
         slots = d.get("slots")
         slots = None if slots in (None, "") else max(0, int(slots))
-        vals = (d["name"], d.get("sub", ""), photo, int(d["price"]), slots,
+        vals = (d["name"], d.get("sub", ""), str(d.get("genetics", "")).strip(),
+                photo, int(d["price"]), slots,
                 json.dumps(stages), bool(d.get("active", True)))
         if d.get("id"):
             await c.execute("""
-                UPDATE grow_plans SET name=$2, sub=$3, photo=$4, price=$5, slots=$6,
-                                      stages=$7, active=$8 WHERE id=$1
+                UPDATE grow_plans SET name=$2, sub=$3, genetics=$4, photo=$5, price=$6,
+                                      slots=$7, stages=$8, active=$9 WHERE id=$1
             """, int(d["id"]), *vals)
             return int(d["id"])
         # новая программа: цикл стартует с момента создания (стадия «семечко»)
         return await c.fetchval("""
-            INSERT INTO grow_plans(name, sub, photo, price, slots, stages, active,
+            INSERT INTO grow_plans(name, sub, genetics, photo, price, slots, stages, active,
                                    stage, stage_at, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7, 0, now(),
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8, 0, now(),
                    COALESCE((SELECT MAX(pos)+1 FROM grow_plans), 0))
             RETURNING id
         """, *vals)

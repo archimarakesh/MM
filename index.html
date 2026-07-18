@@ -671,6 +671,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <h2 id="geTitle">Программа выращивания</h2>
   <p class="sheet-sub">Клиенты покупают доли куста (кратно 10%). Чем раньше стадия входа — тем выше доходность. Цикл стартует с момента создания программы; выплаты — когда закончится стадия сбора урожая.</p>
   <div class="field"><label>Название</label><input id="geName" placeholder="Роза Premium"></div>
+  <div class="field"><label>Генетика</label><input id="geGenetics" placeholder="Например: Grand Prix × Freedom"></div>
   <div class="field"><label>Описание</label><input id="geSub" placeholder="Сортовая роза, теплица"></div>
   <div class="field"><label>Фото</label><div id="gePhoto"></div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -1542,6 +1543,7 @@ function renderEgrow() {
         <h3 style="font-size:16px;font-weight:800">${p.name}</h3>
         ${closed ? '' : `<b style="color:var(--gold-soft);font-size:15px">вход +${enterP}%</b>`}
       </div>
+      ${p.genetics ? `<div style="font-size:11.5px;font-weight:600;color:var(--gold-soft);margin-top:3px">🧬 ${p.genetics}</div>` : ''}
       ${p.sub ? `<p style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">${p.sub}</p>` : ''}
       ${stepper(p.stage, p.done)}
       ${p.live?.length ? `
@@ -1931,6 +1933,7 @@ function openGedit(id) {
   gePhotoData = null;
   document.getElementById('geTitle').textContent = curGe ? 'Редактировать программу' : 'Новая программа';
   document.getElementById('geName').value = curGe?.name || '';
+  document.getElementById('geGenetics').value = curGe?.genetics || '';
   document.getElementById('geSub').value = curGe?.sub || '';
   document.getElementById('gePrice').value = curGe?.price ?? '';
   document.getElementById('geSlots').value = curGe ? (curGe.slots ?? '') : '';
@@ -2058,7 +2061,9 @@ async function saveGedit() {
   const photo = gePhotoData === 'remove' ? null : (gePhotoData || (curGe ? 'keep' : null));
   try {
     const r = await API.call('/api/admin/grow', {
-      id: curGe?.id || null, name, sub: document.getElementById('geSub').value.trim(),
+      id: curGe?.id || null, name,
+      genetics: document.getElementById('geGenetics').value.trim(),
+      sub: document.getElementById('geSub').value.trim(),
       price, stages,
       slots: slotsRaw === '' ? null : Math.max(0, parseInt(slotsRaw, 10) || 0),
       active: geActiveVal, photo,
