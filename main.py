@@ -38,6 +38,9 @@ BONUS_AMOUNT = int(os.getenv("BONUS_AMOUNT", "100") or 100)
 # автопостинг промо в канал (по умолчанию — в бонусный канал)
 KYIV = ZoneInfo("Europe/Kyiv")
 PROMO_CHANNEL_ID = os.getenv("PROMO_CHANNEL_ID", "") or BONUS_CHANNEL_ID
+# кнопка под постом: после /newapp в BotFather поставь https://t.me/Magic_Marketplace_bot/shop —
+# будет открывать мини-апп сразу (web_app-кнопки в каналах Telegram не разрешает)
+PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace_bot")
 # 4 поста в день: каждое из двух промо — по 2 раза (чередование по слотам)
 PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,18:00,21:00").split(",") if t.strip()]
 PROMO_POSTS = [
@@ -228,8 +231,7 @@ async def promo_poster():
         return
     from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🛍 Открыть Magic Market",
-                             url="https://t.me/Magic_Marketplace_bot"),
+        InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL),
     ]])
     while True:
         try:
