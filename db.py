@@ -133,6 +133,10 @@ async def init():
                 pos        INT NOT NULL DEFAULT 0);
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stages TEXT;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS genetics TEXT DEFAULT '';
+            -- таблица могла быть создана старой версией, где payout/days были NOT NULL без дефолта
+            ALTER TABLE grow_plans ALTER COLUMN payout SET DEFAULT 0;
+            ALTER TABLE grow_plans ALTER COLUMN days SET DEFAULT 0;
+            ALTER TABLE grow_plans ALTER COLUMN bloom_days SET DEFAULT 0;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stage INT NOT NULL DEFAULT 0;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stage_at TIMESTAMPTZ NOT NULL DEFAULT now();
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS sold_pct BIGINT NOT NULL DEFAULT 0;

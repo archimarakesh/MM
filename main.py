@@ -583,6 +583,9 @@ async def api_admin_grow(request: Request):
         await db.save_grow_plan(b)
     except (KeyError, ValueError) as e:
         raise HTTPException(400, f"Проверьте поля программы: {e}")
+    except Exception:
+        log.exception("Ошибка сохранения программы выращивания")
+        raise HTTPException(400, "Не удалось сохранить программу — подробности в логах сервера")
     return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
 
 
