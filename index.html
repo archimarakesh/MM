@@ -430,11 +430,13 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
       <div class="bezel-core">
         <div class="b-label">Баланс кошелька</div>
         <div class="b-sum"><span id="profBalance">0</span> <small>₴</small></div>
-        <div class="balance-actions">
+        <div class="balance-actions" style="grid-template-columns:1fr 1fr">
           <button class="btn btn-gold" onclick="go('topup')">Пополнить
             <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
           </button>
-          <button class="btn btn-ghost" onclick="go('history')">История</button>
+          <button class="btn btn-ghost" onclick="openSheet('withdraw')">Вывести
+            <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
+          </button>
         </div>
       </div>
     </div>
@@ -549,6 +551,19 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   </button>
   <p class="note">После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.</p>
   <input type="file" id="coFile" accept="image/*,application/pdf" style="display:none">
+</div>
+
+<div class="sheet" id="sheet-withdraw">
+  <div class="sheet-grip"></div>
+  <h2>Вывод баланса</h2>
+  <p class="sheet-sub">Укажите сумму и свои реквизиты — выплатим вручную и пришлём уведомление. Минимум 100 ₴.</p>
+  <div class="field"><label>Сумма, ₴</label><input id="wdSum" inputmode="numeric" placeholder="500"></div>
+  <div class="field"><label>Куда вывести</label><div class="weight-chips" id="wdMethods" style="margin:0"></div></div>
+  <div class="field"><label id="wdReqLabel">Реквизиты</label><input id="wdReq" placeholder="Номер вашей карты"></div>
+  <button class="btn btn-gold" onclick="submitWithdraw()">Отправить заявку
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+  </button>
+  <p class="note">Сумма резервируется сразу. Если заявку отклонят — средства вернутся на баланс.</p>
 </div>
 
 <div class="sheet" id="sheet-invoice">
@@ -817,6 +832,7 @@ function openSheet(name) {
   document.getElementById('veil').classList.add('open');
   document.getElementById('sheet-' + name).classList.add('open');
   if (name === 'settings') syncSettings();
+  if (name === 'withdraw') renderWithdraw();
   if (name === 'delacc') {
     delAccArmed = false;
     document.getElementById('delAccBtn').textContent = 'Удалить аккаунт';
@@ -1159,6 +1175,7 @@ function syncBalance() {
 let tuMethod = '', tuReceipt = '', INV = null, invTimer = null, invPoll = null;
 const TU_ST_CARD = ['⏳ Проверяется', '✅ Зачислено', '❌ Отклонено'];
 const TU_ST_CRYPTO = ['⏳ Ожидает оплаты', '✅ Зачислено', '⌛ Отменён'];
+const TU_ST_OUT = ['⏳ В обработке', '✅ Выплачено', '↩️ Отклонён'];
 const TU_LABELS = { card: 'Карта', trc20: 'USDT TRC-20', btc: 'BTC', demo: 'Демо' };
 function tuAmount() { return parseInt(document.getElementById('tuSum').value, 10) || 0; }
 function tuOptions() {
@@ -1377,13 +1394,42 @@ function renderPayHistory() {
   const el = document.getElementById('payHistory');
   const pays = S.payments || [];
   el.innerHTML = pays.length ? pays.map(p => {
-    const st = (p.kind === 'card' ? TU_ST_CARD : TU_ST_CRYPTO)[p.status] || '';
+    const st = (p.kind === 'card' ? TU_ST_CARD : p.kind === 'out' ? TU_ST_OUT : TU_ST_CRYPTO)[p.status] || '';
+    const out = p.kind === 'out';
     return `<div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 15px;display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <div><b style="font-size:14px">${fmt(p.amount)} ₴</b>
-        <div style="font-size:11px;color:var(--muted-2);margin-top:2px">${TU_LABELS[p.method] || p.method} · ${new Date(p.created).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>
+      <div><b style="font-size:14px${out ? ';color:var(--warn)' : ''}">${out ? '−' : ''}${fmt(p.amount)} ₴</b>
+        <div style="font-size:11px;color:var(--muted-2);margin-top:2px">${out ? 'Вывод · ' : ''}${TU_LABELS[p.method] || p.method} · ${new Date(p.created).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>
       <span style="font-size:11.5px;font-weight:600;white-space:nowrap">${st}</span>
     </div></div>`;
-  }).join('') : '<div class="empty" style="padding:24px"><p>Пополнений пока не было</p></div>';
+  }).join('') : '<div class="empty" style="padding:24px"><p>Операций пока не было</p></div>';
+}
+
+/* ═══════════ Вывод баланса ═══════════ */
+let wdMethod = 'card';
+const WD_METHODS = [
+  ['card', 'Карта', 'Номер вашей карты'],
+  ['trc20', 'USDT TRC-20', 'Ваш кошелёк TRC-20 (T...)'],
+  ['btc', 'BTC', 'Ваш BTC-адрес'],
+];
+function renderWithdraw() {
+  document.getElementById('wdMethods').innerHTML = WD_METHODS.map(([k, l]) =>
+    `<div class="wchip ${k === wdMethod ? 'sel' : ''}" onclick="wdSel('${k}')">${l}</div>`).join('');
+  document.getElementById('wdReq').placeholder = WD_METHODS.find(m => m[0] === wdMethod)[2];
+}
+function wdSel(k) { haptic('light'); wdMethod = k; renderWithdraw(); }
+async function submitWithdraw() {
+  const v = parseInt(document.getElementById('wdSum').value, 10);
+  if (!v || v < 100) return toast('Минимальная сумма вывода — 100 ₴');
+  if (v > S.balance) return toast('Недостаточно средств на балансе');
+  const req = document.getElementById('wdReq').value.trim();
+  if (!req) return toast('Укажите реквизиты для выплаты');
+  if (!API.ok) return toast('Доступно после подключения сервера');
+  try { applySnapshot(await API.call('/api/withdraw', { amount: v, method: wdMethod, requisites: req })); }
+  catch (e) { return toast(e.message); }
+  document.getElementById('wdSum').value = '';
+  document.getElementById('wdReq').value = '';
+  closeSheets(true); haptic('medium');
+  toast('Заявка на вывод отправлена ⏳');
 }
 
 /* ═══════════ Профиль / рефералка ═══════════ */
@@ -1666,7 +1712,9 @@ function renderAdmin(tab) {
   adminTab = tab;
   const tabs = [
     ['products', 'Товары'], ['grow', 'E-grow'], ['orders', 'Заказы'],
-    ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}` : '')], ['pay', 'Оплата'],
+    ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}` : '')],
+    ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}` : '')],
+    ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
     `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
@@ -1715,6 +1763,21 @@ function renderAdmin(tab) {
             <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
           </div>` : ''}
       </div></div>`).join('') : '<div class="empty"><p>Заказов пока нет</p></div>';
+  } else if (tab === 'withdrawals') {
+    b.innerHTML = (AD.withdrawals || []).length ? AD.withdrawals.map(w => `
+      <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
+        <div class="order-top"><b>−${fmt(w.amount)} ₴ · ${TU_LABELS[w.method] || w.method}</b>
+          <span style="font-size:11px;color:var(--muted-2)">${dt(w.created)}</span></div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${w.user}${w.username ? ' · @' + w.username : ''} · ID ${w.user_id}</div>
+        <div class="ref-link" style="margin-bottom:10px" onclick="copyText('${(w.requisites || '').replace(/'/g, '')}')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span style="word-break:break-all">${w.requisites}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <button class="btn btn-gold" style="padding:12px" onclick="decideWithdraw(${w.id}, true)">Выплатил ✓</button>
+          <button class="btn btn-ghost" style="padding:12px" onclick="decideWithdraw(${w.id}, false)">Отклонить</button>
+        </div>
+      </div></div>`).join('') : '<div class="empty"><p>Нет заявок на вывод</p></div>';
   } else if (tab === 'topups') {
     b.innerHTML = AD.topups.length ? AD.topups.map((t, i) => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
@@ -2024,6 +2087,12 @@ async function saveTtn(code) {
   catch (e) { return toast(e.message); }
   haptic('medium'); toast('ТТН сохранён — покупатель уведомлён');
   renderAdmin('orders');
+}
+async function decideWithdraw(id, approve) {
+  try { AD.withdrawals = (await API.call('/api/admin/withdraw', { id, approve })).withdrawals; }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); toast(approve ? 'Выплата отмечена ✓' : 'Заявка отклонена — деньги возвращены');
+  renderAdmin('withdrawals');
 }
 async function decideTopup(id, approve) {
   try { AD.topups = (await API.call('/api/admin/topup', { id, approve })).topups; }

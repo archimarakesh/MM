@@ -523,6 +523,42 @@ async def api_account_delete(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/withdraw")
+async def api_withdraw(request: Request):
+    u = tg_user(request)
+    b = await request.json()
+    try:
+        snap = await db.create_withdrawal(
+            u["id"], int(b.get("amount", 0)),
+            str(b.get("method", "")), str(b.get("requisites", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
+    await notify(ADMIN_ID,
+                 f"💸 <b>Заявка на вывод {b.get('amount')} ₴</b>\n"
+                 f"{u.get('first_name', '')} (@{u.get('username', '—')}) · {b.get('method', '')}\n"
+                 f"<code>{str(b.get('requisites', ''))[:100]}</code>\nАдминка → Выводы.")
+    return snap
+
+
+@app.post("/api/admin/withdraw")
+async def api_admin_withdraw(request: Request):
+    admin_user(request)
+    b = await request.json()
+    try:
+        res = await db.withdrawal_decide(int(b.get("id", 0)), bool(b.get("approve")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res["approved"]:
+        await notify(res["user_id"],
+                     f"✅ Вывод <b>{res['amount']} ₴</b> выполнен — проверьте поступление.")
+    else:
+        await notify(res["user_id"],
+                     f"↩️ Заявка на вывод <b>{res['amount']} ₴</b> отклонена — средства возвращены на баланс. "
+                     "Если это ошибка — напишите в поддержку.")
+    return {"withdrawals": await db.admin_withdrawals()}
+
+
 @app.post("/api/grow/buy")
 async def api_grow_buy(request: Request):
     u = tg_user(request)
@@ -618,6 +654,7 @@ async def api_admin_data(request: Request):
         "grow_plans": await db.get_grow_plans(include_inactive=True),
         "settings": await db.get_settings(),
         "topups": await db.admin_topups(),
+        "withdrawals": await db.admin_withdrawals(),
         "orders": await db.admin_orders(),
     }
 

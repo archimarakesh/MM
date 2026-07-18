@@ -105,6 +105,15 @@ async def init():
                 created       TIMESTAMPTZ NOT NULL DEFAULT now(),
                 expires       TIMESTAMPTZ NOT NULL);
             ALTER TABLE invoices ADD COLUMN IF NOT EXISTS order_id BIGINT;
+            CREATE TABLE IF NOT EXISTS withdrawals(
+                id         BIGSERIAL PRIMARY KEY,
+                user_id    BIGINT NOT NULL,
+                amount     BIGINT NOT NULL,
+                method     TEXT,
+                requisites TEXT,
+                status     INT NOT NULL DEFAULT 0,
+                created    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                decided    TIMESTAMPTZ);
             CREATE TABLE IF NOT EXISTS ratings(
                 order_id   BIGINT PRIMARY KEY,
                 user_id    BIGINT NOT NULL,
@@ -367,7 +376,13 @@ async def payments_history(tg_id: int, c) -> list:
         SELECT amount_uah AS amount, currency AS method, status, created FROM invoices
         WHERE user_id=$1 ORDER BY id DESC LIMIT 30
     """, tg_id)
-    rows = [{**dict(r), "kind": "card"} for r in tt] + [{**dict(r), "kind": "crypto"} for r in inv]
+    wd = await c.fetch("""
+        SELECT amount, method, status, created FROM withdrawals
+        WHERE user_id=$1 ORDER BY id DESC LIMIT 30
+    """, tg_id)
+    rows = [{**dict(r), "kind": "card"} for r in tt] \
+        + [{**dict(r), "kind": "crypto"} for r in inv] \
+        + [{**dict(r), "kind": "out"} for r in wd]
     rows.sort(key=lambda r: r["created"], reverse=True)
     return [{**r, "created": r["created"].isoformat()} for r in rows[:40]]
 
@@ -737,9 +752,60 @@ async def delete_account(tg_id: int):
         await c.execute("DELETE FROM ratings WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM grows WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM shares WHERE user_id=$1", tg_id)
+        await c.execute("DELETE FROM withdrawals WHERE user_id=$1", tg_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", tg_id)
         await c.execute("UPDATE users SET ref_by=NULL WHERE ref_by=$1", tg_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", tg_id)
+
+
+# ── вывод баланса (ручная выплата) ───────────────────────────────────────────
+MIN_WITHDRAW = 100
+
+
+async def create_withdrawal(tg_id: int, amount: int, method: str, requisites: str) -> dict:
+    if amount < MIN_WITHDRAW:
+        raise ValueError(f"Минимальная сумма вывода — {MIN_WITHDRAW} ₴")
+    if not requisites.strip():
+        raise ValueError("Укажите реквизиты для выплаты")
+    async with _pool.acquire() as c, c.transaction():
+        u = await c.fetchrow("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        if u["balance"] < amount:
+            raise ValueError("Недостаточно средств на балансе")
+        await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", amount, tg_id)
+        await c.execute("""
+            INSERT INTO withdrawals(user_id, amount, method, requisites) VALUES($1,$2,$3,$4)
+        """, tg_id, amount, method, requisites.strip()[:200])
+        return await snapshot(tg_id, c)
+
+
+async def admin_withdrawals() -> list:
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT w.*, u.name, u.username FROM withdrawals w
+            LEFT JOIN users u ON u.tg_id = w.user_id
+            WHERE w.status=0 ORDER BY w.id
+        """)
+    return [{
+        "id": r["id"], "user_id": r["user_id"],
+        "user": r["name"] or "?", "username": r["username"],
+        "amount": r["amount"], "method": r["method"], "requisites": r["requisites"],
+        "created": r["created"].isoformat(),
+    } for r in rows]
+
+
+async def withdrawal_decide(wid: int, approve: bool) -> dict:
+    """Выплачено — баланс уже списан; отклонено — возврат на баланс."""
+    async with _pool.acquire() as c, c.transaction():
+        w = await c.fetchrow(
+            "SELECT * FROM withdrawals WHERE id=$1 AND status=0 FOR UPDATE", wid)
+        if not w:
+            raise ValueError("Заявка не найдена или уже обработана")
+        await c.execute("UPDATE withdrawals SET status=$2, decided=now() WHERE id=$1",
+                        wid, 1 if approve else 2)
+        if not approve:
+            await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                            w["amount"], w["user_id"])
+        return {"user_id": w["user_id"], "amount": w["amount"], "approved": approve}
 
 
 # ── E-growing (доли в кустах, стадии роста) ──────────────────────────────────
@@ -1016,6 +1082,7 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         await c.execute("UPDATE ratings SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE grows SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE shares SET user_id=$1 WHERE user_id=$2", new_id, old_id)
+        await c.execute("UPDATE withdrawals SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2", new_id, old_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", old_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", old_id)
