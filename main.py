@@ -320,6 +320,17 @@ def tg_user(request: Request) -> dict:
     return user
 
 
+def client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
+def client_device(request: Request) -> str:
+    return request.headers.get("x-device", "")[:64]
+
+
 def admin_user(request: Request) -> dict:
     u = tg_user(request)
     if not ADMIN_ID or u["id"] != ADMIN_ID:
@@ -394,6 +405,7 @@ async def api_auth(request: Request):
     u = tg_user(request)
     name = " ".join(filter(None, [u.get("first_name"), u.get("last_name")]))
     await db.upsert_user(u["id"], name, u.get("username"))
+    await db.touch_device(u["id"], client_device(request), client_ip(request))
     return await _snap(u["id"])
 
 
@@ -558,8 +570,11 @@ async def api_bonus_claim(request: Request):
     if not (await _is_member(BONUS_CHANNEL_ID, u["id"])
             and await _is_member(BONUS_CHAT_ID, u["id"])):
         raise HTTPException(400, "Подпишитесь на канал и вступите в чат, затем нажмите ещё раз")
-    if not await db.claim_bonus(u["id"], BONUS_AMOUNT):
-        raise HTTPException(400, "Бонус уже был получен")
+    try:
+        await db.claim_bonus(u["id"], BONUS_AMOUNT,
+                             client_device(request), client_ip(request))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     await notify(ADMIN_ID,
                  f"🎁 {u.get('first_name', '')} (@{u.get('username', '—')}) получил "
                  f"приветственный бонус {BONUS_AMOUNT} ₴.")

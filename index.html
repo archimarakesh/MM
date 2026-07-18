@@ -787,12 +787,36 @@ let S = JSON.parse(localStorage.getItem(DB_KEY) || 'null') || {
 const save = () => localStorage.setItem(DB_KEY, JSON.stringify(S));
 
 /* ═══════════ API (Railway-бэкенд; без него — демо-режим) ═══════════ */
+let DEV = localStorage.getItem('mm_dev') || '';
+async function deviceHash() {
+  if (DEV) return DEV;
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = 240; cv.height = 60;
+    const g = cv.getContext('2d');
+    g.textBaseline = 'top'; g.font = '16px Arial';
+    g.fillStyle = '#f60'; g.fillRect(10, 10, 100, 30);
+    g.fillStyle = '#069'; g.fillText('MagicMarket🌹', 4, 20);
+    const data = [
+      cv.toDataURL(), navigator.userAgent, navigator.platform, navigator.language,
+      screen.width, screen.height, screen.colorDepth,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+      navigator.hardwareConcurrency, navigator.maxTouchPoints,
+    ].join('|');
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
+    DEV = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+  } catch (e) {
+    DEV = 'na';
+  }
+  localStorage.setItem('mm_dev', DEV);
+  return DEV;
+}
 const API = {
   ok: false,
   async call(path, body) {
     const r = await fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Init-Data': tg?.initData || '' },
+      headers: { 'Content-Type': 'application/json', 'X-Init-Data': tg?.initData || '', 'X-Device': DEV },
       body: JSON.stringify(body || {}),
     });
     if (!r.ok) {
@@ -823,6 +847,7 @@ function applySnapshot(d) {
 }
 async function serverSync() {
   if (!tg?.initData || location.protocol === 'file:') return;
+  await deviceHash();
   try { applySnapshot(await API.call('/api/auth')); API.ok = true; }
   catch (e) { /* сервера нет — остаёмся в демо-режиме */ }
 }

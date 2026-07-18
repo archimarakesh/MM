@@ -57,6 +57,15 @@ async def init():
                 ref_earned BIGINT NOT NULL DEFAULT 0,
                 created    TIMESTAMPTZ NOT NULL DEFAULT now());
             ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_claimed BOOLEAN NOT NULL DEFAULT false;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS device_hash TEXT;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT;
+            CREATE TABLE IF NOT EXISTS bonus_claims(
+                user_id     BIGINT PRIMARY KEY,
+                device_hash TEXT,
+                ip          TEXT,
+                created     TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE INDEX IF NOT EXISTS bonus_claims_dev_idx ON bonus_claims(device_hash);
+            CREATE INDEX IF NOT EXISTS bonus_claims_ip_idx ON bonus_claims(ip);
             CREATE TABLE IF NOT EXISTS products(
                 id     BIGSERIAL PRIMARY KEY,
                 name   TEXT NOT NULL,
@@ -765,17 +774,36 @@ async def delete_account(tg_id: int):
         await c.execute("DELETE FROM users WHERE tg_id=$1", tg_id)
 
 
-async def claim_bonus(tg_id: int, amount: int) -> bool:
-    """Одноразовый приветственный бонус. False — уже получен."""
+async def touch_device(tg_id: int, device: str, ip: str):
+    """Запоминаем отпечаток устройства и IP пользователя (для антиабьюза)."""
+    async with _pool.acquire() as c:
+        await c.execute("""
+            UPDATE users SET device_hash = COALESCE(NULLIF($2, ''), device_hash),
+                             last_ip = COALESCE(NULLIF($3, ''), last_ip)
+            WHERE tg_id=$1
+        """, tg_id, device[:64], ip[:64])
+
+
+async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
+    """Одноразовый бонус: раз на аккаунт, раз на устройство, раз на IP."""
     async with _pool.acquire() as c, c.transaction():
         claimed = await c.fetchval(
             "SELECT bonus_claimed FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         if claimed:
-            return False
+            raise ValueError("Бонус уже был получен")
+        if device and await c.fetchval(
+                "SELECT 1 FROM bonus_claims WHERE device_hash=$1 LIMIT 1", device):
+            raise ValueError("С этого устройства бонус уже получали")
+        if ip and await c.fetchval(
+                "SELECT 1 FROM bonus_claims WHERE ip=$1 LIMIT 1", ip):
+            raise ValueError("С этого IP бонус уже получали")
         await c.execute(
             "UPDATE users SET bonus_claimed=true, balance=balance+$1 WHERE tg_id=$2",
             amount, tg_id)
-        return True
+        await c.execute("""
+            INSERT INTO bonus_claims(user_id, device_hash, ip) VALUES($1,$2,$3)
+            ON CONFLICT (user_id) DO NOTHING
+        """, tg_id, device[:64] or None, ip[:64] or None)
 
 
 # ── вывод баланса (ручная выплата) ───────────────────────────────────────────
