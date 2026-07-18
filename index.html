@@ -667,7 +667,10 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div class="field"><label>Бейдж</label><input id="peTag" placeholder="ХИТ / NEW / пусто"></div>
     <div class="field"><label>Наличие, г</label><input id="peStock" inputmode="numeric" placeholder="пусто — без лимита"></div>
   </div>
-  <div class="field"><label>Фото товара · до 4 шт</label><div id="pePhotos" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div></div>
+  <div class="field"><label>Фото товара · до 4 шт</label>
+    <div id="pePhotos" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div>
+    <p class="note" id="pePhotoHint" style="margin:6px 0 0;display:none">Перетащите фото, чтобы изменить порядок. Первое — главное.</p>
+  </div>
   <div class="field"><label>Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
   <input type="file" id="peFile" accept="image/*" style="display:none">
   <div class="pay-opts" style="grid-template-columns:1fr">
@@ -1911,13 +1914,50 @@ let pePhotos = [];
 function renderPePhotos() {
   const el = document.getElementById('pePhotos');
   el.innerHTML = pePhotos.map((p, i) => `
-    <div style="position:relative">
-      <img src="${p.url}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;border:1px solid var(--line)">
-      <div onclick="peRemovePhoto(${i})" style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--danger);color:#fff;display:grid;place-items:center;font-size:12px;cursor:pointer">✕</div>
+    <div class="pe-photo" data-idx="${i}" style="position:relative;touch-action:none;transition:transform .2s var(--ease)">
+      <img src="${p.url}" draggable="false" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;border:1px solid ${i === 0 ? 'var(--gold)' : 'var(--line)'};pointer-events:none">
+      ${i === 0 ? '<span style="position:absolute;left:4px;bottom:4px;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:99px;background:rgba(5,5,5,.8);color:var(--gold-soft)">★ Главное</span>' : ''}
+      <div class="pe-del" onclick="peRemovePhoto(${i})" style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--danger);color:#fff;display:grid;place-items:center;font-size:12px;cursor:pointer">✕</div>
     </div>`).join('') +
     (pePhotos.length < 4 ? `<div onclick="document.getElementById('peFile').click()" style="aspect-ratio:1;border-radius:12px;border:1px dashed var(--gold-line);display:grid;place-items:center;font-size:24px;color:var(--muted);cursor:pointer">+</div>` : '');
+  const hint = document.getElementById('pePhotoHint');
+  if (hint) hint.style.display = pePhotos.length > 1 ? '' : 'none';
+  bindPhotoDrag();
 }
 function peRemovePhoto(i) { pePhotos.splice(i, 1); renderPePhotos(); haptic('light'); }
+
+/* перетаскивание фото для смены порядка; первое = главное */
+let dragIdx = -1, dragEl = null, dragMoved = false;
+function bindPhotoDrag() {
+  document.querySelectorAll('.pe-photo').forEach(tile => {
+    tile.onpointerdown = e => {
+      if (e.target.closest('.pe-del')) return;  // крестик не тянем
+      dragIdx = +tile.dataset.idx; dragEl = tile; dragMoved = false;
+      tile.setPointerCapture(e.pointerId);
+      tile.style.opacity = '.6'; tile.style.transform = 'scale(1.08)'; tile.style.zIndex = '5';
+    };
+    tile.onpointermove = e => {
+      if (dragIdx < 0 || dragEl !== tile) return;
+      dragMoved = true;
+      const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('.pe-photo');
+      if (over && over !== tile) {
+        const to = +over.dataset.idx;
+        const [m] = pePhotos.splice(dragIdx, 1);
+        pePhotos.splice(to, 0, m);
+        dragIdx = to;
+        haptic('light');
+        renderPePhotos();
+        dragEl = document.querySelector(`.pe-photo[data-idx="${to}"]`);
+        dragEl.style.opacity = '.6'; dragEl.style.transform = 'scale(1.08)'; dragEl.style.zIndex = '5';
+      }
+    };
+    tile.onpointerup = tile.onpointercancel = () => {
+      if (dragIdx < 0) return;
+      dragIdx = -1; dragEl = null;
+      renderPePhotos();
+    };
+  });
+}
 document.getElementById('peFile').addEventListener('change', e => {
   const f = e.target.files[0];
   if (!f) return;
