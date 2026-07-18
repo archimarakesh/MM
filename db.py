@@ -127,6 +127,13 @@ async def init():
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stage_at TIMESTAMPTZ NOT NULL DEFAULT now();
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS sold_pct BIGINT NOT NULL DEFAULT 0;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS done BOOLEAN NOT NULL DEFAULT false;
+            CREATE TABLE IF NOT EXISTS grow_photos(
+                id      BIGSERIAL PRIMARY KEY,
+                plan_id BIGINT NOT NULL,
+                photo   TEXT NOT NULL,
+                note    TEXT DEFAULT '',
+                created TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE INDEX IF NOT EXISTS grow_photos_plan_idx ON grow_photos(plan_id);
             CREATE TABLE IF NOT EXISTS shares(
                 id         BIGSERIAL PRIMARY KEY,
                 user_id    BIGINT NOT NULL,
@@ -768,7 +775,43 @@ def _plan_row(r) -> dict:
 async def get_grow_plans(include_inactive: bool = False, conn=None) -> list:
     c = conn or _pool
     q = "SELECT * FROM grow_plans" + ("" if include_inactive else " WHERE active") + " ORDER BY pos, id"
-    return [_plan_row(r) for r in await c.fetch(q)]
+    plans = [_plan_row(r) for r in await c.fetch(q)]
+    live = await c.fetch(
+        "SELECT id, plan_id, note, created FROM grow_photos ORDER BY id DESC")
+    by_plan: dict = {}
+    for r in live:
+        by_plan.setdefault(r["plan_id"], []).append(
+            {"id": r["id"], "note": r["note"] or "", "created": r["created"].isoformat()})
+    for p in plans:
+        p["live"] = by_plan.get(p["id"], [])[:12]
+    return plans
+
+
+async def add_grow_photo(plan_id: int, photo: str, note: str = "") -> int:
+    if not photo.startswith("data:image/") or len(photo) > MAX_PHOTO_LEN:
+        raise ValueError("Приложите фото")
+    data = json.dumps({"f": photo, "t": _make_thumb(photo)})
+    async with _pool.acquire() as c:
+        return await c.fetchval(
+            "INSERT INTO grow_photos(plan_id, photo, note) VALUES($1,$2,$3) RETURNING id",
+            plan_id, data, note.strip()[:200])
+
+
+async def delete_grow_photo(photo_id: int):
+    async with _pool.acquire() as c:
+        await c.execute("DELETE FROM grow_photos WHERE id=$1", photo_id)
+
+
+async def grow_live_photo(photo_id: int, size: str = "f") -> str | None:
+    async with _pool.acquire() as c:
+        val = await c.fetchval("SELECT photo FROM grow_photos WHERE id=$1", photo_id)
+    if not val:
+        return None
+    try:
+        d = json.loads(val)
+        return d.get(size) or d.get("f")
+    except (ValueError, TypeError):
+        return val
 
 
 async def grow_plan_photo(pid: int, size: str = "f") -> str | None:
@@ -824,6 +867,7 @@ async def delete_grow_plan(pid: int):
             await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
                             r["invested"], r["user_id"])
         await c.execute("DELETE FROM shares WHERE plan_id=$1", pid)
+        await c.execute("DELETE FROM grow_photos WHERE plan_id=$1", pid)
         await c.execute("DELETE FROM grow_plans WHERE id=$1", pid)
         return [{"user_id": r["user_id"], "amount": r["invested"]} for r in rows]
 

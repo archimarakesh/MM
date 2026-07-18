@@ -346,6 +346,17 @@ async def grow_photo(pid: int, size: str = "f"):
                     headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
+@app.get("/growlive/{photo_id}")
+async def grow_live(photo_id: int, size: str = "f"):
+    data = await db.grow_live_photo(photo_id, "t" if size == "t" else "f")
+    if not data:
+        raise HTTPException(404, "Нет фото")
+    header, b64 = data.split(",", 1)
+    mime = header.split(":", 1)[1].split(";", 1)[0]
+    return Response(base64.b64decode(b64), media_type=mime,
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @app.get("/photo/{pid}/{idx}")
 async def product_photo(pid: int, idx: int, size: str = "f"):
     data = await db.product_photo(pid, idx, "t" if size == "t" else "f")
@@ -547,6 +558,26 @@ async def api_admin_grow_stage(request: Request):
     for n in notes:
         await notify(n["user_id"],
                      f"🧺 Урожай «{n['name']}» собран! Выплата <b>{n['payout']} ₴</b> зачислена на баланс.")
+    return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
+
+
+@app.post("/api/admin/grow/photo")
+async def api_admin_grow_photo(request: Request):
+    admin_user(request)
+    b = await request.json()
+    try:
+        await db.add_grow_photo(int(b.get("plan_id", 0)),
+                                str(b.get("photo", "")), str(b.get("note", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
+
+
+@app.post("/api/admin/grow/photo/delete")
+async def api_admin_grow_photo_delete(request: Request):
+    admin_user(request)
+    b = await request.json()
+    await db.delete_grow_photo(int(b.get("id", 0)))
     return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
 
 

@@ -668,6 +668,12 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div class="weight-chips" id="geStageChips" style="margin:0"></div>
     <button class="btn btn-ghost" id="geFinishBtn" style="margin-top:10px;color:var(--ok)" onclick="finishGrow()">🧺 Завершить сбор и выплатить всем</button>
   </div>
+  <div class="field" id="geLiveWrap" style="display:none">
+    <label>Живые фото · публикуются с датой</label>
+    <input id="geLiveNote" placeholder="Подпись к фото (необязательно)" style="margin-bottom:8px">
+    <div id="geLiveGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"></div>
+  </div>
+  <input type="file" id="geLiveFile" accept="image/*" style="display:none">
   <div class="pay-opts" style="grid-template-columns:1fr">
     <div class="pay-opt" id="geActive" onclick="geToggleActive()">Программа активна<small>показывается в E-growing</small></div>
   </div>
@@ -1414,6 +1420,7 @@ const DEFAULT_STAGES = [
   { d: 20, p: 15 }, { d: 28, p: 8 }, { d: 14, p: 0 },
 ];
 const selPct = {}; // выбранная доля по программе
+const liveDate = iso => new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const planStages = p => (p.stages && p.stages.length === 6) ? p.stages : DEFAULT_STAGES;
 function planAvail(p) {
   return p.slots == null ? null : Math.max(0, p.slots * 100 - (p.sold_pct || 0));
@@ -1491,6 +1498,17 @@ function renderEgrow() {
       </div>
       ${p.sub ? `<p style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">${p.sub}</p>` : ''}
       ${stepper(p.stage, p.done)}
+      ${p.live?.length ? `
+      <p class="note" style="margin:6px 0 6px">📸 Живые фото · как выглядит куст</p>
+      <div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px">
+        ${p.live.map(l => `
+        <div style="position:relative;flex:none" onclick="openViewer('/growlive/${l.id}')">
+          <img src="/growlive/${l.id}?size=t" alt="" loading="lazy" decoding="async"
+            style="width:108px;aspect-ratio:1;object-fit:cover;border-radius:12px;border:1px solid var(--line);cursor:pointer">
+          <span style="position:absolute;left:5px;bottom:5px;font-size:9px;font-weight:700;padding:2px 6px;border-radius:99px;background:rgba(5,5,5,.75);color:var(--gold-soft)">${liveDate(l.created)}</span>
+          ${l.note ? `<span style="position:absolute;left:5px;top:5px;right:5px;font-size:9px;padding:2px 6px;border-radius:8px;background:rgba(5,5,5,.6);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.note}</span>` : ''}
+        </div>`).join('')}
+      </div>` : ''}
       <p class="note" style="margin:0 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
         : `Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}`}</p>
       <div class="tier-table" style="margin-bottom:12px">
@@ -1877,8 +1895,49 @@ function openGedit(id) {
   document.getElementById('geDelete').style.display = curGe ? '' : 'none';
   document.getElementById('geDelete').textContent = 'Удалить программу';
   geDelArmed = false;
+  document.getElementById('geLiveWrap').style.display = curGe ? '' : 'none';
+  renderGeLive();
   renderGePhoto();
   openSheet('gedit');
+}
+function syncGrowPlans(r) {
+  AD.grow_plans = r.grow_plans;
+  PLANS = r.grow_plans.filter(x => x.active).map((p, k) => ({ ...p, grad: GROW_GRADS[k % GROW_GRADS.length] }));
+  if (curGe) curGe = AD.grow_plans.find(x => x.id === curGe.id) || null;
+}
+function renderGeLive() {
+  const el = document.getElementById('geLiveGrid');
+  if (!curGe) { el.innerHTML = ''; return; }
+  el.innerHTML = (curGe.live || []).map(l => `
+    <div style="position:relative">
+      <img src="/growlive/${l.id}?size=t" onclick="openViewer('/growlive/${l.id}')"
+        style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;border:1px solid var(--line);cursor:pointer">
+      <div onclick="delGeLive(${l.id})" style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--danger);color:#fff;display:grid;place-items:center;font-size:12px;cursor:pointer">✕</div>
+      <span style="position:absolute;left:4px;bottom:4px;font-size:8.5px;font-weight:700;padding:2px 5px;border-radius:99px;background:rgba(5,5,5,.75);color:var(--gold-soft)">${liveDate(l.created)}</span>
+    </div>`).join('') +
+    `<div onclick="document.getElementById('geLiveFile').click()" style="aspect-ratio:1;border-radius:12px;border:1px dashed var(--gold-line);display:grid;place-items:center;font-size:24px;color:var(--muted);cursor:pointer">+</div>`;
+}
+document.getElementById('geLiveFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f || !curGe) return;
+  compressFile(f, 1100, 0.8, async d => {
+    try {
+      syncGrowPlans(await API.call('/api/admin/grow/photo', {
+        plan_id: curGe.id, photo: d,
+        note: document.getElementById('geLiveNote').value.trim(),
+      }));
+    } catch (err) { return toast(err.message); }
+    document.getElementById('geLiveNote').value = '';
+    haptic('medium'); toast('Фото опубликовано 📸');
+    renderGeLive();
+  });
+  e.target.value = '';
+});
+async function delGeLive(id) {
+  try { syncGrowPlans(await API.call('/api/admin/grow/photo/delete', { id })); }
+  catch (e) { return toast(e.message); }
+  haptic('light'); toast('Фото удалено');
+  renderGeLive();
 }
 async function geSetStage(i) {
   if (!curGe) return;
