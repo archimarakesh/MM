@@ -1476,6 +1476,13 @@ function stageDaysLeft(p) {
   const dur = (planStages(p)[p.stage]?.d || 0) * DAY;
   return Math.max(0, Math.ceil((new Date(p.stage_at).getTime() + dur - Date.now()) / DAY));
 }
+function cycleTotals(stages, stage, stageAt, done) {
+  const total = stages.reduce((a, s) => a + s.d, 0);
+  if (done) return { total, left: 0 };
+  const elapsed = stages.slice(0, stage).reduce((a, s) => a + s.d, 0) * DAY +
+    Math.min(Math.max(0, Date.now() - new Date(stageAt).getTime()), (stages[stage]?.d || 0) * DAY);
+  return { total, left: Math.max(0, Math.ceil((total * DAY - elapsed) / DAY)) };
+}
 function cycleProgress(stages, stage, stageAt, done) {
   if (done) return 100;
   const total = stages.reduce((a, s) => a + s.d, 0) * DAY || 1;
@@ -1509,7 +1516,7 @@ function renderEgrow() {
           </div>
           <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:8px">
             <span>вход ${fmt(s.invested)} ₴ (+${s.profit_pct}%)</span>
-            <span>выплата <b style="color:var(--gold-soft)">${fmt(s.payout)} ₴</b> после сбора</span>
+            <span>выплата <b style="color:var(--gold-soft)">${fmt(s.payout)} ₴</b> · ~через ${cycleTotals(s.plan_stages, s.plan_stage, s.plan_stage_at, s.plan_done).left} дн.</span>
           </div>
         </div></div>`;
       }).join('');
@@ -1558,7 +1565,9 @@ function renderEgrow() {
         </div>`).join('')}
       </div>` : ''}
       <p class="note" style="margin:0 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
-        : `Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}`}</p>
+        : (() => { const ct = cycleTotals(ts, p.stage, p.stage_at, p.done); return `
+        Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}<br>
+        Полный цикл <b style="color:var(--txt)">${ct.total} дн.</b> · до выплаты осталось <b style="color:var(--gold-soft)">~${ct.left} дн.</b>`; })()}</p>
       <div class="tier-table" style="margin-bottom:12px">
         ${ts.map((s, k) => `<div class="tier-row ${k === p.stage && !p.done ? 'hit' : ''}">
           <span>${STAGE_META[k][0]} ${STAGE_META[k][1]} · ${s.d} дн.</span>
