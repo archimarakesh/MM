@@ -475,6 +475,18 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <input type="file" id="tuFile" accept="image/*,application/pdf" style="display:none">
   </section>
 
+  <!-- ══ АДМИНКА ══ -->
+  <section class="view" id="view-admin">
+    <div style="display:flex;align-items:center;gap:12px;margin:8px 0 14px">
+      <div class="icon-btn" onclick="go('profile')" aria-label="Назад">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </div>
+      <h1 class="page-title" style="margin:0;font-size:22px">Админка 👑</h1>
+    </div>
+    <div class="weight-chips" id="adminTabs"></div>
+    <div id="adminBody"></div>
+  </section>
+
   <!-- ══ ПОДДЕРЖКА ══ -->
   <section class="view" id="view-support">
     <div class="eyebrow">Мы на связи</div>
@@ -614,13 +626,6 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div class="hr"></div>
   <div class="field"><label>Или введите код со старого аккаунта</label><input id="redeemCode" placeholder="A1B2C3" autocapitalize="characters"></div>
   <button class="btn btn-ghost" onclick="redeemTransfer()">Перенести сюда</button>
-</div>
-
-<div class="sheet" id="sheet-admin">
-  <div class="sheet-grip"></div>
-  <h2>Админка 👑</h2>
-  <div class="weight-chips" id="adminTabs" style="margin-top:12px"></div>
-  <div id="adminBody"></div>
 </div>
 
 <div class="sheet" id="sheet-pedit">
@@ -1595,8 +1600,9 @@ let AD = null, adminTab = 'products', curPe = null, peActiveVal = true;
 async function openAdmin() {
   if (!API.ok) return toast('Админка доступна только на сервере');
   try { AD = await API.call('/api/admin/data'); } catch (e) { return toast(e.message); }
-  openSheet('admin');
-  renderAdmin('products');
+  closeSheets(true);
+  go('admin');
+  renderAdmin(adminTab || 'products');
 }
 function renderAdmin(tab) {
   adminTab = tab;
@@ -1758,7 +1764,7 @@ async function savePedit() {
     renderGoods();
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Товар сохранён');
-  openSheet('admin'); renderAdmin('products');
+  closeSheets(true); renderAdmin('products');
 }
 let peDelArmed = false;
 function peDelReset() {
@@ -1782,7 +1788,7 @@ async function deleteProduct() {
     renderGoods();
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Товар удалён');
-  openSheet('admin'); renderAdmin('products');
+  closeSheets(true); renderAdmin('products');
 }
 async function workOrder(code) {
   try { AD.orders = (await API.call('/api/admin/work', { order: code })).orders; }
@@ -1852,7 +1858,7 @@ async function saveGedit() {
     PLANS = r.grow_plans.filter(x => x.active).map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Программа сохранена');
-  openSheet('admin'); renderAdmin('grow');
+  closeSheets(true); renderAdmin('grow');
 }
 async function deleteGrowPlan() {
   const b = document.getElementById('geDelete');
@@ -1863,7 +1869,7 @@ async function deleteGrowPlan() {
     PLANS = r.grow_plans.filter(x => x.active).map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Программа удалена');
-  openSheet('admin'); renderAdmin('grow');
+  closeSheets(true); renderAdmin('grow');
 }
 async function saveTtn(code) {
   const ttn = document.getElementById('ttn-' + code).value.trim();
