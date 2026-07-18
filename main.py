@@ -27,6 +27,11 @@ _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 APP_URL = os.getenv("APP_URL", "") or (f"https://{_railway_domain}" if _railway_domain else "")
 
 MAX_RECEIPT_LEN = 6_000_000  # ~4.5 МБ файла в base64
+
+# приветственный бонус за подписку на канал и чат (бот должен быть админом в обоих)
+BONUS_CHANNEL_ID = os.getenv("BONUS_CHANNEL_ID", "")
+BONUS_CHAT_ID = os.getenv("BONUS_CHAT_ID", "")
+BONUS_AMOUNT = int(os.getenv("BONUS_AMOUNT", "100") or 100)
 CARD_LIMIT = 5000            # оплата картой — до 5 000 ₴, свыше только крипта
 
 
@@ -244,6 +249,17 @@ if BOT_TOKEN:
         await message.answer(f"Ваш Telegram ID: <code>{message.from_user.id}</code>",
                              parse_mode="HTML")
 
+    @dp.message(Command("chatid"))
+    async def cmd_chatid(message: Message):
+        await message.answer(f"ID этого чата: <code>{message.chat.id}</code>",
+                             parse_mode="HTML")
+
+    @dp.channel_post()
+    async def channel_chatid(message: Message):
+        if (message.text or "").strip().startswith("/chatid"):
+            await message.answer(f"ID этого канала: <code>{message.chat.id}</code>",
+                                 parse_mode="HTML")
+
 
 async def notify(chat_id: int, text: str):
     """Уведомление в Telegram; ошибки не роняют API."""
@@ -314,6 +330,9 @@ def admin_user(request: Request) -> dict:
 async def _snap(uid: int) -> dict:
     snap = await db.snapshot(uid)
     snap["is_admin"] = bool(ADMIN_ID) and uid == ADMIN_ID
+    snap["bonus_offer"] = (not snap.get("bonus_claimed")
+                           and bool(bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID))
+    snap["bonus_amount"] = BONUS_AMOUNT
     return snap
 
 
@@ -521,6 +540,30 @@ async def api_account_delete(request: Request):
                  f"🗑 Пользователь {u.get('first_name', '')} "
                  f"(@{u.get('username', '—')}, ID {u['id']}) удалил аккаунт.")
     return {"ok": True}
+
+
+async def _is_member(chat_id: str, user_id: int) -> bool:
+    try:
+        m = await bot.get_chat_member(int(chat_id), user_id)
+        return m.status in ("member", "administrator", "creator")
+    except Exception:
+        return False
+
+
+@app.post("/api/bonus/claim")
+async def api_bonus_claim(request: Request):
+    u = tg_user(request)
+    if not (bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID):
+        raise HTTPException(400, "Бонус временно недоступен")
+    if not (await _is_member(BONUS_CHANNEL_ID, u["id"])
+            and await _is_member(BONUS_CHAT_ID, u["id"])):
+        raise HTTPException(400, "Подпишитесь на канал и вступите в чат, затем нажмите ещё раз")
+    if not await db.claim_bonus(u["id"], BONUS_AMOUNT):
+        raise HTTPException(400, "Бонус уже был получен")
+    await notify(ADMIN_ID,
+                 f"🎁 {u.get('first_name', '')} (@{u.get('username', '—')}) получил "
+                 f"приветственный бонус {BONUS_AMOUNT} ₴.")
+    return await _snap(u["id"])
 
 
 @app.post("/api/withdraw")

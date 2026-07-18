@@ -553,6 +553,19 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <input type="file" id="coFile" accept="image/*,application/pdf" style="display:none">
 </div>
 
+<div class="sheet" id="sheet-bonus">
+  <div class="sheet-grip"></div>
+  <div style="text-align:center;font-size:52px;margin:6px 0 4px">🎁</div>
+  <h2 style="text-align:center">Бонус за подписку</h2>
+  <p class="sheet-sub" style="text-align:center">Подпишитесь на наш канал и вступите в чат —<br>получите <b style="color:var(--gold-soft)"><span id="bonusAmt">100</span> ₴</b> на баланс. Одноразово.</p>
+  <a class="btn btn-ghost" style="text-decoration:none;margin-bottom:10px" href="https://t.me/+HJLPBVv65kQ0YjAy" target="_blank" rel="noopener">📣 Подписаться на канал</a>
+  <a class="btn btn-ghost" style="text-decoration:none;margin-bottom:14px" href="https://t.me/+0_b77ETKGVpiZGY6" target="_blank" rel="noopener">💬 Вступить в чат</a>
+  <button class="btn btn-gold" onclick="claimBonus()">Проверить и получить
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+  </button>
+  <p class="note" style="text-align:center">Подписку проверяем автоматически — жмите после вступления.</p>
+</div>
+
 <div class="sheet" id="sheet-withdraw">
   <div class="sheet-grip"></div>
   <h2>Вывод баланса</h2>
@@ -794,6 +807,9 @@ function applySnapshot(d) {
   S.refCount = d.ref_count; S.refEarned = d.ref_earned;
   S.payments = d.payments || [];
   if (d.ref_percent) S.refPercent = d.ref_percent;
+  S.bonusOffer = !!d.bonus_offer;
+  if (d.bonus_amount) S.bonusAmount = d.bonus_amount;
+  maybeShowBonus();
   if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
   if (d.grow_plans) PLANS = d.grow_plans.map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
   if (d.shares) SHARES = d.shares;
@@ -1403,6 +1419,22 @@ function renderPayHistory() {
       <span style="font-size:11.5px;font-weight:600;white-space:nowrap">${st}</span>
     </div></div>`;
   }).join('') : '<div class="empty" style="padding:24px"><p>Операций пока не было</p></div>';
+}
+
+/* ═══════════ Приветственный бонус ═══════════ */
+let bonusPrompted = false;
+function maybeShowBonus() {
+  if (!S.bonusOffer || bonusPrompted) return;
+  bonusPrompted = true;
+  document.getElementById('bonusAmt').textContent = fmt(S.bonusAmount || 100);
+  setTimeout(() => { if (S.bonusOffer) openSheet('bonus'); }, 700);
+}
+async function claimBonus() {
+  if (!API.ok) return toast('Доступно после подключения сервера');
+  try { applySnapshot(await API.call('/api/bonus/claim')); }
+  catch (e) { return toast(e.message); }
+  closeSheets(true); haptic('medium');
+  toast(`🎉 +${fmt(S.bonusAmount || 100)} ₴ на балансе!`);
 }
 
 /* ═══════════ Вывод баланса ═══════════ */

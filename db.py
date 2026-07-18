@@ -56,6 +56,7 @@ async def init():
                 ref_by     BIGINT,
                 ref_earned BIGINT NOT NULL DEFAULT 0,
                 created    TIMESTAMPTZ NOT NULL DEFAULT now());
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_claimed BOOLEAN NOT NULL DEFAULT false;
             CREATE TABLE IF NOT EXISTS products(
                 id     BIGSERIAL PRIMARY KEY,
                 name   TEXT NOT NULL,
@@ -361,6 +362,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
     return {
         "balance": u["balance"], "ref_count": cnt, "ref_earned": u["ref_earned"],
         "ref_percent": round(ref_percent(cnt) * 100),
+        "bonus_claimed": u["bonus_claimed"],
         "orders": orders,
         "products": await get_products(conn=c),
         "payment": payment_public(await get_settings(conn=c)),
@@ -761,6 +763,19 @@ async def delete_account(tg_id: int):
         await c.execute("DELETE FROM transfers WHERE user_id=$1", tg_id)
         await c.execute("UPDATE users SET ref_by=NULL WHERE ref_by=$1", tg_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", tg_id)
+
+
+async def claim_bonus(tg_id: int, amount: int) -> bool:
+    """Одноразовый приветственный бонус. False — уже получен."""
+    async with _pool.acquire() as c, c.transaction():
+        claimed = await c.fetchval(
+            "SELECT bonus_claimed FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        if claimed:
+            return False
+        await c.execute(
+            "UPDATE users SET bonus_claimed=true, balance=balance+$1 WHERE tg_id=$2",
+            amount, tg_id)
+        return True
 
 
 # ── вывод баланса (ручная выплата) ───────────────────────────────────────────
