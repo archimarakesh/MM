@@ -66,15 +66,16 @@ _warns: dict = {}       # key -> [метки времени] общий счёт
 _link_strikes: dict = {}  # key -> [метки времени] ссылки/реклама
 _msg_times: dict = {}   # key -> [метки времени] для флуда
 _stickers: dict = {}    # key -> счётчик подряд идущих стикеров
+_report_cd: dict = {}   # user_id -> метка времени последней жалобы (антиспам)
 
 _EMOJI_RE = re.compile(
     "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF"
     "\U0001F1E6-\U0001F1FF\U00002190-\U000021FF\U00002B00-\U00002BFF\U0000FE00-\U0000FE0F\U00002700-\U000027BF]")
 _LINK_RE = re.compile(
-    r"(?:https?://|www\.|t\.me/|telegram\.me/)\S+"
-    r"|@\w{4,}"
+    r"(?:https?://|www\.|t\.me/|telegram\.me/|tg://)\S+"
     r"|\b[\w-]+\.(?:com|net|org|ru|ua|io|me|xyz|top|shop|site|online|info|biz|link|click)\b",
     re.I)
+# @упоминания участников не считаем рекламой — ловим только ссылки/инвайты/домены
 # матные корни и явные оскорбления (рус/укр) — базовый список, ловит очевидное
 _BAD_RE = re.compile(
     r"(ху[йяеё]|пизд|бля[дт]ь?|\bбля\b|еб[аеёу]|ёб|уеб|уёб|заеб|наеб|въеб|отъеб|разъеб"
@@ -376,6 +377,113 @@ async def run():
     @dp.message(Command("chatid"))
     async def cmd_chatid(message: Message):
         await message.answer(f"ID этого чата: <code>{message.chat.id}</code>", parse_mode="HTML")
+
+    # ── жалобы участников → в журнал админу с кнопками действий ────────────────
+    @dp.message(Command("report", "жалоба"))
+    async def cmd_report(message: Message, command: CommandObject):
+        if message.chat.type == "private":
+            return
+        if RULES_CHAT_ID and str(message.chat.id) != str(RULES_CHAT_ID):
+            return
+        target = message.reply_to_message.from_user if message.reply_to_message else None
+        if not target or target.is_bot:
+            m = await message.reply("Ответьте командой /report на сообщение нарушителя.")
+            asyncio.create_task(_del_later(message.chat.id, m.message_id))
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return
+        rk = message.from_user.id
+        now = time.time()
+        if now - _report_cd.get(rk, 0) < 30:  # антиспам жалоб
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return
+        _report_cd[rk] = now
+        reason = (command.args or "").strip() or "не указана"
+        snippet = (message.reply_to_message.text or message.reply_to_message.caption or "[медиа/стикер]")[:300]
+        if not GUARD_ADMIN_ID:
+            return
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔇 Мут 60м", callback_data=f"rmute:{message.chat.id}:{target.id}"),
+            InlineKeyboardButton(text="🚫 Бан", callback_data=f"rban:{message.chat.id}:{target.id}"),
+            InlineKeyboardButton(text="✖", callback_data="rclose"),
+        ]])
+        try:
+            await bot.send_message(
+                GUARD_ADMIN_ID,
+                f"🚨 <b>Жалоба</b>\n"
+                f"👤 На кого: {_esc(target.full_name)} (@{_esc(target.username or '—')}, ID <code>{target.id}</code>)\n"
+                f"🙋 От кого: {_esc(message.from_user.full_name)} (@{_esc(message.from_user.username or '—')})\n"
+                f"💬 Чат: {_esc(message.chat.title)}\n"
+                f"📝 Причина: {_esc(reason)}\n"
+                f"✉️ Сообщение: {_esc(snippet)}\n"
+                f"🕒 {_now()}",
+                parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            log.warning("Жалоба не доставлена — админ не нажал Start у guard-бота?")
+        m = await message.reply("✅ Жалоба отправлена администрации.")
+        asyncio.create_task(_del_later(message.chat.id, m.message_id))
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+    async def _del_later(chat_id, msg_id, secs=8):
+        await asyncio.sleep(secs)
+        try:
+            await bot.delete_message(chat_id, msg_id)
+        except Exception:
+            pass
+
+    @dp.callback_query(F.data == "rclose")
+    async def on_rclose(cb: CallbackQuery):
+        if cb.from_user.id != GUARD_ADMIN_ID:
+            return await cb.answer()
+        try:
+            await cb.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await cb.answer("Закрыто")
+
+    @dp.callback_query(F.data.startswith(("rmute:", "rban:")))
+    async def on_report_action(cb: CallbackQuery):
+        if cb.from_user.id != GUARD_ADMIN_ID:
+            return await cb.answer("Только для администратора", show_alert=True)
+        try:
+            act, chat_id, uid = cb.data.split(":")
+            chat_id, uid = int(chat_id), int(uid)
+        except (ValueError, IndexError):
+            return await cb.answer()
+        if act == "rban":
+            try:
+                await bot.ban_chat_member(chat_id, uid)
+                done = "🚫 Забанен"
+            except Exception:
+                return await cb.answer("Не удалось — проверьте права бота", show_alert=True)
+            await log_action("🚫", "Бан (по жалобе)", cb.message.chat, "админ (жалоба)",
+                             f"ID {uid}", uid, "решение по жалобе")
+        else:
+            until = datetime.now(timezone.utc) + timedelta(minutes=MUTE_MINUTES)
+            try:
+                await bot.restrict_chat_member(chat_id, uid, permissions=MUTED, until_date=until)
+                done = f"🔇 Мут {MUTE_MINUTES}м"
+            except Exception:
+                return await cb.answer("Не удалось — проверьте права бота", show_alert=True)
+            await log_action("🔇", f"Мут {MUTE_MINUTES}м (по жалобе)", cb.message.chat,
+                             "админ (жалоба)", f"ID {uid}", uid, "решение по жалобе")
+        try:
+            await cb.message.edit_text(cb.message.html_text + f"\n\n✅ <b>{done}</b>",
+                                       parse_mode="HTML")
+        except Exception:
+            try:
+                await cb.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+        await cb.answer(done)
 
     # ── автомодерация ─────────────────────────────────────────────────────────
     async def send_temp(chat_id: int, text: str):
