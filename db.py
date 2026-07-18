@@ -23,6 +23,8 @@ DEFAULT_TIERS = [
 MAX_GRAMS = 100
 MAX_PHOTO_LEN = 400_000   # ~300 КБ картинки в base64
 MAX_PHOTOS = 4
+MAX_PENDING_ORDERS = 8    # незакрытых заказов на юзера (антиспам/сток)
+MAX_PENDING_TOPUPS = 8    # квитанций на проверке на юзера
 SEED_PRODUCTS = [
     ("Golden Reserve", "Флагманская позиция", "🏆", "ХИТ", 120),
     ("Black Label", "Тёмная классика", "🖤", "", 95),
@@ -59,6 +61,8 @@ async def init():
             ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_claimed BOOLEAN NOT NULL DEFAULT false;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS device_hash TEXT;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT;
+            -- locked: часть баланса (бонус), которую нельзя вывести, только потратить в магазине
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS locked BIGINT NOT NULL DEFAULT 0;
             CREATE TABLE IF NOT EXISTS bonus_claims(
                 user_id     BIGINT PRIMARY KEY,
                 device_hash TEXT,
@@ -385,6 +389,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "balance": u["balance"], "ref_count": cnt, "ref_earned": u["ref_earned"],
         "ref_percent": round(ref_percent(cnt) * 100),
         "bonus_claimed": u["bonus_claimed"],
+        "withdrawable": max(0, u["balance"] - (u["locked"] or 0)),
         "orders": orders,
         "products": await get_products(conn=c),
         "payment": payment_public(await get_settings(conn=c)),
@@ -396,7 +401,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
 
 async def payments_history(tg_id: int, c) -> list:
     """История пополнений: карта (ручная проверка) + крипто-счета."""
-    await c.execute("UPDATE invoices SET status=2 WHERE status=0 AND expires < now()")
+    await _expire_invoices(c)  # с возвратом стока и отменой заказов, а не голым UPDATE
     tt = await c.fetch("""
         SELECT amount, method, status, created FROM topups
         WHERE user_id=$1 ORDER BY id DESC LIMIT 30
@@ -424,6 +429,12 @@ def ref_percent(invited: int) -> float:
         if invited >= n:
             p = k
     return p
+
+
+async def _spend_locked(c, tg_id: int, amount: int):
+    """Трата уменьшает «залоченный» бонус (его можно потратить в магазине)."""
+    await c.execute(
+        "UPDATE users SET locked = GREATEST(0, locked - $1) WHERE tg_id=$2", amount, tg_id)
 
 
 async def _ref_bonus(c, buyer_id: int, total: int):
@@ -466,6 +477,12 @@ async def order_total(product_id: int, grams: int) -> int:
     return total
 
 
+async def _guard_pending_orders(c, tg_id: int):
+    n = await c.fetchval("SELECT COUNT(*) FROM orders WHERE user_id=$1 AND status=-1", tg_id)
+    if n >= MAX_PENDING_ORDERS:
+        raise ValueError("Слишком много незавершённых заказов — оплатите или дождитесь обработки")
+
+
 async def _insert_order(c, tg_id, p, grams, total, status, pay, ship, receipt=None) -> int:
     return await c.fetchval("""
         INSERT INTO orders(user_id, product_id, product, grams, total, status, pay, receipt, ship, date)
@@ -484,9 +501,11 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
             if u["balance"] < total:
                 raise ValueError("Недостаточно средств — пополните баланс")
             await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", total, tg_id)
+            await _spend_locked(c, tg_id, total)
             oid = await _insert_order(c, tg_id, p, grams, total, 0, "balance", ship)
             await _ref_bonus(c, tg_id, total)
         elif pay == "card":
+            await _guard_pending_orders(c, tg_id)
             oid = await _insert_order(c, tg_id, p, grams, total, -1, "card", ship, receipt)
         else:
             raise ValueError("Неизвестный способ оплаты")
@@ -494,6 +513,8 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
         snap = await snapshot(tg_id, c)
         snap["order_code"] = f"MM-{oid + ORDER_CODE_BASE}"
         snap["order_total"] = total
+        snap["order_product"] = p["name"]
+        snap["order_grams"] = grams
         return snap
 
 
@@ -501,22 +522,12 @@ async def create_order_invoice(tg_id: int, product_id: int, grams: int, currency
                                ship: dict, amount_crypto: str, address: str) -> tuple:
     """Заказ с оплатой криптой: заказ «ждёт оплаты» + привязанный счёт."""
     async with _pool.acquire() as c, c.transaction():
+        await _guard_pending_orders(c, tg_id)
         p, total = await _order_product_total(c, product_id, grams, lock=True)
         oid = await _insert_order(c, tg_id, p, grams, total, -1, currency, ship)
         await _take_stock(c, product_id, grams)
         # новый счёт отменяет прежний неоплаченный (и его заказ, если был) с возвратом остатка
-        prev = await c.fetch("""
-            SELECT o.id, o.product_id, o.grams FROM orders o
-            JOIN invoices i ON i.order_id = o.id
-            WHERE i.user_id=$1 AND i.status=0 AND o.status=-1 AND o.id<>$2
-        """, tg_id, oid)
-        for r in prev:
-            await _restock(c, r["product_id"], r["grams"])
-        await c.execute("""
-            UPDATE orders SET status=-2 WHERE status=-1 AND id<>$2 AND id IN
-                (SELECT order_id FROM invoices WHERE user_id=$1 AND status=0 AND order_id IS NOT NULL)
-        """, tg_id, oid)
-        await c.execute("UPDATE invoices SET status=2 WHERE user_id=$1 AND status=0", tg_id)
+        await _cancel_user_pending_invoices(c, tg_id, exclude_order_id=oid)
         inv = await c.fetchrow("""
             INSERT INTO invoices(user_id, amount_uah, currency, amount_crypto, address, order_id, expires)
             VALUES($1,$2,$3,$4,$5,$6, now() + make_interval(secs => $7))
@@ -526,6 +537,8 @@ async def create_order_invoice(tg_id: int, product_id: int, grams: int, currency
         code = f"MM-{oid + ORDER_CODE_BASE}"
         snap["order_code"] = code
         snap["order_total"] = total
+        snap["order_product"] = p["name"]
+        snap["order_grams"] = grams
         return snap, code, dict(inv)
 
 
@@ -574,6 +587,10 @@ async def rate_order(tg_id: int, order_code: str, stars: int) -> dict:
 # ── пополнения (ручная проверка) ─────────────────────────────────────────────
 async def topup_receipt(tg_id: int, amount: int, method: str, receipt: str) -> int:
     async with _pool.acquire() as c:
+        n = await c.fetchval(
+            "SELECT COUNT(*) FROM topups WHERE user_id=$1 AND status=0", tg_id)
+        if n >= MAX_PENDING_TOPUPS:
+            raise ValueError("Слишком много квитанций на проверке — дождитесь обработки")
         return await c.fetchval("""
             INSERT INTO topups(user_id, amount, method, receipt) VALUES($1,$2,$3,$4)
             RETURNING id
@@ -675,6 +692,28 @@ async def mark_delivered(oid: int) -> bool:
 
 
 # ── крипто-счета (автопроверка оплаты) ───────────────────────────────────────
+async def _cancel_user_pending_invoices(c, tg_id: int, exclude_order_id: int | None = None):
+    """Гасит все неоплаченные счета юзера, отменяя привязанные заказы с возвратом стока."""
+    q = ("""SELECT o.id, o.product_id, o.grams FROM orders o
+            JOIN invoices i ON i.order_id=o.id
+            WHERE i.user_id=$1 AND i.status=0 AND o.status=-1""")
+    args = [tg_id]
+    if exclude_order_id is not None:
+        q += " AND o.id<>$2"
+        args.append(exclude_order_id)
+    for r in await c.fetch(q, *args):
+        await _restock(c, r["product_id"], r["grams"])
+    if exclude_order_id is not None:
+        await c.execute("""UPDATE orders SET status=-2 WHERE status=-1 AND id<>$2 AND id IN
+            (SELECT order_id FROM invoices WHERE user_id=$1 AND status=0 AND order_id IS NOT NULL)
+        """, tg_id, exclude_order_id)
+    else:
+        await c.execute("""UPDATE orders SET status=-2 WHERE status=-1 AND id IN
+            (SELECT order_id FROM invoices WHERE user_id=$1 AND status=0 AND order_id IS NOT NULL)
+        """, tg_id)
+    await c.execute("UPDATE invoices SET status=2 WHERE user_id=$1 AND status=0", tg_id)
+
+
 async def _expire_invoices(c):
     # истёкший счёт отменяет привязанный неоплаченный заказ и возвращает остаток
     rows = await c.fetch("""
@@ -701,9 +740,9 @@ async def pending_amounts(currency: str) -> set:
 
 async def create_invoice(tg_id: int, amount_uah: int, currency: str,
                          amount_crypto: str, address: str) -> dict:
-    async with _pool.acquire() as c:
-        # новый счёт отменяет прежний неоплаченный
-        await c.execute("UPDATE invoices SET status=2 WHERE user_id=$1 AND status=0", tg_id)
+    async with _pool.acquire() as c, c.transaction():
+        # новый счёт отменяет прежний неоплаченный (включая счёт-заказ — с возвратом стока)
+        await _cancel_user_pending_invoices(c, tg_id)
         row = await c.fetchrow("""
             INSERT INTO invoices(user_id, amount_uah, currency, amount_crypto, address, expires)
             VALUES($1,$2,$3,$4,$5, now() + make_interval(secs => $6))
@@ -798,8 +837,15 @@ async def touch_device(tg_id: int, device: str, ip: str):
 
 
 async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
-    """Одноразовый бонус: раз на аккаунт, раз на устройство, раз на IP."""
+    """Одноразовый бонус: раз на аккаунт, устройство и IP. Зачисляется в locked
+    (нельзя вывести, только потратить в магазине). Advisory-локи закрывают гонку."""
+    device, ip = device[:64], ip[:64]
     async with _pool.acquire() as c, c.transaction():
+        # сериализуем параллельные заявки с одного устройства/IP
+        if device:
+            await c.execute("SELECT pg_advisory_xact_lock(hashtext('dev:'||$1))", device)
+        if ip:
+            await c.execute("SELECT pg_advisory_xact_lock(hashtext('ip:'||$1))", ip)
         claimed = await c.fetchval(
             "SELECT bonus_claimed FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         if claimed:
@@ -811,12 +857,12 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
                 "SELECT 1 FROM bonus_claims WHERE ip=$1 LIMIT 1", ip):
             raise ValueError("С этого IP бонус уже получали")
         await c.execute(
-            "UPDATE users SET bonus_claimed=true, balance=balance+$1 WHERE tg_id=$2",
+            "UPDATE users SET bonus_claimed=true, balance=balance+$1, locked=locked+$1 WHERE tg_id=$2",
             amount, tg_id)
         await c.execute("""
             INSERT INTO bonus_claims(user_id, device_hash, ip) VALUES($1,$2,$3)
             ON CONFLICT (user_id) DO NOTHING
-        """, tg_id, device[:64] or None, ip[:64] or None)
+        """, tg_id, device or None, ip or None)
 
 
 # ── вывод баланса (ручная выплата) ───────────────────────────────────────────
@@ -829,9 +875,10 @@ async def create_withdrawal(tg_id: int, amount: int, method: str, requisites: st
     if not requisites.strip():
         raise ValueError("Укажите реквизиты для выплаты")
     async with _pool.acquire() as c, c.transaction():
-        u = await c.fetchrow("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
-        if u["balance"] < amount:
-            raise ValueError("Недостаточно средств на балансе")
+        u = await c.fetchrow("SELECT balance, locked FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        withdrawable = u["balance"] - (u["locked"] or 0)
+        if withdrawable < amount:
+            raise ValueError("Доступно к выводу меньше — бонусные средства можно только потратить в магазине")
         await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", amount, tg_id)
         await c.execute("""
             INSERT INTO withdrawals(user_id, amount, method, requisites) VALUES($1,$2,$3,$4)
@@ -1119,7 +1166,7 @@ async def advance_grow_stages() -> list:
 
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
 async def transfer_create(tg_id: int) -> str:
-    code = secrets.token_hex(3).upper()
+    code = secrets.token_hex(8).upper()  # 64 бита — не брутфорсится
     async with _pool.acquire() as c:
         await c.execute("DELETE FROM transfers WHERE user_id=$1", tg_id)
         await c.execute("INSERT INTO transfers(code, user_id, expires) VALUES($1,$2,$3)",

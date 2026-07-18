@@ -570,6 +570,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div class="sheet-grip"></div>
   <h2>Вывод баланса</h2>
   <p class="sheet-sub">Укажите сумму и свои реквизиты — выплатим вручную и пришлём уведомление. Минимум 100 ₴.</p>
+  <p class="note" id="wdAvail" style="margin:0 0 12px;color:var(--gold-soft)"></p>
   <div class="field"><label>Сумма, ₴</label><input id="wdSum" inputmode="numeric" placeholder="500"></div>
   <div class="field"><label>Куда вывести</label><div class="weight-chips" id="wdMethods" style="margin:0"></div></div>
   <div class="field"><label id="wdReqLabel">Реквизиты</label><input id="wdReq" placeholder="Номер вашей карты"></div>
@@ -836,6 +837,7 @@ function applySnapshot(d) {
   if (d.ref_percent) S.refPercent = d.ref_percent;
   S.bonusOffer = !!d.bonus_offer;
   if (d.bonus_amount) S.bonusAmount = d.bonus_amount;
+  if ('withdrawable' in d) S.withdrawable = d.withdrawable;
   maybeShowBonus();
   if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
   if (d.grow_plans) PLANS = d.grow_plans.map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
@@ -855,6 +857,9 @@ async function serverSync() {
   catch (e) { /* сервера нет — остаёмся в демо-режиме */ }
 }
 const fmt = n => n.toLocaleString('ru-RU');
+/* HTML-escape пользовательских строк (защита от XSS в админке) */
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const STATUSES = ['Оплачен', 'В работе', 'В пути', 'Получен'];
 
 /* ═══════════ Навигация ═══════════ */
@@ -1173,7 +1178,7 @@ function openOrder(i) {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       </b>
     </div>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
-    ${o.ship ? `<p class="note">Получатель: ${o.ship.name} · ${o.ship.city}, отд. ${o.ship.np}</p>` : ''}
+    ${o.ship ? `<p class="note">Получатель: ${esc(o.ship.name)} · ${esc(o.ship.city)}, отд. ${esc(o.ship.np)}</p>` : ''}
     ${o.status === 3 ? `
       <div class="hr"></div>
       <div style="text-align:center;padding-bottom:6px">
@@ -1480,12 +1485,17 @@ function renderWithdraw() {
   document.getElementById('wdMethods').innerHTML = WD_METHODS.map(([k, l]) =>
     `<div class="wchip ${k === wdMethod ? 'sel' : ''}" onclick="wdSel('${k}')">${l}</div>`).join('');
   document.getElementById('wdReq').placeholder = WD_METHODS.find(m => m[0] === wdMethod)[2];
+  const w = S.withdrawable != null ? S.withdrawable : S.balance;
+  const el = document.getElementById('wdAvail');
+  if (el) el.textContent = `Доступно к выводу: ${fmt(w)} ₴` +
+    (w < S.balance ? ` (бонус ${fmt(S.balance - w)} ₴ — только на покупки)` : '');
 }
 function wdSel(k) { haptic('light'); wdMethod = k; renderWithdraw(); }
 async function submitWithdraw() {
   const v = parseInt(document.getElementById('wdSum').value, 10);
+  const avail = S.withdrawable != null ? S.withdrawable : S.balance;
   if (!v || v < 100) return toast('Минимальная сумма вывода — 100 ₴');
-  if (v > S.balance) return toast('Недостаточно средств на балансе');
+  if (v > avail) return toast('Бонусные средства можно только потратить в магазине');
   const req = document.getElementById('wdReq').value.trim();
   if (!req) return toast('Укажите реквизиты для выплаты');
   if (!API.ok) return toast('Доступно после подключения сервера');
@@ -1828,9 +1838,9 @@ function renderAdmin(tab) {
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
         <div style="font-size:12px;color:var(--muted);line-height:1.65">
-          ${o.product} · ${o.grams} г · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}${o.pay ? ' · ' + (TU_LABELS[o.pay] || o.pay) : ''}<br>
-          ${o.user}${o.username ? ' · @' + o.username : ''}
-          ${o.ship ? `<br>${o.ship.name} · ${o.ship.phone}<br>${o.ship.city}, НП №${o.ship.np}` : ''}
+          ${esc(o.product)} · ${o.grams} г · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
+          ${esc(o.user)}${o.username ? ' · @' + esc(o.username) : ''}
+          ${o.ship ? `<br>${esc(o.ship.name)} · ${esc(o.ship.phone)}<br>${esc(o.ship.city)}, НП №${esc(o.ship.np)}` : ''}
         </div>
         ${o.status === -1 && o.receipt ? `
           <div style="margin-top:10px">${receiptChip(`AD.orders[${i}].receipt`, o.receipt)}</div>
@@ -1851,10 +1861,10 @@ function renderAdmin(tab) {
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>−${fmt(w.amount)} ₴ · ${TU_LABELS[w.method] || w.method}</b>
           <span style="font-size:11px;color:var(--muted-2)">${dt(w.created)}</span></div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${w.user}${w.username ? ' · @' + w.username : ''} · ID ${w.user_id}</div>
-        <div class="ref-link" style="margin-bottom:10px" onclick="copyText('${(w.requisites || '').replace(/'/g, '')}')">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${esc(w.user)}${w.username ? ' · @' + esc(w.username) : ''} · ID ${w.user_id}</div>
+        <div class="ref-link" style="margin-bottom:10px" data-v="${esc(w.requisites)}" onclick="copyText(this.dataset.v)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          <span style="word-break:break-all">${w.requisites}</span>
+          <span style="word-break:break-all">${esc(w.requisites)}</span>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <button class="btn btn-gold" style="padding:12px" onclick="decideWithdraw(${w.id}, true)">Выплатил ✓</button>
@@ -1864,9 +1874,9 @@ function renderAdmin(tab) {
   } else if (tab === 'topups') {
     b.innerHTML = AD.topups.length ? AD.topups.map((t, i) => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
-        <div class="order-top"><b>${fmt(t.amount)} ₴ · ${t.method}</b>
+        <div class="order-top"><b>${fmt(t.amount)} ₴ · ${TU_LABELS[t.method] || esc(t.method)}</b>
           <span style="font-size:11px;color:var(--muted-2)">${dt(t.created)}</span></div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${t.user}${t.username ? ' · @' + t.username : ''} · ID ${t.user_id}</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${esc(t.user)}${t.username ? ' · @' + esc(t.username) : ''} · ID ${t.user_id}</div>
         ${receiptChip(`AD.topups[${i}].receipt`, t.receipt || '')}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <button class="btn btn-gold" style="padding:12px" onclick="decideTopup(${t.id}, true)">Зачислить</button>

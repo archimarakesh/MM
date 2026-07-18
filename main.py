@@ -1,11 +1,13 @@
 """Magic Market — FastAPI (фронт + API + админка) + aiogram-бот в одном процессе (Railway)."""
 import asyncio
 import base64
+import html
 import io
 import logging
 import os
 import random
 import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -401,10 +403,40 @@ def tg_user(request: Request) -> dict:
 
 
 def client_ip(request: Request) -> str:
+    # за прокси Railway реальный IP — ПОСЛЕДНИЙ в X-Forwarded-For (его дописывает
+    # доверенный прокси); первые элементы клиент может подделать сам
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd:
-        return fwd.split(",")[0].strip()
+        return fwd.split(",")[-1].strip()
     return request.client.host if request.client else ""
+
+
+def esc(s) -> str:
+    """HTML-escape пользовательских строк для Telegram-уведомлений (parse_mode=HTML)."""
+    return html.escape(str(s or ""))
+
+
+def pint(v, default: int = 0) -> int:
+    """Безопасный int из пользовательского ввода — без 500 на мусоре."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Неверное числовое значение")
+
+
+# простой антибрут для чувствительных действий: {ключ: [метки времени]}
+_rl: dict = defaultdict(list)
+
+
+def rate_limit(key: str, limit: int, window: int) -> bool:
+    """True — можно; False — превышен лимит за окно (секунды)."""
+    now = time.time()
+    hits = [t for t in _rl[key] if now - t < window]
+    _rl[key] = hits
+    if len(hits) >= limit:
+        return False
+    hits.append(now)
+    return True
 
 
 def client_device(request: Request) -> str:
@@ -495,14 +527,15 @@ async def api_order(request: Request):
     b = await request.json()
     pay = str(b.get("pay", "balance"))
     ship = dict(b.get("ship") or {})
-    ship_txt = (f"{ship.get('name', '')} · {ship.get('phone', '')}\n"
-                f"{ship.get('city', '')}, НП №{ship.get('np', '')}")
+    ship_txt = (f"{esc(ship.get('name'))} · {esc(ship.get('phone'))}\n"
+                f"{esc(ship.get('city'))}, НП №{esc(ship.get('np'))}")
+    product_id, grams = pint(b.get("product_id")), pint(b.get("grams"))
     try:
         if pay in CRYPTO:
             address = (await db.get_settings()).get(CRYPTO[pay]["wallet_key"], "")
             if not address:
                 raise ValueError("Этот способ оплаты сейчас недоступен")
-            total = await db.order_total(int(b["product_id"]), int(b["grams"]))
+            total = await db.order_total(product_id, grams)
             try:
                 amt = await crypto_amount(pay, total)
             except ValueError:
@@ -510,28 +543,28 @@ async def api_order(request: Request):
             except Exception:
                 raise ValueError("Не удалось получить курс — попробуйте через минуту")
             snap, code, inv = await db.create_order_invoice(
-                u["id"], int(b["product_id"]), int(b["grams"]), pay, ship, amt, address)
+                u["id"], product_id, grams, pay, ship, amt, address)
             snap["invoice"] = invoice_public(inv)
             snap["invoice"]["order"] = code
         elif pay == "card":
             receipt = str(b.get("receipt", ""))
             if not _receipt_ok(receipt):
                 raise ValueError("Приложите квитанцию об оплате (фото или PDF)")
-            total = await db.order_total(int(b["product_id"]), int(b["grams"]))
+            total = await db.order_total(product_id, grams)
             if total > CARD_LIMIT:
                 raise ValueError(f"Картой — до {CARD_LIMIT} ₴, такой заказ оплатите криптой")
             snap = await db.create_order(
-                u["id"], int(b["product_id"]), int(b["grams"]), "card", ship, receipt)
+                u["id"], product_id, grams, "card", ship, receipt)
             await notify(ADMIN_ID,
                          f"🛒 <b>Заказ {snap['order_code']} — квитанция на проверку</b>\n"
-                         f"{b.get('product_name', '')} · {b['grams']} г · {snap['order_total']} ₴\n"
+                         f"{esc(snap.get('order_product'))} · {snap['order_grams']} г · {snap['order_total']} ₴\n"
                          f"{ship_txt}\nАдминка → Заказы.")
         else:
             snap = await db.create_order(
-                u["id"], int(b["product_id"]), int(b["grams"]), "balance", ship)
+                u["id"], product_id, grams, "balance", ship)
             await notify(ADMIN_ID,
                          f"🛒 <b>Новый заказ {snap['order_code']} (оплачен с баланса)</b>\n"
-                         f"{b.get('product_name', '')} · {b['grams']} г · {snap['order_total']} ₴\n"
+                         f"{esc(snap.get('order_product'))} · {snap['order_grams']} г · {snap['order_total']} ₴\n"
                          f"{ship_txt}")
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -553,7 +586,7 @@ async def api_rate(request: Request):
 async def api_topup_receipt(request: Request):
     u = tg_user(request)
     b = await request.json()
-    amount = int(b.get("amount", 0))
+    amount = pint(b.get("amount"))
     receipt = str(b.get("receipt", ""))
     if amount <= 0:
         raise HTTPException(400, "Неверная сумма")
@@ -563,11 +596,14 @@ async def api_topup_receipt(request: Request):
         raise HTTPException(400, f"Картой — до {CARD_LIMIT} ₴, для больших сумм используйте крипту")
     if not _receipt_ok(receipt):
         raise HTTPException(400, "Приложите квитанцию (фото или PDF)")
-    tid = await db.topup_receipt(u["id"], amount, "card", receipt)
+    try:
+        tid = await db.topup_receipt(u["id"], amount, "card", receipt)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     await notify(ADMIN_ID,
                  f"💳 <b>Квитанция #{tid} на проверку</b>\n"
-                 f"{u.get('first_name', '')} (@{u.get('username', '—')}) · "
-                 f"{amount} ₴ · {b.get('method', '')}\nОткройте админку → Пополнения.")
+                 f"{esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) · "
+                 f"{amount} ₴ · карта\nОткройте админку → Пополнения.")
     return await _snap(u["id"])
 
 
@@ -575,7 +611,7 @@ async def api_topup_receipt(request: Request):
 async def api_invoice(request: Request):
     u = tg_user(request)
     b = await request.json()
-    amount = int(b.get("amount", 0))
+    amount = pint(b.get("amount"))
     cur = str(b.get("currency", ""))
     if amount < 10:
         raise HTTPException(400, "Минимальная сумма — 10 ₴")
@@ -605,7 +641,7 @@ async def api_invoice_active(request: Request):
 async def api_invoice_status(request: Request):
     u = tg_user(request)
     b = await request.json()
-    inv = await db.invoice_get(int(b.get("id", 0)), u["id"])
+    inv = await db.invoice_get(pint(b.get("id")), u["id"])
     if not inv:
         raise HTTPException(404, "Счёт не найден")
     if inv["status"] == 0:
@@ -620,7 +656,7 @@ async def api_invoice_status(request: Request):
 async def api_invoice_cancel(request: Request):
     u = tg_user(request)
     b = await request.json()
-    await db.invoice_cancel(int(b.get("id", 0)), u["id"])
+    await db.invoice_cancel(pint(b.get("id")), u["id"])
     return {"ok": True}
 
 
@@ -629,8 +665,8 @@ async def api_account_delete(request: Request):
     u = tg_user(request)
     await db.delete_account(u["id"])
     await notify(ADMIN_ID,
-                 f"🗑 Пользователь {u.get('first_name', '')} "
-                 f"(@{u.get('username', '—')}, ID {u['id']}) удалил аккаунт.")
+                 f"🗑 Пользователь {esc(u.get('first_name'))} "
+                 f"(@{esc(u.get('username') or '—')}, ID {u['id']}) удалил аккаунт.")
     return {"ok": True}
 
 
@@ -656,7 +692,7 @@ async def api_bonus_claim(request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     await notify(ADMIN_ID,
-                 f"🎁 {u.get('first_name', '')} (@{u.get('username', '—')}) получил "
+                 f"🎁 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) получил "
                  f"приветственный бонус {BONUS_AMOUNT} ₴.")
     return await _snap(u["id"])
 
@@ -667,15 +703,15 @@ async def api_withdraw(request: Request):
     b = await request.json()
     try:
         snap = await db.create_withdrawal(
-            u["id"], int(b.get("amount", 0)),
+            u["id"], pint(b.get("amount")),
             str(b.get("method", "")), str(b.get("requisites", "")))
     except ValueError as e:
         raise HTTPException(400, str(e))
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
     await notify(ADMIN_ID,
-                 f"💸 <b>Заявка на вывод {b.get('amount')} ₴</b>\n"
-                 f"{u.get('first_name', '')} (@{u.get('username', '—')}) · {b.get('method', '')}\n"
-                 f"<code>{str(b.get('requisites', ''))[:100]}</code>\nАдминка → Выводы.")
+                 f"💸 <b>Заявка на вывод {int(b.get('amount', 0))} ₴</b>\n"
+                 f"{esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) · {esc(b.get('method'))}\n"
+                 f"<code>{esc(str(b.get('requisites', ''))[:100])}</code>\nАдминка → Выводы.")
     return snap
 
 
@@ -701,15 +737,15 @@ async def api_admin_withdraw(request: Request):
 async def api_grow_buy(request: Request):
     u = tg_user(request)
     b = await request.json()
-    pct = int(b.get("pct", 0))
+    pct = pint(b.get("pct"))
     try:
-        snap = await db.buy_share(u["id"], int(b.get("plan_id", 0)), pct)
+        snap = await db.buy_share(u["id"], pint(b.get("plan_id")), pct)
     except ValueError as e:
         raise HTTPException(400, str(e))
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
     await notify(ADMIN_ID,
-                 f"🌱 {u.get('first_name', '')} (@{u.get('username', '—')}) купил долю "
-                 f"{pct}% в программе #{b.get('plan_id')}.")
+                 f"🌱 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) купил долю "
+                 f"{pct}% в программе #{int(b.get('plan_id', 0))}.")
     return snap
 
 
@@ -779,6 +815,10 @@ async def api_transfer_create(request: Request):
 @app.post("/api/transfer/redeem")
 async def api_transfer_redeem(request: Request):
     u = tg_user(request)
+    # антибрут: не больше 5 попыток за 5 минут на юзера и на IP
+    if not (rate_limit(f"redeem:{u['id']}", 5, 300)
+            and rate_limit(f"redeem_ip:{client_ip(request)}", 10, 300)):
+        raise HTTPException(429, "Слишком много попыток — подождите несколько минут")
     b = await request.json()
     try:
         return await db.transfer_redeem(str(b.get("code", "")), u["id"])
