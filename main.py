@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, Response
 
 import auth
 import db
+import guard_bot
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("mm")
@@ -391,11 +392,13 @@ async def lifespan(_: FastAPI):
     tracker = asyncio.create_task(np_tracker())
     harvester = asyncio.create_task(grow_harvester())
     poster = asyncio.create_task(promo_poster())
+    guard = asyncio.create_task(guard_bot.run())  # отдельный бот-охранник чата, свой токен
     yield
     checker.cancel()
     tracker.cancel()
     harvester.cancel()
     poster.cancel()
+    guard.cancel()
     if menu_task:
         menu_task.cancel()
     if task:
