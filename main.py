@@ -276,13 +276,24 @@ async def grow_harvester():
 # ── бот ──────────────────────────────────────────────────────────────────────
 bot = dp = None
 if BOT_TOKEN:
-    from aiogram import Bot, Dispatcher
+    from aiogram import BaseMiddleware, Bot, Dispatcher
     from aiogram.filters import Command, CommandObject, CommandStart
     from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                                MenuButtonWebApp, Message, WebAppInfo)
 
     bot = Bot(BOT_TOKEN)
     dp = Dispatcher()
+
+    class ThrottleMiddleware(BaseMiddleware):
+        """Троттлинг апдейтов на пользователя: гасит флуд /start и сообщений,
+        не отвечая и не трогая БД (защита от DDoS через спам команд)."""
+        async def __call__(self, handler, event, data):
+            uid = getattr(getattr(event, "from_user", None), "id", None)
+            if uid and uid != ADMIN_ID and not rate_limit(f"bot:{uid}", 3, 8):
+                return  # >3 сообщений за 8 сек от одного юзера — молча дропаем
+            return await handler(event, data)
+
+    dp.message.middleware(ThrottleMiddleware())
 
     @dp.message(CommandStart())
     async def cmd_start(message: Message, command: CommandObject):
@@ -431,6 +442,9 @@ _rl: dict = defaultdict(list)
 def rate_limit(key: str, limit: int, window: int) -> bool:
     """True — можно; False — превышен лимит за окно (секунды)."""
     now = time.time()
+    if len(_rl) > 50_000:            # защита от разрастания памяти под флудом
+        for k in [k for k, v in _rl.items() if not v or now - v[-1] > 3600]:
+            _rl.pop(k, None)
     hits = [t for t in _rl[key] if now - t < window]
     _rl[key] = hits
     if len(hits) >= limit:

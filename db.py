@@ -55,7 +55,8 @@ def _dsn() -> str:
 
 async def init():
     global _pool
-    _pool = await asyncpg.create_pool(_dsn(), min_size=1, max_size=5)
+    _pool = await asyncpg.create_pool(_dsn(), min_size=2, max_size=10,
+                                      command_timeout=30)
     async with _pool.acquire() as c:
         await c.execute("""
             CREATE TABLE IF NOT EXISTS users(
