@@ -697,6 +697,25 @@ async def api_bonus_claim(request: Request):
     return await _snap(u["id"])
 
 
+@app.post("/api/pin/verify")
+async def api_pin_verify(request: Request):
+    u = tg_user(request)
+    if not rate_limit(f"pin:{u['id']}", 12, 300):
+        raise HTTPException(429, "Слишком много попыток — подождите")
+    b = await request.json()
+    return await db.verify_pin(u["id"], str(b.get("pin", "")))
+
+
+@app.post("/api/pin/set")
+async def api_pin_set(request: Request):
+    u = tg_user(request)
+    b = await request.json()
+    try:
+        return await db.set_pin(u["id"], str(b.get("pin", "")), str(b.get("old", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/withdraw")
 async def api_withdraw(request: Request):
     u = tg_user(request)

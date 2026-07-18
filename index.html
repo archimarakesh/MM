@@ -838,6 +838,8 @@ function applySnapshot(d) {
   S.bonusOffer = !!d.bonus_offer;
   if (d.bonus_amount) S.bonusAmount = d.bonus_amount;
   if ('withdrawable' in d) S.withdrawable = d.withdrawable;
+  if ('has_pin' in d) S.hasPin = d.has_pin;
+  S.serverLockUntil = d.pin_locked_until ? new Date(d.pin_locked_until).getTime() : 0;
   maybeShowBonus();
   if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
   if (d.grow_plans) PLANS = d.grow_plans.map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
@@ -848,13 +850,17 @@ function applySnapshot(d) {
     S.isAdmin = d.is_admin;
     document.getElementById('adminRow').style.display = d.is_admin ? '' : 'none';
   }
-  save(); syncBalance(); renderOrders(); renderGoods();
+  save(); syncBalance(); renderOrders(); renderGoods(); syncSettings();
 }
 async function serverSync() {
   if (!tg?.initData || location.protocol === 'file:') return;
   await deviceHash();
-  try { applySnapshot(await API.call('/api/auth')); API.ok = true; }
-  catch (e) { /* сервера нет — остаёмся в демо-режиме */ }
+  try {
+    const d = await API.call('/api/auth');
+    API.ok = true;
+    applySnapshot(d);
+  } catch (e) { API.ok = false; /* сервера нет — остаёмся в демо-режиме */ }
+  configureLock();  // настроить экран блокировки по данным с сервера (или локально)
 }
 const fmt = n => n.toLocaleString('ru-RU');
 /* HTML-escape пользовательских строк (защита от XSS в админке) */
@@ -1736,8 +1742,9 @@ function renderSupport() {
 }
 
 /* ═══════════ Настройки ═══════════ */
+const pinIsSet = () => API.ok ? !!S.hasPin : !!S.pin;
 function syncSettings() {
-  document.getElementById('pinState').textContent = S.pin ? 'Установлен · нажмите чтобы сменить' : 'Не установлен';
+  document.getElementById('pinState').textContent = pinIsSet() ? 'Установлен · нажмите чтобы сменить' : 'Не установлен';
   document.getElementById('notifToggle').classList.toggle('on', S.notif);
 }
 function toggleNotif() {
@@ -2265,11 +2272,11 @@ function paintDots(dotsEl, n) {
   dotsEl.querySelectorAll('.pin-dot').forEach((d, i) => d.classList.toggle('fill', i < n));
 }
 
-/* смена пин-кода (в настройках) */
-let pinBuf = '', pinStage = 0, pinFirst = '';
+/* смена пин-кода (в настройках): сервер проверяет старый пин; localStorage — фолбэк */
+let pinBuf = '', pinStage = 0, pinFirst = '', pinOld = '';
 function startPinChange() {
-  pinBuf = ''; pinFirst = '';
-  pinStage = S.pin ? -1 : 0; /* -1 = сначала подтвердить старый */
+  pinBuf = ''; pinFirst = ''; pinOld = '';
+  pinStage = pinIsSet() ? -1 : 0; /* -1 = сначала ввести текущий */
   document.getElementById('pinTitle').textContent = pinStage === -1 ? 'Введите текущий пин-код' : 'Придумайте новый пин-код';
   buildPad(document.getElementById('pinPad'), document.getElementById('pinDots'), pinDigit, pinDel);
   paintDots(document.getElementById('pinDots'), 0);
@@ -2285,25 +2292,42 @@ function pinDel() {
   pinBuf = pinBuf.slice(0, -1);
   paintDots(document.getElementById('pinDots'), pinBuf.length);
 }
-function pinStep() {
+async function pinStep() {
   const title = document.getElementById('pinTitle');
   const dots = document.getElementById('pinDots');
-  if (pinStage === -1) {
-    if (pinBuf === S.pin) { pinStage = 0; title.textContent = 'Придумайте новый пин-код'; }
-    else { dots.classList.add('pin-shake'); setTimeout(() => dots.classList.remove('pin-shake'), 500); title.textContent = 'Неверно — попробуйте ещё раз'; }
+  const shake = msg => {
+    dots.classList.add('pin-shake'); setTimeout(() => dots.classList.remove('pin-shake'), 500);
+    title.textContent = msg;
+  };
+  if (pinStage === -1) {           /* ввод текущего пина */
+    if (API.ok) {
+      pinOld = pinBuf;             /* проверит сервер при сохранении */
+      pinStage = 0; title.textContent = 'Придумайте новый пин-код';
+    } else if (pinBuf === S.pin) {
+      pinStage = 0; title.textContent = 'Придумайте новый пин-код';
+    } else shake('Неверно — попробуйте ещё раз');
     pinBuf = ''; paintDots(dots, 0); return;
   }
-  if (pinStage === 0) {
+  if (pinStage === 0) {            /* новый пин, первый ввод */
     pinFirst = pinBuf; pinBuf = ''; pinStage = 1;
     title.textContent = 'Повторите пин-код'; paintDots(dots, 0); return;
   }
+  /* повтор нового пина */
   if (pinBuf === pinFirst) {
-    S.pin = pinBuf; save(); closeSheets(true); syncSettings();
+    if (API.ok) {
+      try { await API.call('/api/pin/set', { pin: pinBuf, old: pinOld }); }
+      catch (e) {
+        pinStage = pinIsSet() ? -1 : 0; pinBuf = ''; pinFirst = ''; pinOld = '';
+        title.textContent = e.message + ' — с начала';
+        paintDots(dots, 0); return;
+      }
+      S.hasPin = true;
+    } else { S.pin = pinBuf; save(); }
+    closeSheets(true); syncSettings();
     haptic('medium'); toast('Пин-код установлен 🔐');
   } else {
-    dots.classList.add('pin-shake'); setTimeout(() => dots.classList.remove('pin-shake'), 500);
     pinStage = 0; pinBuf = ''; pinFirst = '';
-    title.textContent = 'Не совпало — придумайте заново'; paintDots(dots, 0);
+    shake('Не совпало — придумайте заново'); paintDots(dots, 0);
   }
 }
 
@@ -2326,13 +2350,32 @@ function initLock() {
     return;
   }
   lock.classList.add('show');
-  lockMode = S.pin ? 'enter' : 'create';
   buildPad(document.getElementById('lockPad'), document.getElementById('lockDots'), lockDigit,
     () => { lockBuf = lockBuf.slice(0, -1); paintDots(document.getElementById('lockDots'), lockBuf.length); });
-  if (lockMode === 'enter' && S.pinLockUntil && S.pinLockUntil > Date.now()) {
-    showPinLockout();
+  if (location.protocol === 'file:') {
+    configureLock();  // демо: пин из localStorage сразу
   } else {
-    title.textContent = lockMode === 'enter' ? 'Введите пин-код' : 'Придумайте пин-код';
+    // в Telegram ждём serverSync → configureLock() (статус пина с сервера)
+    const pad = document.getElementById('lockPad');
+    pad.style.pointerEvents = 'none'; pad.style.opacity = '.4';
+    title.textContent = 'Загрузка…';
+  }
+}
+function configureLock() {
+  const lock = document.getElementById('lock');
+  if (!lock.classList.contains('show')) return;
+  const title = document.getElementById('lockTitle');
+  const pad = document.getElementById('lockPad');
+  const dots = document.getElementById('lockDots');
+  pad.style.pointerEvents = ''; pad.style.opacity = ''; dots.style.visibility = '';
+  const hasPin = API.ok ? !!S.hasPin : !!S.pin;
+  const lockedUntil = API.ok ? (S.serverLockUntil || 0) : (S.pinLockUntil || 0);
+  lockMode = hasPin ? 'enter' : 'create';
+  lockBuf = ''; paintDots(dots, 0);
+  if (lockMode === 'enter' && lockedUntil > Date.now()) {
+    S.pinLockUntil = lockedUntil; showPinLockout();
+  } else {
+    title.textContent = hasPin ? 'Введите пин-код' : 'Придумайте пин-код';
   }
 }
 function showPinLockout() {
@@ -2365,7 +2408,7 @@ function lockDigit(d) {
   paintDots(document.getElementById('lockDots'), lockBuf.length);
   if (lockBuf.length === PIN_LEN) setTimeout(lockStep, 240);
 }
-function lockStep() {
+async function lockStep() {
   const lock = document.getElementById('lock');
   const title = document.getElementById('lockTitle');
   const dots = document.getElementById('lockDots');
@@ -2374,15 +2417,23 @@ function lockStep() {
     title.textContent = msg; haptic('heavy');
   };
   if (lockMode === 'enter') {
-    if (lockBuf === S.pin) {
+    if (API.ok) {
+      let r;
+      try { r = await API.call('/api/pin/verify', { pin: lockBuf }); }
+      catch (e) { lockBuf = ''; paintDots(dots, 0); return fail('Ошибка сети — попробуйте ещё'); }
+      if (r.ok) { lock.classList.remove('show'); haptic('medium'); }
+      else if (r.locked_until) {
+        S.pinLockUntil = new Date(r.locked_until).getTime();
+        lockBuf = ''; paintDots(dots, 0); return showPinLockout();
+      } else fail('Неверный пин-код' + (r.left != null ? ` · осталось: ${r.left}` : ''));
+    } else if (lockBuf === S.pin) {   /* демо-режим (localStorage) */
       S.pinFails = 0; S.pinLockUntil = 0; save();
       lock.classList.remove('show'); haptic('medium');
     } else {
       S.pinFails = (S.pinFails || 0) + 1;
       if (S.pinFails >= PIN_MAX_FAILS) {
         S.pinLockUntil = Date.now() + PIN_LOCK_MS; S.pinFails = 0; save();
-        lockBuf = ''; paintDots(dots, 0); showPinLockout();
-        return;
+        lockBuf = ''; paintDots(dots, 0); return showPinLockout();
       }
       save();
       fail(`Неверный пин-код · осталось попыток: ${PIN_MAX_FAILS - S.pinFails}`);
@@ -2390,11 +2441,15 @@ function lockStep() {
   } else if (lockMode === 'create') {
     lockFirst = lockBuf; lockMode = 'repeat';
     title.textContent = 'Повторите пин-код';
-  } else { /* repeat */
+  } else { /* repeat — установка нового пина при первом входе */
     if (lockBuf === lockFirst) {
-      S.pin = lockBuf; save(); syncSettings();
-      lock.classList.remove('show'); haptic('medium');
-      toast('Пин-код установлен 🔐');
+      if (API.ok) {
+        try { await API.call('/api/pin/set', { pin: lockBuf }); }
+        catch (e) { lockMode = 'create'; lockFirst = ''; lockBuf = ''; paintDots(dots, 0); return fail(e.message); }
+        S.hasPin = true;
+      } else { S.pin = lockBuf; save(); }
+      syncSettings();
+      lock.classList.remove('show'); haptic('medium'); toast('Пин-код установлен 🔐');
     } else {
       lockMode = 'create'; lockFirst = '';
       fail('Не совпало — придумайте заново');

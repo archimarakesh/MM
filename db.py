@@ -1,5 +1,6 @@
 """Magic Market — хранилище PostgreSQL (asyncpg, Railway DATABASE_URL)."""
 import base64
+import hashlib
 import json
 import os
 import secrets
@@ -9,6 +10,13 @@ from io import BytesIO
 
 import asyncpg
 from PIL import Image
+
+PIN_MAX_FAILS = 3
+PIN_LOCK = timedelta(hours=1)
+
+
+def _hash_pin(pin: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), 100_000).hex()
 
 # уровни рефералки: (приглашено от, доля с покупок рефералов)
 REF_TIERS = [(0, 0.05), (10, 0.07), (50, 0.10)]
@@ -63,6 +71,11 @@ async def init():
             ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT;
             -- locked: часть баланса (бонус), которую нельзя вывести, только потратить в магазине
             ALTER TABLE users ADD COLUMN IF NOT EXISTS locked BIGINT NOT NULL DEFAULT 0;
+            -- серверный пин-код (хэш + соль), счётчик попыток и блокировка
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_salt TEXT;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_fails INT NOT NULL DEFAULT 0;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ;
             CREATE TABLE IF NOT EXISTS bonus_claims(
                 user_id     BIGINT PRIMARY KEY,
                 device_hash TEXT,
@@ -390,6 +403,8 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "ref_percent": round(ref_percent(cnt) * 100),
         "bonus_claimed": u["bonus_claimed"],
         "withdrawable": max(0, u["balance"] - (u["locked"] or 0)),
+        "has_pin": bool(u["pin_hash"]),
+        "pin_locked_until": u["pin_locked_until"].isoformat() if u["pin_locked_until"] else None,
         "orders": orders,
         "products": await get_products(conn=c),
         "payment": payment_public(await get_settings(conn=c)),
@@ -863,6 +878,62 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
             INSERT INTO bonus_claims(user_id, device_hash, ip) VALUES($1,$2,$3)
             ON CONFLICT (user_id) DO NOTHING
         """, tg_id, device or None, ip or None)
+
+
+# ── серверный пин-код ────────────────────────────────────────────────────────
+async def verify_pin(tg_id: int, pin: str) -> dict:
+    """Проверка пина с серверным счётчиком попыток и часовой блокировкой."""
+    async with _pool.acquire() as c, c.transaction():
+        u = await c.fetchrow(
+            "SELECT pin_hash, pin_salt, pin_fails, pin_locked_until FROM users WHERE tg_id=$1 FOR UPDATE",
+            tg_id)
+        if not u or not u["pin_hash"]:
+            return {"ok": True, "no_pin": True}
+        now = datetime.now(timezone.utc)
+        if u["pin_locked_until"] and u["pin_locked_until"] > now:
+            return {"ok": False, "locked_until": u["pin_locked_until"].isoformat()}
+        if _hash_pin(pin, u["pin_salt"]) == u["pin_hash"]:
+            await c.execute(
+                "UPDATE users SET pin_fails=0, pin_locked_until=NULL WHERE tg_id=$1", tg_id)
+            return {"ok": True}
+        fails = u["pin_fails"] + 1
+        locked = None
+        if fails >= PIN_MAX_FAILS:
+            locked = now + PIN_LOCK
+            fails = 0
+        await c.execute(
+            "UPDATE users SET pin_fails=$2, pin_locked_until=$3 WHERE tg_id=$1",
+            tg_id, fails, locked)
+        return {"ok": False,
+                "left": 0 if locked else max(0, PIN_MAX_FAILS - fails),
+                "locked_until": locked.isoformat() if locked else None}
+
+
+async def set_pin(tg_id: int, pin: str, old: str) -> dict:
+    """Установка/смена пина. Смена требует текущий пин (с той же блокировкой)."""
+    if not (pin.isdigit() and len(pin) == 4):
+        raise ValueError("Пин-код — 4 цифры")
+    async with _pool.acquire() as c, c.transaction():
+        u = await c.fetchrow(
+            "SELECT pin_hash, pin_salt, pin_fails, pin_locked_until FROM users WHERE tg_id=$1 FOR UPDATE",
+            tg_id)
+        if u and u["pin_hash"]:
+            now = datetime.now(timezone.utc)
+            if u["pin_locked_until"] and u["pin_locked_until"] > now:
+                raise ValueError("Ввод пин-кода заблокирован — попробуйте позже")
+            if not old or _hash_pin(old, u["pin_salt"]) != u["pin_hash"]:
+                fails = u["pin_fails"] + 1
+                locked = now + PIN_LOCK if fails >= PIN_MAX_FAILS else None
+                await c.execute(
+                    "UPDATE users SET pin_fails=$2, pin_locked_until=$3 WHERE tg_id=$1",
+                    tg_id, 0 if locked else fails, locked)
+                raise ValueError("Неверный текущий пин-код")
+        salt = secrets.token_hex(16)
+        await c.execute("""
+            UPDATE users SET pin_hash=$2, pin_salt=$3, pin_fails=0, pin_locked_until=NULL
+            WHERE tg_id=$1
+        """, tg_id, _hash_pin(pin, salt), salt)
+        return {"ok": True}
 
 
 # ── вывод баланса (ручная выплата) ───────────────────────────────────────────
