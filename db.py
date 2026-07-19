@@ -183,6 +183,7 @@ async def init():
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS stage_at TIMESTAMPTZ NOT NULL DEFAULT now();
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS sold_pct BIGINT NOT NULL DEFAULT 0;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS done BOOLEAN NOT NULL DEFAULT false;
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ NOT NULL DEFAULT now();
             CREATE TABLE IF NOT EXISTS grow_photos(
                 id      BIGSERIAL PRIMARY KEY,
                 plan_id BIGINT NOT NULL,
@@ -1161,6 +1162,7 @@ def _plan_row(r) -> dict:
         "price": r["price"], "slots": r["slots"],
         "stages": _plan_stages(r),
         "stage": r["stage"], "stage_at": r["stage_at"].isoformat(),
+        "start_at": r["start_at"].isoformat(),
         "sold_pct": r["sold_pct"], "done": r["done"],
         "active": r["active"],
         "photo": bool(r["photo"]),
@@ -1222,12 +1224,24 @@ async def grow_plan_photo(pid: int, size: str = "f") -> str | None:
         return val
 
 
+def _parse_dt(v):
+    """ISO-строку (в т.ч. с 'Z') → aware datetime; иначе None."""
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
 async def save_grow_plan(d: dict) -> int:
     stages = d.get("stages")
     if not (isinstance(stages, list) and len(stages) == 6):
         stages = GROW_STAGES_DEFAULT
     stages = [{"d": max(0, int(s.get("d", 0))), "p": max(0, min(1000, int(s.get("p", 0))))}
               for s in stages]
+    start = _parse_dt(d.get("start_at"))  # None = старт сразу / без перепланирования
     async with _pool.acquire() as c:
         photo = None
         if d.get("photo") == "keep" and d.get("id"):
@@ -1241,19 +1255,29 @@ async def save_grow_plan(d: dict) -> int:
                 photo, int(d["price"]), slots,
                 json.dumps(stages), bool(d.get("active", True)))
         if d.get("id"):
+            pid = int(d["id"])
             await c.execute("""
                 UPDATE grow_plans SET name=$2, sub=$3, genetics=$4, photo=$5, price=$6,
                                       slots=$7, stages=$8, active=$9 WHERE id=$1
-            """, int(d["id"]), *vals)
-            return int(d["id"])
-        # новая программа: цикл стартует с момента создания (стадия «семечко»)
+            """, pid, *vals)
+            if start is not None:
+                # перепланирование старта: двигаем и отсчёт цикла, пока не пошли стадии
+                await c.execute("""
+                    UPDATE grow_plans
+                    SET start_at=$2,
+                        stage_at=CASE WHEN stage=0 AND NOT done THEN $2 ELSE stage_at END
+                    WHERE id=$1
+                """, pid, start)
+            return pid
+        # новая программа: цикл и таймер стартуют с даты старта (или сразу)
+        s = start or datetime.now(timezone.utc)
         return await c.fetchval("""
             INSERT INTO grow_plans(name, sub, genetics, photo, price, slots, stages, active,
-                                   stage, stage_at, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8, 0, now(),
+                                   stage, stage_at, start_at, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8, 0, $9, $9,
                    COALESCE((SELECT MAX(pos)+1 FROM grow_plans), 0))
             RETURNING id
-        """, *vals)
+        """, *vals, s)
 
 
 async def delete_grow_plan(pid: int):
@@ -1273,7 +1297,7 @@ async def user_shares(tg_id: int, conn=None) -> list:
     c = conn or _pool
     rows = await c.fetch("""
         SELECT s.*, p.name AS plan_name, p.stage AS p_stage, p.stage_at AS p_stage_at,
-               p.stages AS p_stages, p.done AS p_done
+               p.stages AS p_stages, p.done AS p_done, p.start_at AS p_start_at
         FROM shares s LEFT JOIN grow_plans p ON p.id = s.plan_id
         WHERE s.user_id=$1 ORDER BY s.id DESC
     """, tg_id)
@@ -1291,6 +1315,7 @@ async def user_shares(tg_id: int, conn=None) -> list:
             "status": r["status"], "created": r["created"].isoformat(),
             "plan_stage": r["p_stage"] if r["p_stage"] is not None else HARVEST,
             "plan_stage_at": r["p_stage_at"].isoformat() if r["p_stage_at"] else None,
+            "plan_start_at": r["p_start_at"].isoformat() if r["p_start_at"] else None,
             "plan_stages": st, "plan_done": bool(r["p_done"]),
         })
     return out

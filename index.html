@@ -177,6 +177,14 @@ h1.page-title em{font-style:normal;color:inherit}
 .grow-toggle svg{width:16px;height:16px;transition:transform .35s var(--ease)}
 .grow-toggle.open svg{transform:rotate(180deg)}
 .grow-more{margin-top:12px}
+.presale{border:1px solid rgba(212,175,55,.28);background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(212,175,55,.03));
+  border-radius:var(--r-lg);padding:12px 14px;margin:2px 0 10px}
+.presale-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.presale-top span{font-size:12px;font-weight:700;color:var(--gold-soft);letter-spacing:.02em}
+.presale-top b{font-size:17px;font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums}
+.presale-sub{font-size:12px;color:var(--muted);margin-top:7px;line-height:1.45}
+.status.st-wait{background:rgba(212,175,55,.14);color:var(--gold-soft)}
+.cd{font-variant-numeric:tabular-nums}
 .tier-table{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px}
 .tier-row{display:flex;justify-content:space-between;padding:10px 15px;font-size:12.5px;
   border-bottom:1px solid var(--line);color:var(--muted);transition:background .45s var(--ease)}
@@ -699,7 +707,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 <div class="sheet" id="sheet-gedit">
   <div class="sheet-grip"></div>
   <h2 id="geTitle">Программа выращивания</h2>
-  <p class="sheet-sub">Клиенты покупают доли куста (кратно 10%). Чем раньше стадия входа — тем выше доходность. Цикл стартует с момента создания программы; выплаты — когда закончится стадия сбора урожая.</p>
+  <p class="sheet-sub">Клиенты покупают доли куста (кратно 10%). Чем раньше стадия входа — тем выше доходность. Цикл стартует сразу или с указанной даты старта (предпродажа с таймером); выплаты — когда закончится стадия сбора урожая.</p>
   <div class="field"><label>Название</label><input id="geName" placeholder="Роза Premium"></div>
   <div class="field"><label>Генетика</label><input id="geGenetics" placeholder="Например: Grand Prix × Freedom"></div>
   <div class="field"><label>Описание</label><input id="geSub" placeholder="Сортовая роза, теплица"></div>
@@ -707,6 +715,10 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
     <div class="field"><label>Цена куста (100%), ₴</label><input id="gePrice" inputmode="numeric" placeholder="10000"></div>
     <div class="field"><label>Кол-во кустов</label><input id="geSlots" inputmode="numeric" placeholder="например 96"></div>
+  </div>
+  <div class="field"><label>Старт программы · предпродажа (необязательно)</label>
+    <input type="datetime-local" id="geStart">
+    <small style="display:block;margin-top:5px;font-size:11px;color:var(--muted-2);line-height:1.4">Пусто — старт сразу. Дата в будущем: в E-growing показывается таймер обратного отсчёта, идёт предпродажа, отсчёт цикла начнётся с этой даты.</small>
   </div>
   <div class="field"><label>Стадии · дни и % входа</label><div id="geStages"></div></div>
   <div class="field" id="geStageCtl" style="display:none">
@@ -1672,6 +1684,36 @@ function cycleProgress(stages, stage, stageAt, done) {
   el += Math.min(Math.max(0, Date.now() - new Date(stageAt).getTime()), (stages[stage]?.d || 0) * DAY);
   return Math.min(100, Math.round(el / total * 100));
 }
+const planNotStarted = p => p && p.start_at && new Date(p.start_at).getTime() > Date.now();
+function fmtCountdown(ms) {
+  if (ms <= 0) return 'старт';
+  const d = Math.floor(ms / DAY), h = Math.floor(ms % DAY / 3.6e6),
+        m = Math.floor(ms % 3.6e6 / 6e4), s = Math.floor(ms % 6e4 / 1e3);
+  if (d > 0) return `${d} д ${h} ч ${m} мин`;
+  if (h > 0) return `${h} ч ${m} мин ${s} с`;
+  return `${m} мин ${s} с`;
+}
+const cdSpan = iso => `<span class="cd" data-until="${new Date(iso).getTime()}">${fmtCountdown(new Date(iso).getTime() - Date.now())}</span>`;
+function toLocalInput(iso) {  // ISO(UTC) → значение для <input type="datetime-local"> в локальном времени
+  const d = new Date(iso); if (isNaN(d)) return '';
+  const z = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;
+}
+let growTick = null;
+function tickGrow() {
+  const els = document.querySelectorAll('#view-egrow [data-until]');
+  if (!els.length) { clearInterval(growTick); growTick = null; return; }
+  let flip = false;
+  els.forEach(el => {
+    const left = +el.dataset.until - Date.now();
+    if (left <= 0) flip = true; else el.textContent = fmtCountdown(left);
+  });
+  if (flip) { clearInterval(growTick); growTick = null; renderEgrow(); } // старт наступил — перерисовать
+}
+function armGrowCountdown() {
+  if (growTick) { clearInterval(growTick); growTick = null; }
+  if (document.querySelector('#view-egrow [data-until]')) { tickGrow(); growTick = setInterval(tickGrow, 1000); }
+}
 function stepper(stage, done) {
   return `<div style="display:flex;justify-content:space-between;margin:10px 0 4px">
     ${STAGE_META.map(([e], i) => `<span style="font-size:17px;opacity:${done || i < stage ? '.45' : i === stage ? '1' : '.22'};${i === stage && !done ? 'transform:scale(1.25)' : ''}">${e}</span>`).join('')}
@@ -1687,18 +1729,21 @@ function renderEgrow() {
     my.innerHTML = `<div class="section-head"><h2>Мои доли</h2><span>${active.length} растёт</span></div>` +
       active.map(s => {
         const st = s.plan_stage, meta = STAGE_META[Math.min(st, 5)];
-        const prog = cycleProgress(s.plan_stages, st, s.plan_stage_at, s.plan_done);
+        const ns = s.plan_start_at && new Date(s.plan_start_at).getTime() > Date.now();
+        const prog = ns ? 0 : cycleProgress(s.plan_stages, st, s.plan_stage_at, s.plan_done);
         return `<div class="bezel gold reveal" style="margin-bottom:12px"><div class="bezel-core" style="padding:15px 16px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <b style="font-size:14.5px">${s.plan_name} · ${s.pct}%</b>
-            <span class="status ${st >= 5 ? 'st-done' : 'st-ship'}">${meta[1]} ${meta[0]}</span>
+            ${ns ? '<span class="status st-wait">⏳ предпродажа</span>'
+                 : `<span class="status ${st >= 5 ? 'st-done' : 'st-ship'}">${meta[1]} ${meta[0]}</span>`}
           </div>
           <div style="height:8px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--line);overflow:hidden;margin-top:10px">
             <div style="height:100%;width:${prog}%;border-radius:99px;background:linear-gradient(90deg,#c9971d,#f0d47a)"></div>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:8px">
             <span>вход ${fmt(s.invested)} ₴ (+${s.profit_pct}%)</span>
-            <span>выплата <b style="color:var(--gold-soft)">${fmt(s.payout)} ₴</b> · ~через ${cycleTotals(s.plan_stages, s.plan_stage, s.plan_stage_at, s.plan_done).left} дн.</span>
+            <span>${ns ? `старт через ${cdSpan(s.plan_start_at)}`
+                       : `выплата <b style="color:var(--gold-soft)">${fmt(s.payout)} ₴</b> · ~через ${cycleTotals(s.plan_stages, s.plan_stage, s.plan_stage_at, s.plan_done).left} дн.`}</span>
           </div>
         </div></div>`;
       }).join('');
@@ -1725,6 +1770,7 @@ function renderEgrow() {
     const cost = Math.round(p.price * pct / 100);
     const payout = cost + Math.round(cost * enterP / 100);
     const open = growOpen.has(p.id);
+    const notStarted = planNotStarted(p);
     return `<div class="bezel reveal" style="margin-bottom:14px;transition-delay:${i * 50}ms"><div class="bezel-core" style="padding:14px">
       <div class="good-img" style="background:${p.grad};aspect-ratio:2/1;margin-bottom:10px">
         ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : `<span style="font-size:40px">🌱</span>`}
@@ -1747,10 +1793,16 @@ function renderEgrow() {
           ${l.note ? `<span style="position:absolute;left:5px;top:5px;right:5px;font-size:9px;padding:2px 6px;border-radius:8px;background:rgba(5,5,5,.6);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.note}</span>` : ''}
         </div>`).join('')}
       </div>` : ''}
-      <p class="note" style="margin:0 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
+      ${notStarted ? `
+      <div class="presale">
+        <div class="presale-top"><span>⏳ До старта программы</span><b class="cd" data-until="${new Date(p.start_at).getTime()}">${fmtCountdown(new Date(p.start_at).getTime() - Date.now())}</b></div>
+        <div class="presale-sub">🔥 Идёт предпродажа — зафиксируйте максимальный вход <b style="color:var(--gold-soft)">+${enterP}%</b></div>
+      </div>
+      <p class="note" style="margin:0 0 10px">Полный цикл <b style="color:var(--txt)">${ts.reduce((a, s) => a + s.d, 0)} дн.</b> · отсчёт пойдёт с даты старта</p>`
+      : `<p class="note" style="margin:0 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
         : (() => { const ct = cycleTotals(ts, p.stage, p.stage_at, p.done); return `
         Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}<br>
-        Полный цикл <b style="color:var(--txt)">${ct.total} дн.</b> · до выплаты осталось <b style="color:var(--gold-soft)">~${ct.left} дн.</b>`; })()}</p>
+        Полный цикл <b style="color:var(--txt)">${ct.total} дн.</b> · до выплаты осталось <b style="color:var(--gold-soft)">~${ct.left} дн.</b>`; })()}</p>`}
       <button class="grow-toggle ${open ? 'open' : ''}" onclick="toggleGrow(${p.id})">
         <span>${open ? 'Свернуть' : (closed ? 'Стадии и детали' : 'Стадии входа и покупка доли')}</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -1778,6 +1830,7 @@ function renderEgrow() {
     </div></div>`;
   }).join('');
   observeReveals();
+  armGrowCountdown();
 }
 function toggleGrow(planId) { haptic('light'); growOpen.has(planId) ? growOpen.delete(planId) : growOpen.add(planId); renderEgrow(); }
 function selShare(planId, pct) { haptic('light'); selPct[planId] = pct; renderEgrow(); }
@@ -2202,6 +2255,7 @@ function openGedit(id) {
   document.getElementById('geSub').value = curGe?.sub || '';
   document.getElementById('gePrice').value = curGe?.price ?? '';
   document.getElementById('geSlots').value = curGe ? (curGe.slots ?? '') : '';
+  document.getElementById('geStart').value = (curGe && planNotStarted(curGe)) ? toLocalInput(curGe.start_at) : '';
   const ts = curGe ? planStages(curGe) : DEFAULT_STAGES;
   document.getElementById('geStages').innerHTML = ts.map((s, i) => `
     <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px;margin-bottom:8px;align-items:center">
@@ -2331,6 +2385,7 @@ async function saveGedit() {
       sub: document.getElementById('geSub').value.trim(),
       price, stages,
       slots: slotsRaw === '' ? null : Math.max(0, parseInt(slotsRaw, 10) || 0),
+      start_at: document.getElementById('geStart').value ? new Date(document.getElementById('geStart').value).toISOString() : null,
       active: geActiveVal, photo,
     });
     AD.grow_plans = r.grow_plans;
