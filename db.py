@@ -675,12 +675,55 @@ async def topup_decide(topup_id: int, approve: bool) -> dict:
 
 
 # ── админ: заказы и ТТН ──────────────────────────────────────────────────────
+async def grow_stats() -> dict:
+    """Агрегаты по долям E-grow: вложено, к выплате, выплачено."""
+    async with _pool.acquire() as c:
+        r = await c.fetchrow("""
+            SELECT
+              COUNT(*)                    FILTER (WHERE status=0)      AS active_cnt,
+              COALESCE(SUM(invested) FILTER (WHERE status=0), 0)       AS active_invested,
+              COALESCE(SUM(payout)   FILTER (WHERE status=0), 0)       AS payout_due,
+              COUNT(*)                    FILTER (WHERE status=1)      AS paid_cnt,
+              COALESCE(SUM(payout)   FILTER (WHERE status=1), 0)       AS paid_out,
+              COALESCE(SUM(invested), 0)                               AS invested_total
+            FROM shares
+        """)
+    active_inv, payout_due = int(r["active_invested"]), int(r["payout_due"])
+    return {
+        "active_cnt": r["active_cnt"], "active_invested": active_inv,
+        "payout_due": payout_due, "profit_due": payout_due - active_inv,
+        "paid_cnt": r["paid_cnt"], "paid_out": int(r["paid_out"]),
+        "invested_total": int(r["invested_total"]),
+    }
+
+
+async def sales_stats() -> dict:
+    """Агрегаты по выполненным (полученным) заказам — для статистики продаж."""
+    async with _pool.acquire() as c:
+        await _auto_deliver(c)
+        tot = await c.fetchrow("""
+            SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue, COALESCE(SUM(grams),0) AS grams
+            FROM orders WHERE status=3
+        """)
+        by = await c.fetch("""
+            SELECT product, COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
+                   COALESCE(SUM(grams),0) AS grams
+            FROM orders WHERE status=3 GROUP BY product ORDER BY revenue DESC LIMIT 20
+        """)
+    return {
+        "count": tot["cnt"], "revenue": int(tot["revenue"]), "grams": int(tot["grams"]),
+        "by_product": [{"product": b["product"], "cnt": b["cnt"],
+                        "revenue": int(b["revenue"]), "grams": int(b["grams"])} for b in by],
+    }
+
+
 async def admin_orders() -> list:
     async with _pool.acquire() as c:
         await _auto_deliver(c)
         rows = await c.fetch("""
             SELECT o.*, u.name, u.username FROM orders o
             LEFT JOIN users u ON u.tg_id = o.user_id
+            WHERE o.status <> 3
             ORDER BY o.id DESC LIMIT 200
         """)
     return [{

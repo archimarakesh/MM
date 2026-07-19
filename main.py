@@ -1087,6 +1087,8 @@ async def api_admin_data(request: Request):
         "topups": await db.admin_topups(),
         "withdrawals": await db.admin_withdrawals(),
         "orders": await db.admin_orders(),
+        "sales": await db.sales_stats(),
+        "grow_stats": await db.grow_stats(),
         "promos": await db.admin_promos(),
     }
 

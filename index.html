@@ -185,6 +185,12 @@ h1.page-title em{font-style:normal;color:inherit}
 .presale-sub{font-size:12px;color:var(--muted);margin-top:7px;line-height:1.45}
 .status.st-wait{background:rgba(212,175,55,.14);color:var(--gold-soft)}
 .cd{font-variant-numeric:tabular-nums}
+.admin-stats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.admin-stats>div{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.admin-stats b{display:block;font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
+.admin-stats span{font-size:10.5px;color:var(--muted-2);line-height:1.3}
+.stat-list{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+.stat-list>div{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:3px 0}
 .tier-table{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px}
 .tier-row{display:flex;justify-content:space-between;padding:10px 15px;font-size:12.5px;
   border-bottom:1px solid var(--line);color:var(--muted);transition:background .45s var(--ease)}
@@ -1994,7 +2000,18 @@ function renderAdmin(tab) {
       </div>`).join('') +
       `<button class="btn btn-gold" style="margin-top:14px" onclick="openPedit(null)">+ Добавить товар</button>`;
   } else if (tab === 'grow') {
-    b.innerHTML = (AD.grow_plans || []).map(p => `
+    const gs = AD.grow_stats || {};
+    const growStats = `
+      <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
+        <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:15px">Статистика E-grow</h2><span>${gs.active_cnt || 0} долей растёт</span></div>
+        <div class="admin-stats">
+          <div><b>${fmt(gs.active_invested || 0)} ₴</b><span>вложено в активные доли</span></div>
+          <div><b style="color:var(--gold-soft)">${fmt(gs.payout_due || 0)} ₴</b><span>к выплате при сборе</span></div>
+          <div><b style="color:var(--warn)">+${fmt(gs.profit_due || 0)} ₴</b><span>из них прибыль дольщикам</span></div>
+          <div><b>${fmt(gs.paid_out || 0)} ₴</b><span>выплачено ранее (${gs.paid_cnt || 0})</span></div>
+        </div>
+      </div></div>`;
+    b.innerHTML = growStats + (AD.grow_plans || []).map(p => `
       <div class="set-row" onclick="openGedit(${p.id})">
         <div class="link-ico" style="overflow:hidden">${p.photo
           ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" style="width:100%;height:100%;object-fit:cover">`
@@ -2004,7 +2021,19 @@ function renderAdmin(tab) {
       </div>`).join('') +
       `<button class="btn btn-gold" style="margin-top:14px" onclick="openGedit(null)">+ Добавить программу</button>`;
   } else if (tab === 'orders') {
-    b.innerHTML = AD.orders.length ? AD.orders.map((o, i) => `
+    const sa = AD.sales || {};
+    const salesStats = `
+      <div class="bezel" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
+        <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:15px">Продажи · выполнено</h2><span>${sa.count || 0} заказ.</span></div>
+        <div class="admin-stats">
+          <div><b style="color:var(--gold-soft)">${fmt(sa.revenue || 0)} ₴</b><span>выручка с полученных</span></div>
+          <div><b>${fmt(sa.grams || 0)} г</b><span>продано веса</span></div>
+        </div>
+        ${(sa.by_product || []).length ? `<div class="stat-list">
+          ${sa.by_product.map(x => `<div><span>${esc(x.product)} · ${x.cnt}× · ${fmt(x.grams)} г</span><b style="color:var(--txt)">${fmt(x.revenue)} ₴</b></div>`).join('')}
+        </div>` : ''}
+      </div></div>`;
+    const cards = AD.orders.length ? AD.orders.map((o, i) => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
         <div style="font-size:12px;color:var(--muted);line-height:1.65">
@@ -2025,7 +2054,8 @@ function renderAdmin(tab) {
             <input class="mini-input" id="ttn-${o.id}" placeholder="ТТН Новой Почты → статус «В пути»" inputmode="numeric" style="flex:1">
             <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
           </div>` : ''}
-      </div></div>`).join('') : '<div class="empty"><p>Заказов пока нет</p></div>';
+      </div></div>`).join('') : '<div class="empty" style="padding:20px"><p>Активных заказов нет</p></div>';
+    b.innerHTML = salesStats + cards;
   } else if (tab === 'withdrawals') {
     b.innerHTML = (AD.withdrawals || []).length ? AD.withdrawals.map(w => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
