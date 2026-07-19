@@ -556,7 +556,6 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
   </button>
   <p class="note">После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.</p>
-  <input type="file" id="coFile" accept="image/*,application/pdf" style="display:none">
 </div>
 
 <div class="sheet" id="sheet-bonus">
@@ -1057,51 +1056,21 @@ function customGramsInput(v) {
 }
 
 /* ═══════════ Checkout ═══════════ */
-let payMethod = 'balance', coReceipt = '';
+let payMethod = 'balance';
+const CARD_LIMIT = 5000; // лимит оплаты картой при пополнении
 function openCheckout() {
   const total = priceFor(curProduct, curGrams);
+  payMethod = 'balance';
   document.getElementById('coSummary').textContent =
     `${curProduct.name} · ${curGrams} г · ${fmt(total)} ₴`;
-  payMethod = 'balance'; coReceipt = '';
-  renderCoPays();
+  const enough = S.balance >= total;
+  document.getElementById('coPays').innerHTML =
+    `<p class="note" style="grid-column:1/-1;margin:0">Оплата с баланса · доступно <b style="color:${enough ? 'var(--gold-soft)' : 'var(--danger)'}">${fmt(S.balance)} ₴</b>` +
+    (enough ? '' : ` · не хватает ${fmt(total - S.balance)} ₴`) + `</p>`;
+  document.getElementById('coExtra').innerHTML = enough ? '' :
+    `<a class="btn btn-ghost" style="text-decoration:none;margin-bottom:6px" onclick="closeSheets(true);go('topup')">Пополнить баланс</a>`;
   openSheet('checkout');
 }
-const CARD_LIMIT = 5000; // картой — до 5 000 ₴, свыше только крипта
-function coOptions(total) {
-  const o = [{ key: 'balance', label: 'С баланса', small: `доступно ${fmt(S.balance)} ₴` }];
-  if (API.ok) {
-    if (PAY.card_number && total <= CARD_LIMIT) o.push({ key: 'card', label: 'Картой', small: 'перевод + квитанция' });
-    if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20', small: 'авто-счёт' });
-    if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC', small: 'авто-счёт' });
-  }
-  return o;
-}
-function renderCoPays() {
-  const total = priceFor(curProduct, curGrams);
-  const opts = coOptions(total);
-  if (!opts.find(o => o.key === payMethod)) payMethod = 'balance';
-  document.getElementById('coPays').innerHTML = opts.map(o =>
-    `<div class="pay-opt ${payMethod === o.key ? 'sel' : ''}" onclick="selPay('${o.key}')">${o.label}<small>${o.small}</small></div>`).join('') +
-    (API.ok && PAY.card_number && total > CARD_LIMIT
-      ? `<p class="note" style="grid-column:1/-1;margin:0">💳 Картой — до ${fmt(CARD_LIMIT)} ₴. Для этой суммы доступна оплата криптой.</p>` : '');
-  const ex = document.getElementById('coExtra');
-  if (payMethod === 'card') {
-    ex.innerHTML = `
-      ${cardBlock()}
-      <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('coFile').click()">
-        ${coReceipt ? '✓ Квитанция прикреплена' : '📎 Прикрепить квитанцию'}</button>
-      ${coReceipt ? receiptChip('coReceipt', coReceipt) : ''}`;
-  } else if (payMethod === 'trc20' || payMethod === 'btc') {
-    ex.innerHTML = `<p class="note" style="margin:0 0 12px">После подтверждения появится счёт с QR-кодом, адресом и точной суммой — оплатите его в течение 30 минут, заказ подтвердится автоматически.</p>`;
-  } else ex.innerHTML = '';
-}
-function selPay(k) { haptic('light'); payMethod = k; renderCoPays(); }
-document.getElementById('coFile').addEventListener('change', e => {
-  const f = e.target.files[0];
-  if (!f) return;
-  readReceipt(f, d => { coReceipt = d; renderCoPays(); });
-  e.target.value = '';
-});
 async function placeOrder() {
   const name = document.getElementById('coName').value.trim();
   const phone = document.getElementById('coPhone').value.trim();
@@ -1110,31 +1079,18 @@ async function placeOrder() {
   if (!name || !phone || !city || !np) return toast('Заполните все поля доставки');
   const total = priceFor(curProduct, curGrams);
   const ship = { name, phone, city, np };
+  if (S.balance < total) { toast('Недостаточно средств — пополните баланс'); closeSheets(true); return go('topup'); }
   if (API.ok) {
-    const body = { product_id: curProduct.id, product_name: curProduct.name,
-                   grams: curGrams, pay: payMethod, ship };
-    if (payMethod === 'card') {
-      if (!coReceipt) return toast('Приложите фото квитанции об оплате');
-      body.receipt = coReceipt;
-    }
     let d;
-    try { d = await API.call('/api/order', body); } catch (e) { return toast(e.message); }
+    try { d = await API.call('/api/order', { product_id: curProduct.id, product_name: curProduct.name, grams: curGrams, pay: 'balance', ship }); }
+    catch (e) { return toast(e.message); }
     applySnapshot(d);
-    coReceipt = '';
     closeSheets(true); haptic('medium');
-    if (d.invoice) {
-      INV = d.invoice;
-      renderInvoice(document.getElementById('invoiceBody'));
-      openSheet('invoice');
-      startInvPoll();
-      return;
-    }
-    toast(payMethod === 'card' ? 'Заказ создан — оплата на проверке ⏳' : 'Заказ оформлен ✦');
+    toast('Заказ оформлен ✦');
     go('history');
     return;
   }
   /* демо-режим: только с баланса */
-  if (S.balance < total) return toast('Недостаточно средств — пополните баланс');
   S.balance -= total;
   S.orders.unshift({
     id: 'MM-' + (1043 + S.orders.length),
