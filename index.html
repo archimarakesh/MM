@@ -1239,6 +1239,14 @@ let CARD = null, cardTimer = null, cardPoll = null;
 const TU_ST_CARD = ['⏳ Проверяется', '✅ Зачислено', '❌ Отклонено'];
 const TU_ST_CRYPTO = ['⏳ Ожидает оплаты', '✅ Зачислено', '⌛ Отменён'];
 const TU_ST_OUT = ['⏳ В обработке', '✅ Выплачено', '↩️ Отклонён'];
+/* доступные криптовалюты: key ↔ реквизит в PAY (расширяется при новых кошельках) */
+const CRYPTO_META = [
+  { key: 'trc20', label: 'USDT TRC-20', wallet: 'wallet_trc20' },
+  { key: 'btc', label: 'BTC', wallet: 'wallet_btc' },
+];
+const availCryptos = () => CRYPTO_META.filter(c => PAY[c.wallet]);
+const cryptoLabel = k => (CRYPTO_META.find(c => c.key === k) || {}).label || k;
+const isCryptoKey = k => CRYPTO_META.some(c => c.key === k);
 const TU_LABELS = { card: 'Карта', cardauto: 'Карта', trc20: 'USDT TRC-20', btc: 'BTC', demo: 'Демо' };
 function tuAmount() { return parseInt(document.getElementById('tuSum').value, 10) || 0; }
 function tuOptions() {
@@ -1246,8 +1254,7 @@ function tuOptions() {
   const o = [];
   if (S.cardAuto && tuAmount() <= CARD_LIMIT) o.push({ key: 'cardauto', label: 'Карта' });
   if (PAY.card_number && tuAmount() <= CARD_LIMIT) o.push({ key: 'card', label: S.cardAuto ? 'Карта (квитанция)' : 'Карта' });
-  if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20' });
-  if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC' });
+  if (availCryptos().length) o.push({ key: 'crypto', label: 'Криптовалюта' });
   return o;
 }
 async function renderTopup() {
@@ -1268,11 +1275,14 @@ async function renderTopup() {
   }
 }
 function tuSel(k) { haptic('light'); tuMethod = k; renderTuBody(); renderTopupChips(); }
+function cryptoPick(k) { haptic('light'); tuMethod = k; renderTuBody(); renderTopupChips(); }
 function renderTopupChips() {
   const opts = tuOptions();
-  if (!opts.find(o => o.key === tuMethod)) { tuMethod = opts[0]?.key || ''; renderTuBody(); }
+  const known = k => opts.some(o => o.key === k) || isCryptoKey(k);
+  if (!known(tuMethod)) { tuMethod = opts[0]?.key || ''; renderTuBody(); }
+  const sel = o => o.key === tuMethod || (o.key === 'crypto' && isCryptoKey(tuMethod));
   document.getElementById('tuMethods').innerHTML = (opts.length
-    ? opts.map(o => `<div class="wchip ${o.key === tuMethod ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('')
+    ? opts.map(o => `<div class="wchip ${sel(o) ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('')
     : '<p class="note" style="margin:0">Способы оплаты пока не настроены — загляните позже.</p>') +
     (API.ok && PAY.card_number && tuAmount() > CARD_LIMIT
       ? `<p class="note" style="width:100%;margin:4px 0 0">💳 Картой — до ${fmt(CARD_LIMIT)} ₴. Для этой суммы используйте крипту.</p>` : '');
@@ -1305,9 +1315,20 @@ function renderTuBody() {
         <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
       </button>
       <p class="note">Переведите сумму на карту и приложите фото квитанции — зачислим после ручной проверки.</p>`;
-  } else if (tuMethod === 'trc20' || tuMethod === 'btc') {
+  } else if (tuMethod === 'crypto') {
+    const list = availCryptos();
+    b.innerHTML = `
+      <p class="note" style="margin:0 0 12px">Выберите криптовалюту:</p>
+      <div class="weight-chips" style="margin:0">
+        ${list.map(c => `<div class="wchip" onclick="cryptoPick('${c.key}')">${c.label}</div>`).join('')}
+      </div>`;
+  } else if (isCryptoKey(tuMethod)) {
     if (INV && INV.status === 0 && INV.currency === tuMethod) renderInvoice(b);
     else b.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span class="wchip sel" style="pointer-events:none">${cryptoLabel(tuMethod)}</span>
+        <span class="note" style="cursor:pointer;color:var(--gold-soft)" onclick="tuSel('crypto')">← другая крипта</span>
+      </div>
       <p class="note" style="margin:0 0 12px">Счёт действует 30 минут: получите адрес и точную сумму в крипте по текущему курсу, оплатите — баланс пополнится автоматически после подтверждения сети.</p>
       <button class="btn btn-gold" onclick="createInvoice()">Создать счёт
         <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
