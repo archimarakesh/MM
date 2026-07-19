@@ -589,7 +589,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
       <div class="wchip" data-k="branch" onclick="setKind('branch', this)">Отделения</div>
       <div class="wchip" data-k="postomat" onclick="setKind('postomat', this)">Почтоматы</div>
     </div>
-    <input id="coNP" placeholder="Сначала выберите город" autocomplete="off" disabled oninput="onNPInput()">
+    <input id="coNP" placeholder="№ отделения или почтомат" autocomplete="off" oninput="onNPInput()">
     <div class="ac-list" id="coNPList"></div>
   </div>
   <div class="field"><label>Оплата</label>
@@ -1112,16 +1112,14 @@ function resetCheckoutAddr() {
   coCitySel = coWhSel = null; coKind = ''; coCityRes = []; coWhRes = [];
   const c = document.getElementById('coCity'), n = document.getElementById('coNP');
   c.value = '';
-  n.value = ''; n.disabled = true; n.placeholder = 'Сначала выберите город';
+  n.value = ''; n.placeholder = '№ отделения или почтомат';
   document.getElementById('coCityList').innerHTML = '';
   document.getElementById('coNPList').innerHTML = '';
   document.querySelectorAll('#coKind .wchip').forEach(x => x.classList.toggle('sel', x.dataset.k === ''));
 }
 const acDebounce = fn => { clearTimeout(npTimer); npTimer = setTimeout(fn, 300); };
 function onCityInput() {
-  coCitySel = coWhSel = null;
-  const n = document.getElementById('coNP');
-  n.disabled = true; n.value = ''; n.placeholder = 'Сначала выберите город';
+  coCitySel = coWhSel = null;                 // город меняется — сбрасываем выбор из справочника
   document.getElementById('coNPList').innerHTML = '';
   const q = document.getElementById('coCity').value.trim();
   if (q.length < 2) { document.getElementById('coCityList').innerHTML = ''; return; }
@@ -1140,7 +1138,7 @@ function pickCity(i) {
   document.getElementById('coCity').value = c.present || c.name;
   document.getElementById('coCityList').innerHTML = '';
   const n = document.getElementById('coNP');
-  n.disabled = false; n.value = ''; n.placeholder = 'Отделение или почтомат';
+  n.value = ''; n.placeholder = 'Отделение или почтомат';
   haptic('light'); loadWarehouses(); n.focus();
 }
 function setKind(k, el) {
@@ -1261,7 +1259,8 @@ function openOrder(i) {
       <b style="display:flex;align-items:center;gap:6px">${o.ttn}
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       </b>
-    </div>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
+    </div>
+    <a class="btn btn-ghost" style="text-decoration:none;margin-top:8px;padding:11px" href="https://novaposhta.ua/tracking/?cargo_number=${o.ttn}" target="_blank" rel="noopener">Отследить на сайте Новой Почты ↗</a>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
     ${o.status === 2 && (o.np_status_text || o.np_eta || o.np_arrival) ? `
     <div class="np-live">
       ${o.np_status_text ? `<div class="np-row"><span>Статус Новой Почты</span><b>${esc(o.np_status_text)}</b></div>` : ''}
