@@ -42,7 +42,9 @@ SEED_PRODUCTS = [
     ("Silk Road", "Восточная коллекция", "🐫", "", 105),
 ]
 # ключи реквизитов оплаты в settings
-PAYMENT_KEYS = ["card_number", "card_holder", "wallet_trc20", "wallet_btc"]
+PAYMENT_KEYS = ["card_number", "card_holder",
+                "wallet_trc20", "wallet_trx", "wallet_btc", "wallet_ltc",
+                "wallet_ton", "wallet_sol", "wallet_eth", "wallet_bnb"]
 INVOICE_TTL = 30 * 60       # крипто-счёт живёт 30 минут
 
 _pool: asyncpg.Pool | None = None

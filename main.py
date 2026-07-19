@@ -63,37 +63,59 @@ def _receipt_ok(receipt: str) -> bool:
 
 # ── криптовалюты для авто-счетов ─────────────────────────────────────────────
 USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+ETHERSCAN_KEY = os.getenv("ETHERSCAN_API_KEY", "")  # один ключ на ETH и BNB (Etherscan V2)
+# dec — десятичные ончейн; disp — знаков в показываемой сумме; chain — тип проверки
 CRYPTO = {
-    "trc20": {"gecko": "tether", "label": "USDT TRC-20", "wallet_key": "wallet_trc20"},
-    "btc": {"gecko": "bitcoin", "label": "BTC", "wallet_key": "wallet_btc"},
+    "trc20": {"gecko": "tether", "label": "USDT TRC-20", "wallet_key": "wallet_trc20",
+              "dec": 6, "disp": 3, "chain": "trc20"},
+    "ton":   {"gecko": "the-open-network", "label": "TON", "wallet_key": "wallet_ton",
+              "dec": 9, "disp": 4, "chain": "ton"},
+    "trx":   {"gecko": "tron", "label": "TRX", "wallet_key": "wallet_trx",
+              "dec": 6, "disp": 2, "chain": "trx"},
+    "btc":   {"gecko": "bitcoin", "label": "BTC", "wallet_key": "wallet_btc",
+              "dec": 8, "disp": 8, "chain": "utxo",
+              "api": "https://mempool.space/api", "scheme": "bitcoin"},
+    "eth":   {"gecko": "ethereum", "label": "ETH", "wallet_key": "wallet_eth",
+              "dec": 18, "disp": 6, "chain": "evm", "chainid": 1},
+    "bnb":   {"gecko": "binancecoin", "label": "BNB", "wallet_key": "wallet_bnb",
+              "dec": 18, "disp": 6, "chain": "evm", "chainid": 56},
+    "sol":   {"gecko": "solana", "label": "SOL", "wallet_key": "wallet_sol",
+              "dec": 9, "disp": 5, "chain": "sol"},
+    "ltc":   {"gecko": "litecoin", "label": "LTC", "wallet_key": "wallet_ltc",
+              "dec": 8, "disp": 8, "chain": "utxo",
+              "api": "https://litecoinspace.org/api", "scheme": "litecoin"},
 }
 _rates: dict = {"ts": 0.0, "data": {}}
 
 
 async def get_rates() -> dict:
-    """Курс UAH за 1 монету (CoinGecko, кэш 2 минуты)."""
+    """Курс UAH за 1 монету по всем валютам (CoinGecko, кэш 2 минуты)."""
     if time.time() - _rates["ts"] < 120 and _rates["data"]:
         return _rates["data"]
+    ids = ",".join(sorted({m["gecko"] for m in CRYPTO.values()}))
     async with aiohttp.ClientSession() as s:
         async with s.get("https://api.coingecko.com/api/v3/simple/price",
-                         params={"ids": "bitcoin,tether", "vs_currencies": "uah"},
+                         params={"ids": ids, "vs_currencies": "uah"},
                          timeout=aiohttp.ClientTimeout(total=15)) as r:
             data = await r.json()
-    _rates["data"] = {"btc": float(data["bitcoin"]["uah"]),
-                      "trc20": float(data["tether"]["uah"])}
+    _rates["data"] = {k: float(data[m["gecko"]]["uah"])
+                      for k, m in CRYPTO.items() if data.get(m["gecko"])}
     _rates["ts"] = time.time()
     return _rates["data"]
 
 
 async def crypto_amount(currency: str, uah: int) -> str:
     """Сумма в крипте с уникальным «хвостом» — по ней распознаём платёж."""
-    rate = (await get_rates())[currency]
+    meta = CRYPTO[currency]
+    rate = (await get_rates()).get(currency)
+    if not rate:
+        raise Exception("нет курса")
+    disp = meta["disp"]
+    base = uah / rate
     taken = await db.pending_amounts(currency)
-    for _ in range(80):
-        if currency == "trc20":
-            amt = f"{round(uah / rate, 2) + random.randint(1, 99) / 10000:.4f}"
-        else:
-            amt = f"{round(uah / rate, 8) + random.randint(10, 999) / 1e8:.8f}"
+    span = 10 ** min(disp, 4)
+    for _ in range(120):
+        amt = f"{base + random.randint(1, span - 1) / (10 ** disp):.{disp}f}"
         if amt not in taken:
             return amt
     raise ValueError("Не удалось создать счёт, попробуйте ещё раз")
@@ -108,9 +130,12 @@ def qr_data_url(text: str) -> str:
 
 def invoice_public(inv: dict, with_qr: bool = True) -> dict:
     cur = inv["currency"]
-    payload = inv["address"] if cur == "trc20" else \
-        f"bitcoin:{inv['address']}?amount={inv['amount_crypto']}"
-    d = {"id": inv["id"], "currency": cur, "label": CRYPTO[cur]["label"],
+    meta = CRYPTO.get(cur, {})
+    if meta.get("chain") == "utxo":
+        payload = f'{meta["scheme"]}:{inv["address"]}?amount={inv["amount_crypto"]}'
+    else:
+        payload = inv["address"]
+    d = {"id": inv["id"], "currency": cur, "label": meta.get("label", cur),
          "amount_uah": inv["amount_uah"], "amount_crypto": inv["amount_crypto"],
          "address": inv["address"], "status": inv["status"],
          "expires": inv["expires"].isoformat()}
@@ -120,35 +145,104 @@ def invoice_public(inv: dict, with_qr: bool = True) -> dict:
 
 
 async def _check_invoice(s: aiohttp.ClientSession, inv: dict) -> str | None:
-    """Ищет входящий платёж с точной суммой. Возвращает txid или None."""
+    """Ищет входящий платёж с точной суммой. Возвращает txid или None.
+    Любая ошибка/неизвестная сеть → None (никогда не зачисляет по ошибке)."""
+    cur = inv["currency"]
+    meta = CRYPTO.get(cur)
+    if not meta:
+        return None
+    addr = inv["address"]
+    want = int(round(float(inv["amount_crypto"]) * 10 ** meta["dec"]))
+    t0 = inv["created"].timestamp() - 3600
+    since_ms = str(int(inv["created"].timestamp() * 1000) - 60000)
+    chain = meta["chain"]
     try:
-        if inv["currency"] == "trc20":
-            url = f"https://api.trongrid.io/v1/accounts/{inv['address']}/transactions/trc20"
-            params = {"only_to": "true", "limit": "50",
-                      "contract_address": USDT_CONTRACT,
-                      "min_timestamp": str(int(inv["created"].timestamp() * 1000) - 60000)}
-            async with s.get(url, params=params,
-                             timeout=aiohttp.ClientTimeout(total=15)) as r:
+        if chain == "trc20":
+            url = f"https://api.trongrid.io/v1/accounts/{addr}/transactions/trc20"
+            params = {"only_to": "true", "limit": "50", "contract_address": USDT_CONTRACT,
+                      "min_timestamp": since_ms}
+            async with s.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as r:
                 data = (await r.json()).get("data", [])
-            want = int(round(float(inv["amount_crypto"]) * 1e6))
             for t in data:
-                if t.get("to") == inv["address"] and int(t.get("value", 0)) == want:
+                if t.get("to") == addr and int(t.get("value", 0)) == want:
                     return t.get("transaction_id", "ok")
-        else:  # btc
-            url = f"https://mempool.space/api/address/{inv['address']}/txs"
-            async with s.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+        elif chain == "trx":
+            url = f"https://api.trongrid.io/v1/accounts/{addr}/transactions"
+            params = {"only_to": "true", "limit": "50", "min_timestamp": since_ms}
+            async with s.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                data = (await r.json()).get("data", [])
+            for t in data:
+                c = (t.get("raw_data", {}).get("contract") or [{}])[0]
+                if c.get("type") != "TransferContract":
+                    continue
+                if int(c.get("parameter", {}).get("value", {}).get("amount", 0)) == want:
+                    return t.get("txID", "ok")
+        elif chain == "utxo":
+            async with s.get(f'{meta["api"]}/address/{addr}/txs',
+                             timeout=aiohttp.ClientTimeout(total=15)) as r:
                 txs = await r.json()
-            want = int(round(float(inv["amount_crypto"]) * 1e8))
-            t0 = inv["created"].timestamp() - 3600
             for tx in txs:
                 st = tx.get("status", {})
                 if not st.get("confirmed") or st.get("block_time", 0) < t0:
                     continue
                 for v in tx.get("vout", []):
-                    if v.get("scriptpubkey_address") == inv["address"] and v.get("value") == want:
+                    if v.get("scriptpubkey_address") == addr and v.get("value") == want:
                         return tx.get("txid", "ok")
+        elif chain == "ton":
+            async with s.get("https://toncenter.com/api/v2/getTransactions",
+                             params={"address": addr, "limit": "30"},
+                             timeout=aiohttp.ClientTimeout(total=15)) as r:
+                data = (await r.json()).get("result", [])
+            for tx in data:
+                if tx.get("utime", 0) < t0:
+                    continue
+                if int(tx.get("in_msg", {}).get("value", 0)) == want:
+                    return tx.get("transaction_id", {}).get("hash", "ok")
+        elif chain == "sol":
+            async with s.post("https://api.mainnet-beta.solana.com",
+                              json={"jsonrpc": "2.0", "id": 1, "method": "getSignaturesForAddress",
+                                    "params": [addr, {"limit": 25}]},
+                              timeout=aiohttp.ClientTimeout(total=15)) as r:
+                sigs = (await r.json()).get("result", []) or []
+            for sg in sigs:
+                if (sg.get("blockTime") or 0) < t0 or sg.get("err"):
+                    continue
+                async with s.post("https://api.mainnet-beta.solana.com",
+                                  json={"jsonrpc": "2.0", "id": 1, "method": "getTransaction",
+                                        "params": [sg["signature"],
+                                                   {"encoding": "jsonParsed",
+                                                    "maxSupportedTransactionVersion": 0}]},
+                                  timeout=aiohttp.ClientTimeout(total=15)) as r2:
+                    tx = (await r2.json()).get("result") or {}
+                m = tx.get("meta") or {}
+                keys = [k.get("pubkey") if isinstance(k, dict) else k
+                        for k in tx.get("transaction", {}).get("message", {}).get("accountKeys", [])]
+                if addr in keys:
+                    i = keys.index(addr)
+                    pre, post = m.get("preBalances", []), m.get("postBalances", [])
+                    if i < len(pre) and i < len(post) and post[i] - pre[i] == want:
+                        return sg["signature"]
+        elif chain == "evm":
+            if not ETHERSCAN_KEY:
+                return None
+            async with s.get("https://api.etherscan.io/v2/api",
+                             params={"chainid": meta["chainid"], "module": "account",
+                                     "action": "txlist", "address": addr, "sort": "desc",
+                                     "apikey": ETHERSCAN_KEY},
+                             timeout=aiohttp.ClientTimeout(total=15)) as r:
+                res = (await r.json()).get("result", [])
+            if isinstance(res, list):
+                for t in res:
+                    if (t.get("to") or "").lower() != addr.lower():
+                        continue
+                    if t.get("isError") != "0":
+                        continue
+                    if int(t.get("timeStamp", 0)) < t0:
+                        continue
+                    if int(t.get("value", 0)) == want:
+                        return t.get("hash", "ok")
     except Exception:
-        log.warning("Проверка счёта #%s не удалась", inv["id"])
+        log.warning("Проверка счёта #%s (%s) не удалась", inv["id"], cur)
     return None
 
 
