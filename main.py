@@ -634,49 +634,19 @@ async def api_auth(request: Request):
 async def api_order(request: Request):
     u = tg_user(request)
     b = await request.json()
-    pay = str(b.get("pay", "balance"))
     ship = dict(b.get("ship") or {})
     ship_txt = (f"{esc(ship.get('name'))} · {esc(ship.get('phone'))}\n"
                 f"{esc(ship.get('city'))}, НП №{esc(ship.get('np'))}")
     product_id, grams = pint(b.get("product_id")), pint(b.get("grams"))
+    # оплата заказа — только с баланса (пополнить баланс можно любым способом)
     try:
-        if pay in CRYPTO:
-            address = (await db.get_settings()).get(CRYPTO[pay]["wallet_key"], "")
-            if not address:
-                raise ValueError("Этот способ оплаты сейчас недоступен")
-            total = await db.order_total(product_id, grams)
-            try:
-                amt = await crypto_amount(pay, total)
-            except ValueError:
-                raise
-            except Exception:
-                raise ValueError("Не удалось получить курс — попробуйте через минуту")
-            snap, code, inv = await db.create_order_invoice(
-                u["id"], product_id, grams, pay, ship, amt, address)
-            snap["invoice"] = invoice_public(inv)
-            snap["invoice"]["order"] = code
-        elif pay == "card":
-            receipt = str(b.get("receipt", ""))
-            if not _receipt_ok(receipt):
-                raise ValueError("Приложите квитанцию об оплате (фото или PDF)")
-            total = await db.order_total(product_id, grams)
-            if total > CARD_LIMIT:
-                raise ValueError(f"Картой — до {CARD_LIMIT} ₴, такой заказ оплатите криптой")
-            snap = await db.create_order(
-                u["id"], product_id, grams, "card", ship, receipt)
-            await notify(ADMIN_ID,
-                         f"🛒 <b>Заказ {snap['order_code']} — квитанция на проверку</b>\n"
-                         f"{esc(snap.get('order_product'))} · {snap['order_grams']} г · {snap['order_total']} ₴\n"
-                         f"{ship_txt}\nАдминка → Заказы.")
-        else:
-            snap = await db.create_order(
-                u["id"], product_id, grams, "balance", ship)
-            await notify(ADMIN_ID,
-                         f"🛒 <b>Новый заказ {snap['order_code']} (оплачен с баланса)</b>\n"
-                         f"{esc(snap.get('order_product'))} · {snap['order_grams']} г · {snap['order_total']} ₴\n"
-                         f"{ship_txt}")
+        snap = await db.create_order(u["id"], product_id, grams, "balance", ship)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    await notify(ADMIN_ID,
+                 f"🛒 <b>Новый заказ {snap['order_code']} (оплачен с баланса)</b>\n"
+                 f"{esc(snap.get('order_product'))} · {snap['order_grams']} г · {snap['order_total']} ₴\n"
+                 f"{ship_txt}")
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
     return snap
 
