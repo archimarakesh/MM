@@ -1094,6 +1094,71 @@ async def api_transfer_redeem(request: Request):
 
 
 # ── админка ──────────────────────────────────────────────────────────────────
+@app.post("/api/np/cities")
+async def api_np_cities(request: Request):
+    """Поиск населённых пунктов в справочнике НП (Address.searchSettlements)."""
+    u = tg_user(request)
+    if not rate_limit(f"npc:{u['id']}", 30, 60):
+        raise HTTPException(429, "Слишком часто — подождите минуту")
+    q = str((await request.json()).get("q", "")).strip()
+    if len(q) < 2:
+        return {"cities": []}
+    key = os.getenv("NP_API_KEY", "")
+    if not key:
+        raise HTTPException(400, "Справочник Новой Почты недоступен")
+    payload = {"apiKey": key, "modelName": "Address", "calledMethod": "searchSettlements",
+               "methodProperties": {"CityName": q, "Limit": "20"}}
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(NP_API, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                data = (await r.json()).get("data", []) or []
+    except Exception:
+        raise HTTPException(502, "Новая Почта недоступна — попробуйте позже")
+    addrs = (data[0].get("Addresses") if data else []) or []
+    cities = [{"ref": a.get("DeliveryCity", ""),
+               "name": a.get("MainDescription", "") or a.get("Present", ""),
+               "area": a.get("Area", ""), "present": a.get("Present", "")}
+              for a in addrs if a.get("DeliveryCity")]
+    return {"cities": cities}
+
+
+@app.post("/api/np/warehouses")
+async def api_np_warehouses(request: Request):
+    """Отделения и почтоматы города из справочника НП (Address.getWarehouses)."""
+    u = tg_user(request)
+    if not rate_limit(f"npw:{u['id']}", 40, 60):
+        raise HTTPException(429, "Слишком часто — подождите минуту")
+    b = await request.json()
+    city_ref = str(b.get("city_ref", "")).strip()
+    q = str(b.get("q", "")).strip()
+    kind = str(b.get("kind", "")).strip()   # ''|'branch'|'postomat'
+    if not city_ref:
+        return {"warehouses": []}
+    key = os.getenv("NP_API_KEY", "")
+    if not key:
+        raise HTTPException(400, "Справочник Новой Почты недоступен")
+    props = {"CityRef": city_ref, "Limit": "50", "Page": "1"}
+    if q:
+        props["FindByString"] = q
+    payload = {"apiKey": key, "modelName": "Address", "calledMethod": "getWarehouses",
+               "methodProperties": props}
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(NP_API, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                data = (await r.json()).get("data", []) or []
+    except Exception:
+        raise HTTPException(502, "Новая Почта недоступна — попробуйте позже")
+    out = []
+    for w in data:
+        is_post = str(w.get("CategoryOfWarehouse", "") or "") == "Postomat"
+        if (kind == "postomat" and not is_post) or (kind == "branch" and is_post):
+            continue
+        out.append({"ref": w.get("Ref", ""), "number": w.get("Number", ""),
+                    "desc": w.get("Description", ""),
+                    "short": w.get("ShortAddress", ""), "postomat": is_post})
+    return {"warehouses": out}
+
+
 @app.post("/api/admin/data")
 async def api_admin_data(request: Request):
     admin_user(request)

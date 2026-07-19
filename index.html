@@ -194,6 +194,14 @@ h1.page-title em{font-style:normal;color:inherit}
 .np-live{border:1px solid var(--line);border-radius:var(--r-lg);padding:6px 12px;margin:10px 0}
 .np-row{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:4px 0}
 .np-row b{color:var(--txt);font-weight:700;text-align:right}
+.np-ac{position:relative}
+.np-kind{display:flex;gap:6px;margin-bottom:8px}
+.ac-list{margin-top:6px;max-height:210px;overflow-y:auto;border-radius:12px}
+.ac-list:not(:empty){border:1px solid var(--line);background:rgba(255,255,255,.03)}
+.ac-item{padding:10px 12px;font-size:13px;color:var(--txt);cursor:pointer;border-bottom:1px solid var(--line);line-height:1.4}
+.ac-item:last-child{border-bottom:none}
+.ac-item:active{background:rgba(212,175,55,.12)}
+.ac-empty{padding:10px 12px;font-size:12px;color:var(--muted-2)}
 .tier-table{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px}
 .tier-row{display:flex;justify-content:space-between;padding:10px 15px;font-size:12.5px;
   border-bottom:1px solid var(--line);color:var(--muted);transition:background .45s var(--ease)}
@@ -571,8 +579,19 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <p class="sheet-sub" id="coSummary"></p>
   <div class="field"><label>Имя и фамилия</label><input id="coName" placeholder="Иван Иванов"></div>
   <div class="field"><label>Телефон</label><input id="coPhone" inputmode="tel" placeholder="+380"></div>
-  <div class="field"><label>Город</label><input id="coCity" placeholder="Киев"></div>
-  <div class="field"><label>Отделение Новой Почты</label><input id="coNP" inputmode="numeric" placeholder="№ отделения или почтомата"></div>
+  <div class="field np-ac"><label>Город</label>
+    <input id="coCity" placeholder="Начните вводить город" autocomplete="off" oninput="onCityInput()">
+    <div class="ac-list" id="coCityList"></div>
+  </div>
+  <div class="field np-ac"><label>Отделение / почтомат Новой Почты</label>
+    <div class="np-kind" id="coKind">
+      <div class="wchip sel" data-k="" onclick="setKind('', this)">Все</div>
+      <div class="wchip" data-k="branch" onclick="setKind('branch', this)">Отделения</div>
+      <div class="wchip" data-k="postomat" onclick="setKind('postomat', this)">Почтоматы</div>
+    </div>
+    <input id="coNP" placeholder="Сначала выберите город" autocomplete="off" disabled oninput="onNPInput()">
+    <div class="ac-list" id="coNPList"></div>
+  </div>
   <div class="field"><label>Оплата</label>
     <div class="pay-opts" id="coPays"></div>
   </div>
@@ -1087,7 +1106,70 @@ function customGramsInput(v) {
 /* ═══════════ Checkout ═══════════ */
 let payMethod = 'balance';
 const CARD_LIMIT = 5000; // лимит оплаты картой при пополнении
+/* ── выбор адреса из справочника Новой Почты ── */
+let coCitySel = null, coWhSel = null, coKind = '', coCityRes = [], coWhRes = [], npTimer = null;
+function resetCheckoutAddr() {
+  coCitySel = coWhSel = null; coKind = ''; coCityRes = []; coWhRes = [];
+  const c = document.getElementById('coCity'), n = document.getElementById('coNP');
+  c.value = '';
+  n.value = ''; n.disabled = true; n.placeholder = 'Сначала выберите город';
+  document.getElementById('coCityList').innerHTML = '';
+  document.getElementById('coNPList').innerHTML = '';
+  document.querySelectorAll('#coKind .wchip').forEach(x => x.classList.toggle('sel', x.dataset.k === ''));
+}
+const acDebounce = fn => { clearTimeout(npTimer); npTimer = setTimeout(fn, 300); };
+function onCityInput() {
+  coCitySel = coWhSel = null;
+  const n = document.getElementById('coNP');
+  n.disabled = true; n.value = ''; n.placeholder = 'Сначала выберите город';
+  document.getElementById('coNPList').innerHTML = '';
+  const q = document.getElementById('coCity').value.trim();
+  if (q.length < 2) { document.getElementById('coCityList').innerHTML = ''; return; }
+  acDebounce(async () => {
+    if (!API.ok) return;
+    let r; try { r = await API.call('/api/np/cities', { q }); } catch { return; }
+    coCityRes = r.cities || [];
+    document.getElementById('coCityList').innerHTML = coCityRes.length
+      ? coCityRes.map((c, i) => `<div class="ac-item" onclick="pickCity(${i})">${esc(c.present || c.name)}</div>`).join('')
+      : '<div class="ac-empty">Ничего не найдено</div>';
+  });
+}
+function pickCity(i) {
+  const c = coCityRes[i]; if (!c) return;
+  coCitySel = c; coWhSel = null;
+  document.getElementById('coCity').value = c.present || c.name;
+  document.getElementById('coCityList').innerHTML = '';
+  const n = document.getElementById('coNP');
+  n.disabled = false; n.value = ''; n.placeholder = 'Отделение или почтомат';
+  haptic('light'); loadWarehouses(); n.focus();
+}
+function setKind(k, el) {
+  coKind = k;
+  document.querySelectorAll('#coKind .wchip').forEach(x => x.classList.toggle('sel', x === el));
+  loadWarehouses();
+}
+function onNPInput() { coWhSel = null; loadWarehouses(); }
+function loadWarehouses() {
+  if (!coCitySel) return;
+  const q = document.getElementById('coNP').value.trim();
+  acDebounce(async () => {
+    if (!API.ok) return;
+    let r; try { r = await API.call('/api/np/warehouses', { city_ref: coCitySel.ref, q, kind: coKind }); } catch { return; }
+    coWhRes = r.warehouses || [];
+    document.getElementById('coNPList').innerHTML = coWhRes.length
+      ? coWhRes.slice(0, 30).map((w, i) => `<div class="ac-item" onclick="pickWh(${i})">${w.postomat ? '📮' : '🏤'} №${esc(w.number)} · ${esc(w.desc)}</div>`).join('')
+      : '<div class="ac-empty">Ничего не найдено</div>';
+  });
+}
+function pickWh(i) {
+  const w = coWhRes[i]; if (!w) return;
+  coWhSel = w;
+  document.getElementById('coNP').value = `№${w.number} · ${w.desc}`;
+  document.getElementById('coNPList').innerHTML = '';
+  haptic('light');
+}
 function openCheckout() {
+  resetCheckoutAddr();
   const total = priceFor(curProduct, curGrams);
   payMethod = 'balance';
   document.getElementById('coSummary').textContent =
@@ -1103,11 +1185,13 @@ function openCheckout() {
 async function placeOrder() {
   const name = document.getElementById('coName').value.trim();
   const phone = document.getElementById('coPhone').value.trim();
-  const city = document.getElementById('coCity').value.trim();
-  const np = document.getElementById('coNP').value.trim();
+  const city = coCitySel ? coCitySel.name : document.getElementById('coCity').value.trim();
+  const np = coWhSel ? String(coWhSel.number) : document.getElementById('coNP').value.trim();
   if (!name || !phone || !city || !np) return toast('Заполните все поля доставки');
   const total = priceFor(curProduct, curGrams);
   const ship = { name, phone, city, np };
+  if (coCitySel) ship.city_ref = coCitySel.ref;
+  if (coWhSel) { ship.branch = coWhSel.desc; ship.wh_ref = coWhSel.ref; ship.postomat = coWhSel.postomat; }
   if (S.balance < total) { toast('Недостаточно средств — пополните баланс'); closeSheets(true); return go('topup'); }
   if (API.ok) {
     let d;
