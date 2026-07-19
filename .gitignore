@@ -13,6 +13,10 @@ dist/
 promo/*
 !promo/egrow-1.png
 !promo/egrow-4.png
+!promo/figma/
+!promo/figma/*.svg
+!promo/src/
+!promo/src/*
 
 # IDE / OS
 .idea/

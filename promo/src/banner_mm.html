@@ -1,0 +1,74 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:1600px;height:900px;overflow:hidden;position:relative;font-family:'Manrope',sans-serif;
+  background:#050505;color:#f3eee2;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:64px 96px}
+.orb1{position:absolute;width:1150px;height:1150px;top:-500px;left:50%;transform:translateX(-50%);border-radius:50%;
+  background:radial-gradient(circle,rgba(212,175,55,.16),transparent 62%);pointer-events:none}
+.orb2{position:absolute;width:950px;height:950px;bottom:-460px;left:-260px;border-radius:50%;
+  background:radial-gradient(circle,rgba(140,60,20,.13),transparent 64%);pointer-events:none}
+.grain{position:absolute;inset:0;opacity:.03;pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* centered hero */
+.hero{text-align:center;position:relative}
+.logo{width:98px;filter:drop-shadow(0 20px 50px rgba(212,175,55,.4))}
+.wordmark{font-family:'Cinzel',serif;font-weight:800;font-size:60px;letter-spacing:.1em;line-height:1;margin-top:14px}
+.m1{color:#f59e2d}.m2{color:#fff}
+.tag{font-size:26px;color:#b7ae98;margin-top:18px;line-height:1.5}
+
+/* bento row */
+.bento{display:flex;gap:24px;width:100%;margin-top:44px}
+.shell{flex:1;background:rgba(255,255,255,.045);border:1px solid rgba(212,175,55,.16);border-radius:30px;padding:8px;
+  box-shadow:0 30px 70px rgba(0,0,0,.5)}
+.core{height:340px;border-radius:23px;background:linear-gradient(160deg,rgba(30,26,18,.92),rgba(12,10,6,.92));
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.08);padding:34px 28px;display:flex;flex-direction:column;justify-content:center}
+.ico{font-size:52px;line-height:1;margin-bottom:22px}
+.ct{font-size:29px;font-weight:800;color:#f4ecd8}
+.cs{font-size:20px;color:#9a917c;margin-top:12px;line-height:1.45;font-weight:500}
+.cs b{color:#e8c96a;font-weight:800}
+
+/* footer handle (plain, not a button) */
+.foot{margin-top:40px;text-align:center}
+.handle{font-family:'Manrope',sans-serif;font-size:34px;font-weight:800;letter-spacing:.01em;
+  background:linear-gradient(135deg,#f6dd8b,#d4af37 55%,#c9971d);-webkit-background-clip:text;background-clip:text;color:transparent}
+.pay{margin-top:14px;font-size:19px;letter-spacing:.16em;text-transform:uppercase;color:#8d846f;font-weight:600}
+</style></head><body>
+<div class="orb1"></div><div class="orb2"></div><div class="grain"></div>
+
+<div class="hero">
+  <img class="logo" src="file:///D:/MM/logo.webp">
+  <div class="wordmark"><span class="m1">Magic</span> <span class="m2">Market</span></div>
+  <div class="tag">Премиальный магазин и e-growing в одном Telegram-приложении</div>
+</div>
+
+<div class="bento">
+  <div class="shell"><div class="core">
+    <div class="ico">⚖️</div>
+    <div class="ct">Товары на вес</div>
+    <div class="cs">Чем больше — тем <b>дешевле грамм</b></div>
+  </div></div>
+  <div class="shell"><div class="core">
+    <div class="ico">🌱</div>
+    <div class="ct">E-growing</div>
+    <div class="cs">Доли кустов · <b>до +35%</b> за цикл</div>
+  </div></div>
+  <div class="shell"><div class="core">
+    <div class="ico">📦</div>
+    <div class="ct">Новая Почта</div>
+    <div class="cs"><b>Отправка в день заказа</b>, трекинг в реальном времени</div>
+  </div></div>
+  <div class="shell"><div class="core">
+    <div class="ico">🤝</div>
+    <div class="ct">Рефералка</div>
+    <div class="cs"><b>До 10%</b> с покупок друзей</div>
+  </div></div>
+</div>
+
+<div class="foot">
+  <div class="handle">@Magic_Marketplace_bot</div>
+  <div class="pay">Карта · крипта · USDT · BTC</div>
+</div>
+</body></html>
