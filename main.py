@@ -911,6 +911,40 @@ async def api_pin_set(request: Request):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/promo/redeem")
+async def api_promo_redeem(request: Request):
+    u = tg_user(request)
+    if not rate_limit(f"promo:{u['id']}", 6, 300):
+        raise HTTPException(429, "Слишком много попыток — подождите")
+    b = await request.json()
+    try:
+        snap = await db.promo_redeem(u["id"], str(b.get("code", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
+    await notify(ADMIN_ID,
+                 f"🎟 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) "
+                 f"активировал промокод на {snap.get('promo_amount')} ₴.")
+    return snap
+
+
+@app.post("/api/admin/promo/generate")
+async def api_admin_promo_generate(request: Request):
+    admin_user(request)
+    b = await request.json()
+    amount, count = pint(b.get("amount")), pint(b.get("count"))
+    if amount < 1 or count < 1:
+        raise HTTPException(400, "Укажите сумму и количество")
+    codes = await db.promo_generate(amount, count)
+    return {"codes": codes, "promos": await db.admin_promos()}
+
+
+@app.post("/api/admin/promo/list")
+async def api_admin_promo_list(request: Request):
+    admin_user(request)
+    return {"promos": await db.admin_promos()}
+
+
 @app.post("/api/withdraw")
 async def api_withdraw(request: Request):
     u = tg_user(request)
@@ -1051,6 +1085,7 @@ async def api_admin_data(request: Request):
         "topups": await db.admin_topups(),
         "withdrawals": await db.admin_withdrawals(),
         "orders": await db.admin_orders(),
+        "promos": await db.admin_promos(),
     }
 
 

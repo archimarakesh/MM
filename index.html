@@ -472,6 +472,12 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="500"></div>
     <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
     <div id="tuBody"></div>
+    <div class="section-head"><h2>Промокод</h2><span>🎟</span></div>
+    <div style="display:flex;gap:8px">
+      <input class="mini-input" id="promoInput" placeholder="Введите промокод" autocapitalize="characters" style="flex:1">
+      <button class="btn btn-gold" style="width:auto;padding:11px 20px" onclick="redeemPromo()">Применить</button>
+    </div>
+    <p class="note" style="margin:6px 0 0">Начисленное промокодом можно потратить в магазине, но нельзя вывести.</p>
     <div class="section-head"><h2>История оплат</h2></div>
     <div id="payHistory"></div>
     <input type="file" id="tuFile" accept="image/*,application/pdf" style="display:none">
@@ -1568,15 +1574,28 @@ function topUpDemo() {
   document.getElementById('tuSum').value = '';
   haptic('medium'); toast(`Баланс пополнен на ${fmt(v)} ₴`);
 }
+async function redeemPromo() {
+  const code = document.getElementById('promoInput').value.trim();
+  if (!code) return toast('Введите промокод');
+  if (!API.ok) return toast('Доступно после подключения сервера');
+  let d;
+  try { d = await API.call('/api/promo/redeem', { code }); }
+  catch (e) { return toast(e.message); }
+  applySnapshot(d);
+  document.getElementById('promoInput').value = '';
+  haptic('medium'); toast(`🎟 Промокод активирован: +${fmt(d.promo_amount)} ₴`);
+}
 function renderPayHistory() {
   const el = document.getElementById('payHistory');
   const pays = S.payments || [];
   el.innerHTML = pays.length ? pays.map(p => {
-    const st = (p.kind === 'card' ? TU_ST_CARD : p.kind === 'out' ? TU_ST_OUT : TU_ST_CRYPTO)[p.status] || '';
+    const promo = p.kind === 'promo';
+    const st = promo ? '✅ Активирован'
+      : (p.kind === 'card' ? TU_ST_CARD : p.kind === 'out' ? TU_ST_OUT : TU_ST_CRYPTO)[p.status] || '';
     const out = p.kind === 'out';
     return `<div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 15px;display:flex;justify-content:space-between;align-items:center;gap:10px">
       <div><b style="font-size:14px${out ? ';color:var(--warn)' : ''}">${out ? '−' : ''}${fmt(p.amount)} ₴</b>
-        <div style="font-size:11px;color:var(--muted-2);margin-top:2px">${out ? 'Вывод · ' : ''}${TU_LABELS[p.method] || p.method} · ${new Date(p.created).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>
+        <div style="font-size:11px;color:var(--muted-2);margin-top:2px">${out ? 'Вывод · ' : promo ? '🎟 Промокод · ' : ''}${promo ? '' : (TU_LABELS[p.method] || p.method) + ' · '}${new Date(p.created).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>
       <span style="font-size:11.5px;font-weight:600;white-space:nowrap">${st}</span>
     </div></div>`;
   }).join('') : '<div class="empty" style="padding:24px"><p>Операций пока не было</p></div>';
@@ -1932,7 +1951,7 @@ function renderAdmin(tab) {
     ['products', 'Товары'], ['grow', 'E-grow'], ['orders', 'Заказы'],
     ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}` : '')],
     ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}` : '')],
-    ['pay', 'Оплата'],
+    ['promo', 'Промокоды'], ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
     `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
@@ -2008,6 +2027,18 @@ function renderAdmin(tab) {
           <button class="btn btn-ghost" style="padding:12px" onclick="decideTopup(${t.id}, false)">Отклонить</button>
         </div>
       </div></div>`).join('') : '<div class="empty"><p>Нет квитанций на проверке</p></div>';
+  } else if (tab === 'promo') {
+    const pr = AD.promos || { codes: [], stats: [] };
+    b.innerHTML = `
+      <p class="note" style="margin:0 0 12px">Задайте сумму и количество — коды одноразовые, начисляются в баланс (без вывода).</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field"><label>Сумма, ₴</label><input id="promoAmount" inputmode="numeric" placeholder="100"></div>
+        <div class="field"><label>Количество</label><input id="promoCount" inputmode="numeric" placeholder="10"></div>
+      </div>
+      <button class="btn btn-gold" onclick="genPromos()">Сгенерировать</button>
+      <div id="promoGenerated"></div>
+      ${pr.stats.length ? `<div class="section-head"><h2>Выпущено</h2></div>` + pr.stats.map(s =>
+        `<p class="note" style="margin:2px 0">${fmt(s.amount)} ₴ — использовано <b style="color:var(--txt)">${s.used}/${s.total}</b></p>`).join('') : ''}`;
   } else {
     const s = AD.settings;
     b.innerHTML = `
@@ -2365,6 +2396,27 @@ async function decideTopup(id, approve) {
   catch (e) { return toast(e.message); }
   haptic('medium'); toast(approve ? 'Зачислено ✓' : 'Отклонено');
   renderAdmin('topups');
+}
+async function genPromos() {
+  const amount = parseInt(document.getElementById('promoAmount').value, 10);
+  const count = parseInt(document.getElementById('promoCount').value, 10);
+  if (!amount || amount < 1) return toast('Укажите сумму');
+  if (!count || count < 1) return toast('Укажите количество');
+  let r;
+  try { r = await API.call('/api/admin/promo/generate', { amount, count }); }
+  catch (e) { return toast(e.message); }
+  AD.promos = r.promos;
+  haptic('medium'); toast(`Создано кодов: ${r.codes.length}`);
+  document.getElementById('promoGenerated').innerHTML = `
+    <div class="bezel gold" style="margin-top:12px"><div class="bezel-core" style="padding:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <b style="font-size:13px">Новые коды · ${fmt(amount)} ₴</b>
+        <span class="note" style="cursor:pointer;color:var(--gold-soft)" onclick="copyText('${r.codes.join('\\n')}')">Копировать все</span>
+      </div>
+      <div style="font-family:monospace;font-size:14px;line-height:1.7;letter-spacing:.05em;word-break:break-all">${r.codes.join('&nbsp;&nbsp;')}</div>
+    </div></div>`;
+  document.getElementById('promoAmount').value = '';
+  document.getElementById('promoCount').value = '';
 }
 async function savePay() {
   try {

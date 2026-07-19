@@ -215,6 +215,13 @@ async def init():
                 ends       TIMESTAMPTZ NOT NULL,
                 status     INT NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS grows_user_idx ON grows(user_id);
+            CREATE TABLE IF NOT EXISTS promos(
+                code    TEXT PRIMARY KEY,
+                amount  BIGINT NOT NULL,
+                used_by BIGINT,
+                used_at TIMESTAMPTZ,
+                created TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE INDEX IF NOT EXISTS promos_used_idx ON promos(used_by);
             CREATE TABLE IF NOT EXISTS settings(
                 key   TEXT PRIMARY KEY,
                 value TEXT);
@@ -447,10 +454,15 @@ async def payments_history(tg_id: int, c) -> list:
         SELECT amount_uah AS amount, status, created FROM card_payments
         WHERE user_id=$1 ORDER BY id DESC LIMIT 30
     """, tg_id)
+    pr = await c.fetch("""
+        SELECT amount, used_at AS created FROM promos
+        WHERE used_by=$1 ORDER BY used_at DESC LIMIT 30
+    """, tg_id)
     rows = [{**dict(r), "kind": "card"} for r in tt] \
         + [{**dict(r), "kind": "crypto"} for r in inv] \
         + [{**dict(r), "kind": "out"} for r in wd] \
-        + [{**dict(r), "method": "card", "kind": "cardauto"} for r in cp]
+        + [{**dict(r), "method": "card", "kind": "cardauto"} for r in cp] \
+        + [{**dict(r), "method": "promo", "status": 1, "kind": "promo"} for r in pr]
     rows.sort(key=lambda r: r["created"], reverse=True)
     return [{**r, "created": r["created"].isoformat()} for r in rows[:40]]
 
@@ -899,6 +911,63 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
         """, tg_id, device or None, ip or None)
 
 
+# ── промокоды (одноразовые бонус-коды, деньги в locked) ──────────────────────
+_PROMO_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без похожих 0/O/1/I
+
+
+def _gen_promo_code() -> str:
+    return "".join(secrets.choice(_PROMO_ALPHABET) for _ in range(8))
+
+
+async def promo_generate(amount: int, count: int) -> list:
+    amount = max(1, int(amount))
+    count = max(1, min(500, int(count)))
+    codes = []
+    async with _pool.acquire() as c:
+        while len(codes) < count:
+            code = _gen_promo_code()
+            try:
+                await c.execute("INSERT INTO promos(code, amount) VALUES($1,$2)", code, amount)
+                codes.append(code)
+            except asyncpg.UniqueViolationError:
+                continue
+    return codes
+
+
+async def promo_redeem(tg_id: int, code: str) -> dict:
+    code = (code or "").strip().upper()
+    if not code:
+        raise ValueError("Введите промокод")
+    async with _pool.acquire() as c, c.transaction():
+        p = await c.fetchrow("SELECT * FROM promos WHERE code=$1 FOR UPDATE", code)
+        if not p:
+            raise ValueError("Промокод не найден")
+        if p["used_by"]:
+            raise ValueError("Промокод уже использован")
+        await c.execute("UPDATE promos SET used_by=$1, used_at=now() WHERE code=$2", tg_id, code)
+        # деньги в locked — потратить в магазине можно, вывести нельзя
+        await c.execute(
+            "UPDATE users SET balance=balance+$1, locked=locked+$1 WHERE tg_id=$2",
+            p["amount"], tg_id)
+        snap = await snapshot(tg_id, c)
+        snap["promo_amount"] = p["amount"]
+        return snap
+
+
+async def admin_promos() -> dict:
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT code, amount, used_by, used_at FROM promos ORDER BY created DESC LIMIT 300
+        """)
+        stats = await c.fetch("""
+            SELECT amount, COUNT(*) AS total, COUNT(used_by) AS used FROM promos GROUP BY amount ORDER BY amount
+        """)
+    return {
+        "codes": [{"code": r["code"], "amount": r["amount"], "used": bool(r["used_by"])} for r in rows],
+        "stats": [{"amount": r["amount"], "total": r["total"], "used": r["used"]} for r in stats],
+    }
+
+
 # ── серверный пин-код ────────────────────────────────────────────────────────
 async def verify_pin(tg_id: int, pin: str) -> dict:
     """Проверка пина с серверным счётчиком попыток и часовой блокировкой."""
@@ -1340,6 +1409,7 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         await c.execute("UPDATE grows SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE shares SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE withdrawals SET user_id=$1 WHERE user_id=$2", new_id, old_id)
+        await c.execute("UPDATE promos SET used_by=$1 WHERE used_by=$2", new_id, old_id)
         await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2", new_id, old_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", old_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", old_id)
