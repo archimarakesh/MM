@@ -113,6 +113,7 @@ async def init():
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt TEXT;
+            UPDATE orders SET ship=NULL WHERE status=3 AND ship IS NOT NULL;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
             CREATE TABLE IF NOT EXISTS topups(
                 id      BIGSERIAL PRIMARY KEY,
@@ -241,7 +242,7 @@ async def init():
 # ── авто-статус «Получен» ────────────────────────────────────────────────────
 async def _auto_deliver(c):
     await c.execute("""
-        UPDATE orders SET status=3
+        UPDATE orders SET status=3, ship=NULL
         WHERE status IN (1,2) AND shipped_at IS NOT NULL AND shipped_at < $1
     """, datetime.now(timezone.utc) - timedelta(days=AUTO_DELIVER_DAYS))
 
@@ -733,7 +734,7 @@ async def shipped_orders() -> list:
 
 async def mark_delivered(oid: int) -> bool:
     async with _pool.acquire() as c:
-        tag = await c.execute("UPDATE orders SET status=3 WHERE id=$1 AND status=2", oid)
+        tag = await c.execute("UPDATE orders SET status=3, ship=NULL WHERE id=$1 AND status=2", oid)
     return tag == "UPDATE 1"
 
 
