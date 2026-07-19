@@ -719,6 +719,8 @@ async def api_topup_receipt(request: Request):
 @app.post("/api/invoice")
 async def api_invoice(request: Request):
     u = tg_user(request)
+    if not rate_limit(f"inv:{u['id']}", 8, 60):
+        raise HTTPException(429, "Слишком часто — подождите минуту")
     b = await request.json()
     amount = pint(b.get("amount"))
     cur = str(b.get("currency", ""))
@@ -749,6 +751,8 @@ async def api_invoice_active(request: Request):
 @app.post("/api/invoice/status")
 async def api_invoice_status(request: Request):
     u = tg_user(request)
+    if not rate_limit(f"invstat:{u['id']}", 20, 60):
+        raise HTTPException(429, "Слишком часто — подождите")
     b = await request.json()
     inv = await db.invoice_get(pint(b.get("id")), u["id"])
     if not inv:
@@ -786,6 +790,8 @@ async def _card_settle(payment_id: str) -> bool:
 @app.post("/api/card/create")
 async def api_card_create(request: Request):
     u = tg_user(request)
+    if not rate_limit(f"cardc:{u['id']}", 6, 60):
+        raise HTTPException(429, "Слишком часто — подождите минуту")
     if not paydome.enabled():
         raise HTTPException(400, "Авто-оплата картой сейчас недоступна")
     b = await request.json()
@@ -822,6 +828,8 @@ async def api_card_active(request: Request):
 @app.post("/api/card/status")
 async def api_card_status(request: Request):
     u = tg_user(request)
+    if not rate_limit(f"cardstat:{u['id']}", 20, 60):
+        raise HTTPException(429, "Слишком часто — подождите")
     b = await request.json()
     pid = str(b.get("payment_id", ""))
     p = await db.card_payment_active(u["id"])
