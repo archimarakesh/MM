@@ -67,11 +67,11 @@ ETHERSCAN_KEY = os.getenv("ETHERSCAN_API_KEY", "")  # один ключ на ETH
 # dec — десятичные ончейн; disp — знаков в показываемой сумме; chain — тип проверки
 CRYPTO = {
     "trc20": {"gecko": "tether", "label": "USDT TRC-20", "wallet_key": "wallet_trc20",
-              "dec": 6, "disp": 3, "chain": "trc20"},
+              "dec": 6, "disp": 4, "chain": "trc20"},
     "ton":   {"gecko": "the-open-network", "label": "GRAM", "wallet_key": "wallet_ton",
               "dec": 9, "disp": 4, "chain": "ton"},
     "trx":   {"gecko": "tron", "label": "TRX", "wallet_key": "wallet_trx",
-              "dec": 6, "disp": 2, "chain": "trx"},
+              "dec": 6, "disp": 3, "chain": "trx"},
     "btc":   {"gecko": "bitcoin", "label": "BTC", "wallet_key": "wallet_btc",
               "dec": 8, "disp": 8, "chain": "utxo",
               "api": "https://mempool.space/api", "scheme": "bitcoin"},

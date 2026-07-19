@@ -778,9 +778,13 @@ async def _expire_invoices(c):
 
 
 async def pending_amounts(currency: str) -> set:
+    # берём суммы не только активных счетов, но и всех за последние 3 часа —
+    # чтобы метку не переиспользовать, пока поздний платёж по старому счёту
+    # ещё может попасть в окно проверки (защита от кросс-зачисления)
     async with _pool.acquire() as c:
         rows = await c.fetch(
-            "SELECT amount_crypto FROM invoices WHERE currency=$1 AND status=0", currency)
+            "SELECT amount_crypto FROM invoices WHERE currency=$1 "
+            "AND (status=0 OR created > now() - interval '3 hours')", currency)
     return {r["amount_crypto"] for r in rows}
 
 
