@@ -169,6 +169,14 @@ h1.page-title em{font-style:normal;color:inherit}
   transition:all .45s var(--ease)}
 .wchip.sel{border-color:var(--gold);color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d);
   box-shadow:0 6px 16px rgba(212,175,55,.25)}
+.grow-toggle{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;
+  background:rgba(212,175,55,.06);color:var(--gold-soft);border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:11px;font:inherit;font-size:12.5px;font-weight:700;
+  cursor:pointer;transition:background .3s var(--ease)}
+.grow-toggle:active{background:rgba(212,175,55,.12)}
+.grow-toggle svg{width:16px;height:16px;transition:transform .35s var(--ease)}
+.grow-toggle.open svg{transform:rotate(180deg)}
+.grow-more{margin-top:12px}
 .tier-table{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px}
 .tier-row{display:flex;justify-content:space-between;padding:10px 15px;font-size:12.5px;
   border-bottom:1px solid var(--line);color:var(--muted);transition:background .45s var(--ease)}
@@ -1640,6 +1648,7 @@ const DEFAULT_STAGES = [
   { d: 20, p: 15 }, { d: 28, p: 8 }, { d: 14, p: 0 },
 ];
 const selPct = {}; // выбранная доля по программе
+const growOpen = new Set(); // развёрнутые карточки программ (превью → раскрытие)
 const liveDate = iso => new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const planStages = p => (p.stages && p.stages.length === 6) ? p.stages : DEFAULT_STAGES;
 function planAvail(p) {
@@ -1715,6 +1724,7 @@ function renderEgrow() {
     const enterP = ts[Math.min(p.stage, 5)].p;
     const cost = Math.round(p.price * pct / 100);
     const payout = cost + Math.round(cost * enterP / 100);
+    const open = growOpen.has(p.id);
     return `<div class="bezel reveal" style="margin-bottom:14px;transition-delay:${i * 50}ms"><div class="bezel-core" style="padding:14px">
       <div class="good-img" style="background:${p.grad};aspect-ratio:2/1;margin-bottom:10px">
         ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : `<span style="font-size:40px">🌱</span>`}
@@ -1741,6 +1751,11 @@ function renderEgrow() {
         : (() => { const ct = cycleTotals(ts, p.stage, p.stage_at, p.done); return `
         Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}<br>
         Полный цикл <b style="color:var(--txt)">${ct.total} дн.</b> · до выплаты осталось <b style="color:var(--gold-soft)">~${ct.left} дн.</b>`; })()}</p>
+      <button class="grow-toggle ${open ? 'open' : ''}" onclick="toggleGrow(${p.id})">
+        <span>${open ? 'Свернуть' : (closed ? 'Стадии и детали' : 'Стадии входа и покупка доли')}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="grow-more"${open ? '' : ' hidden'}>
       <div class="tier-table" style="margin-bottom:12px">
         ${ts.map((s, k) => `<div class="tier-row ${k === p.stage && !p.done ? 'hit' : ''}">
           <span>${STAGE_META[k][0]} ${STAGE_META[k][1]} · ${s.d} дн.</span>
@@ -1759,10 +1774,12 @@ function renderEgrow() {
       <button class="btn btn-gold" onclick="buyShare(${p.id})">Купить ${pct}% за ${fmt(cost)} ₴
         <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4-3.2-7-8-7 0 4.5 3.2 7 8 7z"/></svg></span>
       </button>` : `<a class="btn btn-ghost" style="text-decoration:none;color:var(--warn)" href="${ADMIN_CHAT}" target="_blank" rel="noopener">Все доли выкуплены — написать админу</a>`}`}
+      </div>
     </div></div>`;
   }).join('');
   observeReveals();
 }
+function toggleGrow(planId) { haptic('light'); growOpen.has(planId) ? growOpen.delete(planId) : growOpen.add(planId); renderEgrow(); }
 function selShare(planId, pct) { haptic('light'); selPct[planId] = pct; renderEgrow(); }
 async function buyShare(planId) {
   if (!API.ok) return toast('Доступно после подключения сервера');
