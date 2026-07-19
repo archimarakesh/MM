@@ -257,6 +257,17 @@ async def run():
         except Exception:
             pass
 
+    @dp.message(F.is_automatic_forward)
+    async def on_channel_forward(message: Message):
+        # пост из канала, автоматически пересланный в привязанный чат, Telegram
+        # закрепляет сам — открепляем, чтобы промо не висело закреплённым
+        if RULES_CHAT_ID and str(message.chat.id) != str(RULES_CHAT_ID):
+            return
+        try:
+            await bot.unpin_chat_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
+
     @dp.callback_query(F.data.startswith("ack:"))
     async def on_ack(cb: CallbackQuery):
         try:
