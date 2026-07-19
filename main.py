@@ -68,7 +68,7 @@ ETHERSCAN_KEY = os.getenv("ETHERSCAN_API_KEY", "")  # один ключ на ETH
 CRYPTO = {
     "trc20": {"gecko": "tether", "label": "USDT TRC-20", "wallet_key": "wallet_trc20",
               "dec": 6, "disp": 3, "chain": "trc20"},
-    "ton":   {"gecko": "the-open-network", "label": "TON", "wallet_key": "wallet_ton",
+    "ton":   {"gecko": "the-open-network", "label": "GRAM", "wallet_key": "wallet_ton",
               "dec": 9, "disp": 4, "chain": "ton"},
     "trx":   {"gecko": "tron", "label": "TRX", "wallet_key": "wallet_trx",
               "dec": 6, "disp": 2, "chain": "trx"},
