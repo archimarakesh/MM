@@ -609,6 +609,19 @@ async def order_decide(order_code: str, approve: bool) -> dict:
         return {"user_id": o["user_id"], "code": order_code, "approved": approve}
 
 
+async def delete_order(order_code: str) -> None:
+    """Жёсткое удаление заказа админом (без авто-возврата средств)."""
+    try:
+        oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
+    except (IndexError, ValueError):
+        raise ValueError("Неверный номер заказа")
+    async with _pool.acquire() as c, c.transaction():
+        tag = await c.execute("DELETE FROM orders WHERE id=$1", oid)
+        if tag == "DELETE 0":
+            raise ValueError("Заказ не найден")
+        await c.execute("DELETE FROM ratings WHERE order_id=$1", oid)
+
+
 async def rate_order(tg_id: int, order_code: str, stars: int) -> dict:
     try:
         oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE

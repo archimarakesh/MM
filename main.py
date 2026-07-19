@@ -1180,6 +1180,17 @@ async def api_admin_work(request: Request):
     return {"orders": await db.admin_orders()}
 
 
+@app.post("/api/admin/order/delete")
+async def api_admin_order_delete(request: Request):
+    admin_user(request)
+    b = await request.json()
+    try:
+        await db.delete_order(str(b.get("order", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"orders": await db.admin_orders(), "sales": await db.sales_stats()}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))

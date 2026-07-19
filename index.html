@@ -2054,6 +2054,7 @@ function renderAdmin(tab) {
             <input class="mini-input" id="ttn-${o.id}" placeholder="ТТН Новой Почты → статус «В пути»" inputmode="numeric" style="flex:1">
             <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
           </div>` : ''}
+        <button class="btn btn-ghost" style="margin-top:10px;padding:10px;font-size:12.5px;color:var(--danger)" onclick="delOrder('${o.id}')">${orderDelArmed.has(o.id) ? '✕ Точно удалить? Нажмите ещё раз' : 'Удалить заказ'}</button>
       </div></div>`).join('') : '<div class="empty" style="padding:20px"><p>Активных заказов нет</p></div>';
     b.innerHTML = salesStats + cards;
   } else if (tab === 'withdrawals') {
@@ -2272,6 +2273,20 @@ async function decideOrder(code, approve) {
   catch (e) { return toast(e.message); }
   haptic('medium'); toast(approve ? 'Оплата подтверждена ✓' : 'Заказ отклонён');
   renderAdmin('orders');
+}
+const orderDelArmed = new Set();
+async function delOrder(code) {
+  if (!orderDelArmed.has(code)) {  // первый тап — вооружаем подтверждение
+    orderDelArmed.add(code); haptic('heavy'); renderAdmin('orders');
+    setTimeout(() => { if (orderDelArmed.delete(code) && adminTab === 'orders') renderAdmin('orders'); }, 3500);
+    return;
+  }
+  orderDelArmed.delete(code);
+  try {
+    const r = await API.call('/api/admin/order/delete', { order: code });
+    AD.orders = r.orders; if (r.sales) AD.sales = r.sales;
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Заказ удалён'); renderAdmin('orders');
 }
 /* ── админ: программы E-growing ── */
 let curGe = null, geActiveVal = true, gePhotoData = null, geDelArmed = false, geFinishArmed = false;
