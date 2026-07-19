@@ -566,7 +566,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 </nav>
 
 <!-- шторки -->
-<div class="sheet-veil" id="veil" onclick="closeSheets()"></div>
+<div class="sheet-veil" id="veil" onclick="veilClose()"></div>
 
 <div class="sheet" id="sheet-product">
   <div class="sheet-grip"></div>
@@ -954,6 +954,13 @@ function closeSheets(silent) {
   document.getElementById('veil').classList.remove('open');
   document.querySelectorAll('.sheet').forEach(s => s.classList.remove('open'));
 }
+const checkoutOpen = () => document.getElementById('sheet-checkout').classList.contains('open');
+function confirmCloseCheckout() {  // защита от случайного смахивания с потерей введённых данных
+  const msg = 'Закрыть оформление заказа?';
+  if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) closeSheets(); });
+  else if (confirm(msg)) closeSheets();
+}
+function veilClose() { checkoutOpen() ? confirmCloseCheckout() : closeSheets(); }
 
 /* свайп-вниз для закрытия шторок */
 document.querySelectorAll('.sheet').forEach(sh => {
@@ -979,7 +986,7 @@ document.querySelectorAll('.sheet').forEach(sh => {
     dragging = false;
     sh.style.transition = '';
     sh.style.transform = '';
-    if (dy > 110) closeSheets();
+    if (dy > 110) { sh.id === 'sheet-checkout' ? confirmCloseCheckout() : closeSheets(); }
     dy = 0;
   };
   sh.addEventListener('touchend', endDrag);
