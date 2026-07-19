@@ -1247,7 +1247,6 @@ const CRYPTO_META = [
   { key: 'btc', label: 'BTC', wallet: 'wallet_btc' },
   { key: 'eth', label: 'ETH', wallet: 'wallet_eth' },
   { key: 'bnb', label: 'BNB', wallet: 'wallet_bnb' },
-  { key: 'sol', label: 'SOL', wallet: 'wallet_sol' },
   { key: 'ltc', label: 'LTC', wallet: 'wallet_ltc' },
 ];
 const availCryptos = () => CRYPTO_META.filter(c => PAY[c.wallet]);
@@ -2007,7 +2006,6 @@ function renderAdmin(tab) {
       <div class="field"><label>BTC</label><input id="payBtc" value="${s.wallet_btc || ''}" placeholder="bc1..."></div>
       <div class="field"><label>ETH</label><input id="payEth" value="${s.wallet_eth || ''}" placeholder="0x..."></div>
       <div class="field"><label>BNB (BSC)</label><input id="payBnb" value="${s.wallet_bnb || ''}" placeholder="0x..."></div>
-      <div class="field"><label>SOL</label><input id="paySol" value="${s.wallet_sol || ''}" placeholder="..."></div>
       <div class="field"><label>LTC</label><input id="payLtc" value="${s.wallet_ltc || ''}" placeholder="ltc1..."></div>
       <button class="btn btn-gold" onclick="savePay()">Сохранить реквизиты</button>
       <p class="note" style="margin-top:8px">ETH и BNB зачисляются автоматически только при заданном ключе Etherscan (env ETHERSCAN_API_KEY). Без него — оставьте эти поля пустыми.</p>`;
@@ -2364,7 +2362,6 @@ async function savePay() {
       wallet_btc: document.getElementById('payBtc').value,
       wallet_eth: document.getElementById('payEth').value,
       wallet_bnb: document.getElementById('payBnb').value,
-      wallet_sol: document.getElementById('paySol').value,
       wallet_ltc: document.getElementById('payLtc').value,
     })).settings;
     PAY = Object.fromEntries(Object.entries(AD.settings).filter(([, v]) => v));

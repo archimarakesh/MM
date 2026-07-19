@@ -79,8 +79,6 @@ CRYPTO = {
               "dec": 18, "disp": 6, "chain": "evm", "chainid": 1},
     "bnb":   {"gecko": "binancecoin", "label": "BNB", "wallet_key": "wallet_bnb",
               "dec": 18, "disp": 6, "chain": "evm", "chainid": 56},
-    "sol":   {"gecko": "solana", "label": "SOL", "wallet_key": "wallet_sol",
-              "dec": 9, "disp": 5, "chain": "sol"},
     "ltc":   {"gecko": "litecoin", "label": "LTC", "wallet_key": "wallet_ltc",
               "dec": 8, "disp": 8, "chain": "utxo",
               "api": "https://litecoinspace.org/api", "scheme": "litecoin"},
@@ -198,30 +196,6 @@ async def _check_invoice(s: aiohttp.ClientSession, inv: dict) -> str | None:
                     continue
                 if int(tx.get("in_msg", {}).get("value", 0)) == want:
                     return tx.get("transaction_id", {}).get("hash", "ok")
-        elif chain == "sol":
-            async with s.post("https://api.mainnet-beta.solana.com",
-                              json={"jsonrpc": "2.0", "id": 1, "method": "getSignaturesForAddress",
-                                    "params": [addr, {"limit": 25}]},
-                              timeout=aiohttp.ClientTimeout(total=15)) as r:
-                sigs = (await r.json()).get("result", []) or []
-            for sg in sigs:
-                if (sg.get("blockTime") or 0) < t0 or sg.get("err"):
-                    continue
-                async with s.post("https://api.mainnet-beta.solana.com",
-                                  json={"jsonrpc": "2.0", "id": 1, "method": "getTransaction",
-                                        "params": [sg["signature"],
-                                                   {"encoding": "jsonParsed",
-                                                    "maxSupportedTransactionVersion": 0}]},
-                                  timeout=aiohttp.ClientTimeout(total=15)) as r2:
-                    tx = (await r2.json()).get("result") or {}
-                m = tx.get("meta") or {}
-                keys = [k.get("pubkey") if isinstance(k, dict) else k
-                        for k in tx.get("transaction", {}).get("message", {}).get("accountKeys", [])]
-                if addr in keys:
-                    i = keys.index(addr)
-                    pre, post = m.get("preBalances", []), m.get("postBalances", [])
-                    if i < len(pre) and i < len(post) and post[i] - pre[i] == want:
-                        return sg["signature"]
         elif chain == "evm":
             if not ETHERSCAN_KEY:
                 return None
