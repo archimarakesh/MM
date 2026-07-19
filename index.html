@@ -838,6 +838,7 @@ function applySnapshot(d) {
   S.bonusOffer = !!d.bonus_offer;
   if (d.bonus_amount) S.bonusAmount = d.bonus_amount;
   if ('withdrawable' in d) S.withdrawable = d.withdrawable;
+  if ('card_auto' in d) S.cardAuto = d.card_auto;
   if ('has_pin' in d) S.hasPin = d.has_pin;
   S.serverLockUntil = d.pin_locked_until ? new Date(d.pin_locked_until).getTime() : 0;
   maybeShowBonus();
@@ -1233,15 +1234,17 @@ function syncBalance() {
     ${next !== null ? `<div style="font-size:11px;color:var(--muted-2);margin-top:6px">Пригласите ещё ${next - n} — процент вырастет до ${REF_LEVELS[li + 1][1]}%</div>` : ''}`;
 }
 let tuMethod = '', tuReceipt = '', INV = null, invTimer = null, invPoll = null;
+let CARD = null, cardTimer = null, cardPoll = null;
 const TU_ST_CARD = ['⏳ Проверяется', '✅ Зачислено', '❌ Отклонено'];
 const TU_ST_CRYPTO = ['⏳ Ожидает оплаты', '✅ Зачислено', '⌛ Отменён'];
 const TU_ST_OUT = ['⏳ В обработке', '✅ Выплачено', '↩️ Отклонён'];
-const TU_LABELS = { card: 'Карта', trc20: 'USDT TRC-20', btc: 'BTC', demo: 'Демо' };
+const TU_LABELS = { card: 'Карта', cardauto: 'Карта', trc20: 'USDT TRC-20', btc: 'BTC', demo: 'Демо' };
 function tuAmount() { return parseInt(document.getElementById('tuSum').value, 10) || 0; }
 function tuOptions() {
   if (!API.ok) return [{ key: 'demo', label: 'Демо-зачисление' }];
   const o = [];
-  if (PAY.card_number && tuAmount() <= CARD_LIMIT) o.push({ key: 'card', label: 'Карта' });
+  if (S.cardAuto && tuAmount() <= CARD_LIMIT) o.push({ key: 'cardauto', label: 'Карта' });
+  if (PAY.card_number && tuAmount() <= CARD_LIMIT) o.push({ key: 'card', label: S.cardAuto ? 'Карта (квитанция)' : 'Карта' });
   if (PAY.wallet_trc20) o.push({ key: 'trc20', label: 'USDT TRC-20' });
   if (PAY.wallet_btc) o.push({ key: 'btc', label: 'BTC' });
   return o;
@@ -1254,7 +1257,13 @@ async function renderTopup() {
     /* восстановить активный счёт после переоткрытия */
     try { INV = (await API.call('/api/invoice/active')).invoice || false; }
     catch (e) { INV = false; }
-    if (INV && INV.status === 0) { tuMethod = INV.currency; renderTopup(); startInvPoll(); }
+    if (INV && INV.status === 0) { tuMethod = INV.currency; renderTopup(); startInvPoll(); return; }
+  }
+  if (API.ok && S.cardAuto && CARD === null) {
+    /* восстановить активную выданную карту */
+    try { const r = await API.call('/api/card/active'); CARD = r.card ? { ...r, status: 0 } : false; }
+    catch (e) { CARD = false; }
+    if (CARD && CARD.status === 0) { tuMethod = 'cardauto'; renderTopup(); startCardPoll(); }
   }
 }
 function tuSel(k) { haptic('light'); tuMethod = k; renderTuBody(); renderTopupChips(); }
@@ -1277,7 +1286,15 @@ function renderTuBody() {
     b.innerHTML = `<button class="btn btn-gold" onclick="topUpDemo()">Пополнить (демо)</button>`;
     return;
   }
-  if (tuMethod === 'card') {
+  if (tuMethod === 'cardauto') {
+    clearInterval(cardTimer);
+    if (CARD && CARD.status === 0) renderCardPay(b);
+    else b.innerHTML = `
+      <p class="note" style="margin:0 0 12px">Карта выдаётся автоматически на 30 минут: получите номер и точную сумму, переведите — баланс пополнится сам после поступления оплаты.</p>
+      <button class="btn btn-gold" onclick="createCardPay()">Получить карту
+        <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+      </button>`;
+  } else if (tuMethod === 'card') {
     b.innerHTML = `
       ${cardBlock()}
       <button class="btn btn-ghost" style="margin-bottom:12px" onclick="document.getElementById('tuFile').click()">
@@ -1368,6 +1385,62 @@ async function cancelInvoice() {
   haptic('light'); toast('Платёж отменён');
   if (wasOrder) { closeSheets(true); serverSync(); go('history'); }
   else renderTuBody();
+}
+/* ── PayDome: авто-карта ── */
+async function createCardPay() {
+  const v = parseInt(document.getElementById('tuSum').value, 10);
+  if (!v || v < 10) return toast('Укажите сумму от 10 ₴');
+  try { CARD = await API.call('/api/card/create', { amount: v }); CARD.status = 0; }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); renderTuBody(); startCardPoll();
+}
+function startCardPoll() {
+  clearInterval(cardPoll);
+  cardPoll = setInterval(() => checkCardPay(false), 15000);
+}
+async function checkCardPay(manual) {
+  if (!CARD || CARD.status !== 0) { clearInterval(cardPoll); return; }
+  try {
+    const r = await API.call('/api/card/status', { payment_id: CARD.payment_id });
+    if (r.paid) {
+      CARD = false; clearInterval(cardPoll);
+      await serverSync();
+      if (document.getElementById('view-topup').classList.contains('active')) renderTopup();
+      haptic('medium'); toast('Оплата картой получена — баланс пополнен ✅');
+    } else if (manual) {
+      toast('Оплата пока не поступила — обычно до пары минут');
+    }
+  } catch (e) { if (manual) toast(e.message); }
+}
+async function cancelCardPay() {
+  clearInterval(cardPoll);
+  if (CARD?.payment_id) { try { await API.call('/api/card/cancel', { payment_id: CARD.payment_id }); } catch (e) {} }
+  CARD = false; haptic('light'); toast('Платёж отменён'); renderTuBody();
+}
+function renderCardPay(b) {
+  b.innerHTML = `
+    <div class="bezel gold"><div class="bezel-core" style="text-align:center;padding:18px">
+      <p class="note" style="margin:0 0 8px">Переведите точную сумму на карту:</p>
+      <div style="font-size:24px;font-weight:800;color:var(--gold-soft);margin-bottom:4px;cursor:pointer" onclick="copyText('${CARD.pay_uah}')">${fmt(CARD.pay_uah)} ₴</div>
+      <div class="ref-link" style="justify-content:center" onclick="copyText('${(CARD.card || '').replace(/\\s/g, '')}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="3"/><path d="M1 9h22"/></svg>
+        <span style="font-size:18px;font-weight:700;letter-spacing:.06em">${CARD.card}</span>
+      </div>
+      <div style="margin-top:12px;font-size:13px;color:var(--muted)">Осталось <b id="cardLeft" style="color:var(--gold-soft)">—</b></div>
+      <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <button class="btn btn-ghost" style="padding:12px" onclick="cancelCardPay()">Отменить</button>
+        <button class="btn btn-gold" style="padding:12px" onclick="checkCardPay(true)">Проверить</button>
+      </div>
+    </div></div>
+    <p class="note">Переведите <b>ровно ${fmt(CARD.pay_uah)} ₴</b> — по этой сумме распознаём ваш платёж. Зачисление автоматическое.</p>`;
+  const tick = () => {
+    const left = Math.max(0, new Date(CARD.expires) - Date.now());
+    const m = Math.floor(left / 60000), s = Math.floor(left % 60000 / 1000);
+    const el = document.getElementById('cardLeft');
+    if (el) el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    if (!left) { clearInterval(cardTimer); CARD = false; renderTuBody(); }
+  };
+  tick(); cardTimer = setInterval(tick, 1000);
 }
 function copyText(t) { navigator.clipboard?.writeText(t); haptic('medium'); toast('Скопировано'); }
 function cardBlock() {

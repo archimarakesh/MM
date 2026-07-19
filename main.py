@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, Response
 import auth
 import db
 import guard_bot
+import paydome
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("mm")
@@ -262,6 +263,19 @@ async def promo_poster():
             await asyncio.sleep(300)
 
 
+async def card_checker():
+    """Страховка к вебхуку: раз в 30с опрашиваем неоплаченные card-платежи."""
+    if not paydome.enabled():
+        return
+    while True:
+        try:
+            for p in await db.card_payment_pending():
+                await _card_settle(p["payment_id"])
+        except Exception:
+            log.exception("Ошибка проверщика card-платежей")
+        await asyncio.sleep(30)
+
+
 async def grow_harvester():
     """Раз в 5 минут двигает стадии программ по расписанию; на сборе — выплаты."""
     while True:
@@ -388,17 +402,22 @@ async def lifespan(_: FastAPI):
         log.info("Бот запущен (polling)")
     else:
         log.warning("BOT_TOKEN не задан — бот не запущен, API без авторизации не работает")
+    if paydome.enabled() and APP_URL:
+        asyncio.create_task(paydome.set_webhook(f"{APP_URL}/api/paydome/webhook"))
+        log.info("PayDome включён, вебхук: %s/api/paydome/webhook", APP_URL)
     checker = asyncio.create_task(invoice_checker())
     tracker = asyncio.create_task(np_tracker())
     harvester = asyncio.create_task(grow_harvester())
     poster = asyncio.create_task(promo_poster())
     guard = asyncio.create_task(guard_bot.run())  # отдельный бот-охранник чата, свой токен
+    card_task = asyncio.create_task(card_checker())
     yield
     checker.cancel()
     tracker.cancel()
     harvester.cancel()
     poster.cancel()
     guard.cancel()
+    card_task.cancel()
     if menu_task:
         menu_task.cancel()
     if task:
@@ -473,6 +492,7 @@ async def _snap(uid: int) -> dict:
     snap["bonus_offer"] = (not snap.get("bonus_claimed")
                            and bool(bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID))
     snap["bonus_amount"] = BONUS_AMOUNT
+    snap["card_auto"] = paydome.enabled()
     return snap
 
 
@@ -674,6 +694,91 @@ async def api_invoice_cancel(request: Request):
     u = tg_user(request)
     b = await request.json()
     await db.invoice_cancel(pint(b.get("id")), u["id"])
+    return {"ok": True}
+
+
+# ── PayDome: авто-карта для пополнения ────────────────────────────────────────
+async def _card_settle(payment_id: str) -> bool:
+    """Источник истины — GetPaymentStatus. Зачисляем только при Paid."""
+    if await paydome.status(payment_id) != paydome.STATUS_PAID:
+        return False
+    res = await db.card_payment_paid(payment_id)
+    if not res:
+        return False
+    await notify(res["user_id"],
+                 f"✅ Оплата картой получена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+    await notify(ADMIN_ID, f"💳 PayDome: +{res['amount']} ₴ (payment {payment_id}).")
+    return True
+
+
+@app.post("/api/card/create")
+async def api_card_create(request: Request):
+    u = tg_user(request)
+    if not paydome.enabled():
+        raise HTTPException(400, "Авто-оплата картой сейчас недоступна")
+    b = await request.json()
+    amount = pint(b.get("amount"))
+    if amount < 10:
+        raise HTTPException(400, "Минимальная сумма — 10 ₴")
+    if amount > CARD_LIMIT:
+        raise HTTPException(400, f"Картой — до {CARD_LIMIT} ₴, для больших сумм используйте крипту")
+    try:
+        card = await paydome.get_card(amount)
+    except ValueError:
+        raise HTTPException(400, "Не удалось получить карту — попробуйте позже")
+    if not card.get("card") or not card.get("payment_id"):
+        raise HTTPException(400, "Провайдер не выдал карту — попробуйте позже")
+    p = await db.card_payment_create(u["id"], card["payment_id"], card["card"],
+                                     amount, card["pay_uah"])
+    return {"payment_id": p["payment_id"], "card": p["card"],
+            "pay_uah": p["pay_uah"], "amount": p["amount_uah"],
+            "expires": p["expires"].isoformat()}
+
+
+@app.post("/api/card/active")
+async def api_card_active(request: Request):
+    u = tg_user(request)
+    p = await db.card_payment_active(u["id"])
+    if not p:
+        return {"card": None}
+    return {"payment_id": p["payment_id"], "card": p["card"],
+            "pay_uah": p["pay_uah"], "amount": p["amount_uah"],
+            "expires": p["expires"].isoformat()}
+
+
+@app.post("/api/card/status")
+async def api_card_status(request: Request):
+    u = tg_user(request)
+    b = await request.json()
+    pid = str(b.get("payment_id", ""))
+    p = await db.card_payment_active(u["id"])
+    paid = False
+    if p and p["payment_id"] == pid:
+        paid = await _card_settle(pid)
+    return {"paid": paid}
+
+
+@app.post("/api/card/cancel")
+async def api_card_cancel(request: Request):
+    u = tg_user(request)
+    b = await request.json()
+    await db.card_payment_cancel(u["id"], str(b.get("payment_id", "")))
+    return {"ok": True}
+
+
+@app.post("/api/paydome/webhook")
+async def api_paydome_webhook(request: Request):
+    """Вебхук PayDome — только триггер: перепроверяем статус через API и зачисляем при Paid."""
+    try:
+        b = await request.json()
+    except Exception:
+        return {"ok": True}
+    pid = b.get("paymentId")
+    if pid:
+        try:
+            await _card_settle(str(pid))
+        except Exception:
+            log.warning("Обработка вебхука PayDome не удалась: %s", pid)
     return {"ok": True}
 
 

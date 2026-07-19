@@ -133,6 +133,17 @@ async def init():
                 created       TIMESTAMPTZ NOT NULL DEFAULT now(),
                 expires       TIMESTAMPTZ NOT NULL);
             ALTER TABLE invoices ADD COLUMN IF NOT EXISTS order_id BIGINT;
+            CREATE TABLE IF NOT EXISTS card_payments(
+                id         BIGSERIAL PRIMARY KEY,
+                user_id    BIGINT NOT NULL,
+                payment_id TEXT UNIQUE NOT NULL,
+                card       TEXT,
+                amount_uah BIGINT NOT NULL,
+                pay_uah    BIGINT NOT NULL,
+                status     INT NOT NULL DEFAULT 0,
+                created    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                expires    TIMESTAMPTZ NOT NULL);
+            CREATE INDEX IF NOT EXISTS card_payments_user_idx ON card_payments(user_id);
             CREATE TABLE IF NOT EXISTS withdrawals(
                 id         BIGSERIAL PRIMARY KEY,
                 user_id    BIGINT NOT NULL,
@@ -430,9 +441,14 @@ async def payments_history(tg_id: int, c) -> list:
         SELECT amount, method, status, created FROM withdrawals
         WHERE user_id=$1 ORDER BY id DESC LIMIT 30
     """, tg_id)
+    cp = await c.fetch("""
+        SELECT amount_uah AS amount, status, created FROM card_payments
+        WHERE user_id=$1 ORDER BY id DESC LIMIT 30
+    """, tg_id)
     rows = [{**dict(r), "kind": "card"} for r in tt] \
         + [{**dict(r), "kind": "crypto"} for r in inv] \
-        + [{**dict(r), "kind": "out"} for r in wd]
+        + [{**dict(r), "kind": "out"} for r in wd] \
+        + [{**dict(r), "method": "card", "kind": "cardauto"} for r in cp]
     rows.sort(key=lambda r: r["created"], reverse=True)
     return [{**r, "created": r["created"].isoformat()} for r in rows[:40]]
 
@@ -935,6 +951,63 @@ async def set_pin(tg_id: int, pin: str, old: str) -> dict:
             WHERE tg_id=$1
         """, tg_id, _hash_pin(pin, salt), salt)
         return {"ok": True}
+
+
+# ── PayDome: авто-карта для пополнения ───────────────────────────────────────
+CARD_PAY_TTL = 30 * 60  # 30 минут на оплату карты
+
+
+async def card_payment_create(tg_id: int, payment_id: str, card: str,
+                              amount_uah: int, pay_uah: int) -> dict:
+    async with _pool.acquire() as c, c.transaction():
+        # новый счёт отменяет прежний неоплаченный
+        await c.execute(
+            "UPDATE card_payments SET status=2 WHERE user_id=$1 AND status=0", tg_id)
+        row = await c.fetchrow("""
+            INSERT INTO card_payments(user_id, payment_id, card, amount_uah, pay_uah, expires)
+            VALUES($1,$2,$3,$4,$5, now() + make_interval(secs => $6))
+            RETURNING *
+        """, tg_id, payment_id, card, amount_uah, pay_uah, CARD_PAY_TTL)
+    return dict(row)
+
+
+async def card_payment_active(tg_id: int) -> dict | None:
+    async with _pool.acquire() as c:
+        await c.execute(
+            "UPDATE card_payments SET status=2 WHERE status=0 AND expires < now()")
+        r = await c.fetchrow(
+            "SELECT * FROM card_payments WHERE user_id=$1 AND status=0 ORDER BY id DESC LIMIT 1",
+            tg_id)
+    return dict(r) if r else None
+
+
+async def card_payment_pending() -> list:
+    async with _pool.acquire() as c:
+        await c.execute(
+            "UPDATE card_payments SET status=2 WHERE status=0 AND expires < now()")
+        rows = await c.fetch("SELECT * FROM card_payments WHERE status=0 ORDER BY id LIMIT 100")
+    return [dict(r) for r in rows]
+
+
+async def card_payment_cancel(tg_id: int, payment_id: str):
+    async with _pool.acquire() as c:
+        await c.execute(
+            "UPDATE card_payments SET status=2 WHERE payment_id=$1 AND user_id=$2 AND status=0",
+            payment_id, tg_id)
+
+
+async def card_payment_paid(payment_id: str) -> dict | None:
+    """Помечает оплаченным и зачисляет баланс. None — уже обработан/нет такого."""
+    async with _pool.acquire() as c, c.transaction():
+        p = await c.fetchrow(
+            "SELECT * FROM card_payments WHERE payment_id=$1 AND status=0 FOR UPDATE", payment_id)
+        if not p:
+            return None
+        await c.execute("UPDATE card_payments SET status=1 WHERE id=$1", p["id"])
+        # зачисляем фактически оплаченную сумму (pay_uah) — «сколько заплатил, столько получил»
+        await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                        p["pay_uah"], p["user_id"])
+        return {"user_id": p["user_id"], "amount": p["pay_uah"]}
 
 
 # ── вывод баланса (ручная выплата) ───────────────────────────────────────────
