@@ -291,13 +291,39 @@ async def invoice_checker():
 
 
 async def post_promo(path: str, caption: str):
-    """Публикация одного промо-поста в канал с кнопкой на мини-апп."""
+    """Публикация одного промо-поста в канал с кнопкой на мини-апп. Возвращает message_id."""
     from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL),
     ]])
-    await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
-                         caption=caption or None, parse_mode="HTML", reply_markup=kb)
+    msg = await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
+                               caption=caption or None, parse_mode="HTML", reply_markup=kb)
+    return msg.message_id
+
+
+async def publish_promo(items):
+    """Удаляет предыдущий промо-набор и публикует новый — чтобы канал и чат не засорялись.
+    Удаление поста в канале Telegram автоматически убирает и его копию в привязанном чате.
+    items: список (path, caption). Возвращает число опубликованных постов."""
+    prev_chat = await db.get_kv("promo_chat")
+    prev_ids = await db.get_kv("promo_msgs")
+    if prev_chat and prev_ids:
+        for mid in prev_ids.split(","):
+            if not mid:
+                continue
+            try:
+                await bot.delete_message(int(prev_chat), int(mid))
+            except Exception:
+                pass  # уже удалён / нет прав / устарел — не критично
+    new_ids = []
+    for path, caption in items:
+        if not os.path.exists(path):
+            log.warning("Промо-файл не найден: %s", path)
+            continue
+        new_ids.append(str(await post_promo(path, caption)))
+    await db.set_kv("promo_chat", str(int(PROMO_CHANNEL_ID)))
+    await db.set_kv("promo_msgs", ",".join(new_ids))
+    return len(new_ids)
 
 
 async def promo_poster():
@@ -324,7 +350,7 @@ async def promo_poster():
                 continue  # уже постили в этот слот (например, после рестарта)
             path, caption = PROMO_POSTS[idx % len(PROMO_POSTS)]
             if os.path.exists(path):
-                await post_promo(path, caption)
+                await publish_promo([(path, caption)])
                 await db.set_kv("last_promo", slot_key)
                 log.info("Промо-пост отправлен: %s (%s)", path, slot_key)
             else:
@@ -419,17 +445,15 @@ if BOT_TOKEN:
         if not PROMO_CHANNEL_ID:
             await message.answer("Канал не задан: добавьте PROMO_CHANNEL_ID или BONUS_CHANNEL_ID.")
             return
-        sent = 0
-        for path, caption in PROMO_POSTS:
-            if not os.path.exists(path):
-                await message.answer(f"Файл не найден: {path}")
-                continue
-            try:
-                await post_promo(path, caption)
-                sent += 1
-            except Exception as e:
-                await message.answer(f"Ошибка постинга {path}: {e}")
-        await message.answer(f"✅ Опубликовано постов: {sent}/{len(PROMO_POSTS)}")
+        missing = [path for path, _ in PROMO_POSTS if not os.path.exists(path)]
+        for path in missing:
+            await message.answer(f"Файл не найден: {path}")
+        try:
+            sent = await publish_promo(PROMO_POSTS)
+        except Exception as e:
+            await message.answer(f"Ошибка постинга: {e}")
+            return
+        await message.answer(f"✅ Опубликовано постов: {sent}/{len(PROMO_POSTS)} · старые удалены")
 
     @dp.channel_post()
     async def channel_chatid(message: Message):
