@@ -839,6 +839,7 @@ function applySnapshot(d) {
   if (d.bonus_amount) S.bonusAmount = d.bonus_amount;
   if ('withdrawable' in d) S.withdrawable = d.withdrawable;
   if ('card_auto' in d) S.cardAuto = d.card_auto;
+  if ('card_fee' in d) S.cardFee = d.card_fee;
   if ('has_pin' in d) S.hasPin = d.has_pin;
   S.serverLockUntil = d.pin_locked_until ? new Date(d.pin_locked_until).getTime() : 0;
   maybeShowBonus();
@@ -1290,7 +1291,7 @@ function renderTuBody() {
     clearInterval(cardTimer);
     if (CARD && CARD.status === 0) renderCardPay(b);
     else b.innerHTML = `
-      <p class="note" style="margin:0 0 12px">Карта выдаётся автоматически на 30 минут: получите номер и точную сумму, переведите — баланс пополнится сам после поступления оплаты.</p>
+      <p class="note" style="margin:0 0 12px">Карта выдаётся автоматически на 30 минут: получите номер и точную сумму, переведите — баланс пополнится сам после поступления оплаты.${S.cardFee ? ` К сумме добавляется сервисный сбор <b style="color:var(--gold-soft)">${S.cardFee}%</b>.` : ''}</p>
       <button class="btn btn-gold" onclick="createCardPay()">Получить карту
         <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
       </button>`;
@@ -1422,6 +1423,7 @@ function renderCardPay(b) {
     <div class="bezel gold"><div class="bezel-core" style="text-align:center;padding:18px">
       <p class="note" style="margin:0 0 8px">Переведите точную сумму на карту:</p>
       <div style="font-size:24px;font-weight:800;color:var(--gold-soft);margin-bottom:4px;cursor:pointer" onclick="copyText('${CARD.pay_uah}')">${fmt(CARD.pay_uah)} ₴</div>
+      ${CARD.amount && CARD.amount !== CARD.pay_uah ? `<p class="note" style="margin:0 0 8px">на баланс: <b style="color:var(--txt)">${fmt(CARD.amount)} ₴</b> · сбор ${fmt(CARD.pay_uah - CARD.amount)} ₴</p>` : ''}
       <div class="ref-link" style="justify-content:center" onclick="copyText('${(CARD.card || '').replace(/\\s/g, '')}')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="3"/><path d="M1 9h22"/></svg>
         <span style="font-size:18px;font-weight:700;letter-spacing:.06em">${CARD.card}</span>

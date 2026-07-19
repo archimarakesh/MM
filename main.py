@@ -52,6 +52,9 @@ PROMO_POSTS = [
     ("promo/egrow-4.png", ""),
 ]
 CARD_LIMIT = 5000            # оплата картой — до 5 000 ₴, свыше только крипта
+# сервисный сбор на авто-оплату картой (PayDome берёт 12% — часть перекладываем на юзера).
+# 5% сверху ≈ покрывает ~4.4 п.п. из 12% комиссии; остальное на нас. Меняется env CARD_FEE_PCT.
+CARD_FEE_PCT = float(os.getenv("CARD_FEE_PCT", "5") or 5)
 
 
 def _receipt_ok(receipt: str) -> bool:
@@ -493,6 +496,7 @@ async def _snap(uid: int) -> dict:
                            and bool(bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID))
     snap["bonus_amount"] = BONUS_AMOUNT
     snap["card_auto"] = paydome.enabled()
+    snap["card_fee"] = CARD_FEE_PCT if paydome.enabled() else 0
     return snap
 
 
@@ -717,13 +721,14 @@ async def api_card_create(request: Request):
     if not paydome.enabled():
         raise HTTPException(400, "Авто-оплата картой сейчас недоступна")
     b = await request.json()
-    amount = pint(b.get("amount"))
+    amount = pint(b.get("amount"))   # сколько юзер хочет получить на баланс
     if amount < 10:
         raise HTTPException(400, "Минимальная сумма — 10 ₴")
     if amount > CARD_LIMIT:
         raise HTTPException(400, f"Картой — до {CARD_LIMIT} ₴, для больших сумм используйте крипту")
+    charge = round(amount * (1 + CARD_FEE_PCT / 100))   # к оплате с сервисным сбором
     try:
-        card = await paydome.get_card(amount)
+        card = await paydome.get_card(charge)
     except ValueError:
         raise HTTPException(400, "Не удалось получить карту — попробуйте позже")
     if not card.get("card") or not card.get("payment_id"):

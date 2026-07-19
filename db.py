@@ -1004,10 +1004,10 @@ async def card_payment_paid(payment_id: str) -> dict | None:
         if not p:
             return None
         await c.execute("UPDATE card_payments SET status=1 WHERE id=$1", p["id"])
-        # зачисляем фактически оплаченную сумму (pay_uah) — «сколько заплатил, столько получил»
+        # на баланс — желаемая сумма (amount_uah); разница pay_uah−amount_uah = сервисный сбор
         await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
-                        p["pay_uah"], p["user_id"])
-        return {"user_id": p["user_id"], "amount": p["pay_uah"]}
+                        p["amount_uah"], p["user_id"])
+        return {"user_id": p["user_id"], "amount": p["amount_uah"]}
 
 
 # ── вывод баланса (ручная выплата) ───────────────────────────────────────────
