@@ -113,6 +113,10 @@ async def init():
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt TEXT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_status INT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_status_text TEXT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_eta TEXT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_arrival TEXT;
             UPDATE orders SET ship=NULL WHERE status=3 AND ship IS NOT NULL;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
             CREATE TABLE IF NOT EXISTS topups(
@@ -419,6 +423,8 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "product": r["product"], "grams": r["grams"], "total": r["total"],
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
         "ship": json.loads(r["ship"]) if r["ship"] else None,
+        "np_status": r["np_status"], "np_status_text": r["np_status_text"],
+        "np_eta": r["np_eta"], "np_arrival": r["np_arrival"],
         "stars": stars.get(r["id"]),
     } for r in rows]
     return {
@@ -747,6 +753,7 @@ async def admin_orders() -> list:
         "pay": r["pay"],
         "receipt": r["receipt"] if r["status"] == -1 else None,
         "ship": json.loads(r["ship"]) if r["ship"] else None,
+        "np_status_text": r["np_status_text"], "np_eta": r["np_eta"], "np_arrival": r["np_arrival"],
     } for r in rows]
 
 
@@ -784,9 +791,19 @@ async def shipped_orders() -> list:
     """Заказы «В пути» с ТТН — для трекера Новой Почты."""
     async with _pool.acquire() as c:
         rows = await c.fetch(
-            "SELECT id, user_id, ttn FROM orders WHERE status=2 AND ttn IS NOT NULL LIMIT 100")
+            "SELECT id, user_id, ttn, np_status FROM orders "
+            "WHERE status=2 AND ttn IS NOT NULL LIMIT 100")
     return [{"id": r["id"], "user_id": r["user_id"], "ttn": r["ttn"],
+             "np_status": r["np_status"],
              "code": f"MM-{r['id'] + ORDER_CODE_BASE}"} for r in rows]
+
+
+async def update_order_np(oid: int, code, text: str, eta: str, arrival: str):
+    """Сохраняет живой статус НП по заказу (без смены статуса заказа)."""
+    async with _pool.acquire() as c:
+        await c.execute(
+            "UPDATE orders SET np_status=$2, np_status_text=$3, np_eta=$4, np_arrival=$5 WHERE id=$1",
+            oid, code, text or None, eta or None, arrival or None)
 
 
 async def mark_delivered(oid: int) -> bool:

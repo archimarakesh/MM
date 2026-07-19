@@ -242,7 +242,9 @@ async def _settle(inv: dict, txid: str) -> bool:
 
 # ── трекер Новой Почты ───────────────────────────────────────────────────────
 NP_API = "https://api.novaposhta.ua/v2.0/json/"
-NP_RECEIVED = {"9", "10", "11"}  # «Отримано» в разных вариантах
+NP_ARRIVED = {"7", "8"}                    # прибыло в отделение / почтомат — готово к выдаче
+NP_RECEIVED = {"9", "10", "11", "106"}     # «Отримано» в разных вариантах
+NP_DONE = NP_ARRIVED | NP_RECEIVED
 
 
 async def np_tracker():
@@ -262,9 +264,24 @@ async def np_tracker():
                     async with s.post(NP_API, json=payload,
                                       timeout=aiohttp.ClientTimeout(total=20)) as r:
                         data = (await r.json()).get("data", []) or []
-                by_ttn = {str(d.get("Number", "")): str(d.get("StatusCode", "")) for d in data}
+                by_ttn = {str(d.get("Number", "")): d for d in data}
                 for o in orders:
-                    if by_ttn.get(o["ttn"]) in NP_RECEIVED and await db.mark_delivered(o["id"]):
+                    d = by_ttn.get(o["ttn"])
+                    if not d:
+                        continue
+                    code = str(d.get("StatusCode", "") or "")
+                    text = str(d.get("Status", "") or "")
+                    eta = str(d.get("ScheduledDeliveryDate", "") or "")
+                    arrival = str(d.get("RecipientDateTime", "") or d.get("ActualDeliveryDate", "") or "")
+                    await db.update_order_np(o["id"], int(code) if code.isdigit() else None,
+                                             text, eta, arrival)
+                    prev = str(o["np_status"] or "")
+                    if code in NP_ARRIVED and prev not in NP_DONE:   # прибыло — уведомляем один раз
+                        wh = str(d.get("WarehouseRecipient", "") or "")
+                        await notify(o["user_id"],
+                                     f"📦 Заказ <b>{o['code']}</b> прибыл в отделение Новой Почты"
+                                     + (f":\n{esc(wh)}" if wh else "") + "\nЗаберите посылку 🙌")
+                    if code in NP_RECEIVED and await db.mark_delivered(o["id"]):
                         await notify(o["user_id"],
                                      f"🎉 Заказ <b>{o['code']}</b> получен! "
                                      "Будем рады вашей оценке ★ в «Истории».")

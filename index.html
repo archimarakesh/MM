@@ -191,6 +191,9 @@ h1.page-title em{font-style:normal;color:inherit}
 .admin-stats span{font-size:10.5px;color:var(--muted-2);line-height:1.3}
 .stat-list{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
 .stat-list>div{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:3px 0}
+.np-live{border:1px solid var(--line);border-radius:var(--r-lg);padding:6px 12px;margin:10px 0}
+.np-row{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:4px 0}
+.np-row b{color:var(--txt);font-weight:700;text-align:right}
 .tier-table{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px}
 .tier-row{display:flex;justify-content:space-between;padding:10px 15px;font-size:12.5px;
   border-bottom:1px solid var(--line);color:var(--muted);transition:background .45s var(--ease)}
@@ -1134,6 +1137,7 @@ async function placeOrder() {
 /* ═══════════ История ═══════════ */
 function stClass(s) { return s >= 3 ? 'st-done' : s >= 1 ? 'st-ship' : s >= 0 ? 'st-paid' : s === -1 ? 'st-wait' : 'st-cancel'; }
 function stLabel(s) { return s === -1 ? 'Ждёт оплаты' : s === -2 ? 'Отменён' : STATUSES[s]; }
+function npDate(s) { return s ? String(s).replace(/ 00:00:00$/, '').replace(/:\d{2}$/, '').trim() : ''; }
 function renderOrders() {
   const el = document.getElementById('ordersList');
   if (!S.orders.length) {
@@ -1174,6 +1178,12 @@ function openOrder(i) {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       </b>
     </div>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
+    ${o.status === 2 && (o.np_status_text || o.np_eta || o.np_arrival) ? `
+    <div class="np-live">
+      ${o.np_status_text ? `<div class="np-row"><span>Статус Новой Почты</span><b>${esc(o.np_status_text)}</b></div>` : ''}
+      ${o.np_eta ? `<div class="np-row"><span>Ожидаемая дата</span><b>${npDate(o.np_eta)}</b></div>` : ''}
+      ${o.np_arrival ? `<div class="np-row"><span>Прибыло в отделение</span><b style="color:var(--gold-soft)">${npDate(o.np_arrival)}</b></div>` : ''}
+    </div>` : ''}
     ${o.ship ? `<p class="note">Получатель: ${esc(o.ship.name)} · ${esc(o.ship.city)}, отд. ${esc(o.ship.np)}</p>` : ''}
     ${o.status === 3 ? `
       <div class="hr"></div>
@@ -2041,6 +2051,7 @@ function renderAdmin(tab) {
           ${esc(o.user)}${o.username ? ' · @' + esc(o.username) : ''}
           ${o.ship ? `<br>${esc(o.ship.name)} · ${esc(o.ship.phone)}<br>${esc(o.ship.city)}, НП №${esc(o.ship.np)}` : ''}
         </div>
+        ${o.np_status_text ? `<div style="font-size:11.5px;color:var(--gold-soft);margin-top:6px">📍 ${esc(o.np_status_text)}${o.np_eta ? ` · ожид. ${npDate(o.np_eta)}` : ''}</div>` : ''}
         ${o.status === -1 && o.receipt ? `
           <div style="margin-top:10px">${receiptChip(`AD.orders[${i}].receipt`, o.receipt)}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
