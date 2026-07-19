@@ -1137,25 +1137,37 @@ async def api_np_warehouses(request: Request):
     key = os.getenv("NP_API_KEY", "")
     if not key:
         raise HTTPException(400, "Справочник Новой Почты недоступен")
-    props = {"CityRef": city_ref, "Limit": "50", "Page": "1"}
+    base = {"CityRef": city_ref, "Limit": "500"}
     if q:
-        props["FindByString"] = q
-    payload = {"apiKey": key, "modelName": "Address", "calledMethod": "getWarehouses",
-               "methodProperties": props}
+        base["FindByString"] = q            # поиск сужает выборку — хватает одной страницы
+    all_wh = []
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.post(NP_API, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                data = (await r.json()).get("data", []) or []
+            for page in range(1, 6):        # до 5 страниц × 500 — покрывает даже Киев
+                payload = {"apiKey": key, "modelName": "Address", "calledMethod": "getWarehouses",
+                           "methodProperties": {**base, "Page": str(page)}}
+                async with s.post(NP_API, json=payload,
+                                  timeout=aiohttp.ClientTimeout(total=15)) as r:
+                    chunk = (await r.json()).get("data", []) or []
+                all_wh.extend(chunk)
+                if len(chunk) < 500:
+                    break
     except Exception:
         raise HTTPException(502, "Новая Почта недоступна — попробуйте позже")
+
+    def is_postomat(w):
+        cat = str(w.get("CategoryOfWarehouse", "") or "")
+        dl = str(w.get("Description", "") or "").lower()
+        return cat == "Postomat" or "поштомат" in dl or "почтомат" in dl
+
     out = []
-    for w in data:
-        is_post = str(w.get("CategoryOfWarehouse", "") or "") == "Postomat"
-        if (kind == "postomat" and not is_post) or (kind == "branch" and is_post):
+    for w in all_wh:
+        post = is_postomat(w)
+        if (kind == "postomat" and not post) or (kind == "branch" and post):
             continue
         out.append({"ref": w.get("Ref", ""), "number": w.get("Number", ""),
                     "desc": w.get("Description", ""),
-                    "short": w.get("ShortAddress", ""), "postomat": is_post})
+                    "short": w.get("ShortAddress", ""), "postomat": post})
     return {"warehouses": out}
 
 

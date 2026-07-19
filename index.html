@@ -1155,7 +1155,7 @@ function loadWarehouses() {
     let r; try { r = await API.call('/api/np/warehouses', { city_ref: coCitySel.ref, q, kind: coKind }); } catch { return; }
     coWhRes = r.warehouses || [];
     document.getElementById('coNPList').innerHTML = coWhRes.length
-      ? coWhRes.slice(0, 30).map((w, i) => `<div class="ac-item" onclick="pickWh(${i})">${w.postomat ? '📮' : '🏤'} №${esc(w.number)} · ${esc(w.desc)}</div>`).join('')
+      ? coWhRes.slice(0, 50).map((w, i) => `<div class="ac-item" onclick="pickWh(${i})">${w.postomat ? '📮' : '🏤'} №${esc(w.number)} · ${esc(w.desc)}</div>`).join('')
       : '<div class="ac-empty">Ничего не найдено</div>';
   });
 }
