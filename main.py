@@ -318,29 +318,43 @@ async def post_promo(path: str, caption: str):
     return msg.message_id
 
 
+async def _delete_promo_msg(stored: str):
+    """stored = 'chat_id:msg_id' — удаляет пост (и его копию в привязанном чате)."""
+    if stored and ":" in stored:
+        chat, mid = stored.rsplit(":", 1)
+        try:
+            await bot.delete_message(int(chat), int(mid))
+        except Exception:
+            pass  # уже удалён / нет прав / устарел — не критично
+
+
+async def _cleanup_legacy_promo():
+    """Разовая чистка старого механизма (единый пост на все) при первом запуске нового."""
+    old_ids, old_chat = await db.get_kv("promo_msgs"), await db.get_kv("promo_chat")
+    if old_ids and old_chat:
+        for mid in old_ids.split(","):
+            if mid:
+                await _delete_promo_msg(f"{old_chat}:{mid}")
+        await db.set_kv("promo_msgs", "")
+        await db.set_kv("promo_chat", "")
+
+
 async def publish_promo(items):
-    """Удаляет предыдущий промо-набор и публикует новый — чтобы канал и чат не засорялись.
-    Удаление поста в канале Telegram автоматически убирает и его копию в привязанном чате.
+    """Публикует набор промо; КАЖДЫЙ пост удаляет только свою предыдущую версию
+    (память по файлу), поэтому в канале сосуществуют разные посты и не засоряются.
     items: список (path, caption). Возвращает число опубликованных постов."""
-    prev_chat = await db.get_kv("promo_chat")
-    prev_ids = await db.get_kv("promo_msgs")
-    if prev_chat and prev_ids:
-        for mid in prev_ids.split(","):
-            if not mid:
-                continue
-            try:
-                await bot.delete_message(int(prev_chat), int(mid))
-            except Exception:
-                pass  # уже удалён / нет прав / устарел — не критично
-    new_ids = []
+    await _cleanup_legacy_promo()
+    n = 0
     for path, caption in items:
         if not os.path.exists(path):
             log.warning("Промо-файл не найден: %s", path)
             continue
-        new_ids.append(str(await post_promo(path, caption)))
-    await db.set_kv("promo_chat", str(int(PROMO_CHANNEL_ID)))
-    await db.set_kv("promo_msgs", ",".join(new_ids))
-    return len(new_ids)
+        key = f"promo_msg:{path}"                       # своя память на каждый пост
+        await _delete_promo_msg(await db.get_kv(key))   # снести только прошлый такой же
+        mid = await post_promo(path, caption)
+        await db.set_kv(key, f"{int(PROMO_CHANNEL_ID)}:{mid}")
+        n += 1
+    return n
 
 
 async def promo_poster():
