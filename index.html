@@ -547,6 +547,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div id="supportLinks"></div>
     <div class="section-head"><h2>Частые вопросы</h2><span>FAQ</span></div>
     <div id="faqList"></div>
+    <p class="note" style="text-align:center;margin-top:18px;opacity:.5">версия <span id="buildTag">—</span></p>
   </section>
 </div>
 
@@ -2925,6 +2926,8 @@ function observeReveals() {
 }
 
 /* ═══════════ Старт ═══════════ */
+const BUILD = 'swipe-4 · 20.07';   // метка сборки — видно в «Поддержке», чтобы ловить старый кэш
+document.getElementById('buildTag').textContent = BUILD;
 renderGoods(); renderOrders(); renderSupport(); renderFaq();
 initProfile(); syncBalance(); syncSettings(); initLock();
 observeReveals();
