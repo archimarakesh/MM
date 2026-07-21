@@ -931,17 +931,33 @@ async function serverSync() {
   configureLock();  // настроить экран блокировки по данным с сервера (или локально)
 }
 /* фоновое обновление: статусы заказов меняет админ, приложение должно их подхватывать само */
-let syncing = false, lastSync = 0, syncTimer = null;
+let syncing = false, lastSync = 0, syncTimer = null, adminSyncing = false;
 async function softSync(force) {
   if (syncing || document.hidden) return;
-  if (!force && Date.now() - lastSync < 5000) return;   // не чаще раза в 5 сек
+  if (!force && Date.now() - lastSync < 2000) return;
   syncing = true; lastSync = Date.now();
   try { await serverSync(); } finally { syncing = false; }
 }
+async function adminSync() {
+  if (adminSyncing || document.hidden || !API.ok || !AD) return;
+  if (!document.getElementById('view-admin').classList.contains('active')) return;
+  if (document.querySelector('.sheet.open')) return;               // открыт редактор товара/программы
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;   // админ печатает — не сбиваем
+  // в полях уже есть набранное (например ТТН) — перерисовка стёрла бы его
+  if ([...document.querySelectorAll('#adminBody input')].some(i => i.value.trim())) return;
+  adminSyncing = true;
+  try {
+    AD = await API.call('/api/admin/data');
+    renderAdmin(adminTab || 'products');
+  } catch (e) { /* тихо: следующая попытка через 5 сек */ }
+  finally { adminSyncing = false; }
+}
 function startAutoSync() {
   clearInterval(syncTimer);
-  syncTimer = setInterval(() => softSync(true), 30000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) softSync(true); });
+  const tick = () => { softSync(true); adminSync(); };
+  syncTimer = setInterval(tick, 5000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 }
 const fmt = n => n.toLocaleString('ru-RU');
 /* HTML-escape пользовательских строк (защита от XSS в админке) */
@@ -2956,7 +2972,7 @@ function revealNow(root) {
 }
 
 /* ═══════════ Старт ═══════════ */
-const BUILD = 'v8';   // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
+const BUILD = 'v9';   // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
 document.getElementById('buildTag').textContent = BUILD;
 renderGoods(); renderOrders(); renderSupport(); renderFaq();
 initProfile(); syncBalance(); syncSettings(); initLock();
