@@ -625,7 +625,13 @@ async def _snap(uid: int) -> dict:
 
 @app.get("/")
 async def index():
-    return FileResponse("index.html")
+    # HTML не кэшируем: иначе вебвью Telegram (особенно Android) держит старую версию
+    # мини-аппа и обновления не доезжают до пользователя
+    return FileResponse("index.html", headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
 
 
 _IMMUTABLE = {"Cache-Control": "public, max-age=86400"}
