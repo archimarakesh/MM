@@ -13,6 +13,8 @@ dist/
 promo/*
 !promo/egrow-1.png
 !promo/egrow-4.png
+!promo/contest.png
+!promo/award_base.png
 !promo/figma/
 !promo/figma/*.svg
 !promo/src/

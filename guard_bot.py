@@ -21,11 +21,18 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import award_image
 import db
 
 KYIV = ZoneInfo("Europe/Kyiv")
 ACTIVITY_PRIZES = [400, 300, 200]   # призы за 1-3 место, ₴ на баланс (бонусные, как приветственные)
 ACTIVITY_HOUR = 12                  # понедельник, по Киеву
+CONTEST_TIMES = os.getenv("CONTEST_TIMES", "11:00,19:00")   # баннер конкурса, по Киеву
+CONTEST_BANNER = os.path.join("promo", "contest.png")
+CONTEST_CAPTION = ("🏆 <b>Конкурс активности</b>\n"
+                   "Топ-3 самых активных в чате за неделю получают "
+                   "<b>400 / 300 / 200 ₴</b> на баланс магазина.\n"
+                   "Итоги — каждый понедельник в 12:00. <b>/top</b> — текущий рейтинг.")
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("guard")
@@ -145,8 +152,8 @@ async def run(notify=None):
     from aiogram import Bot, Dispatcher, F
     from aiogram.enums import ContentType
     from aiogram.filters import Command, CommandObject
-    from aiogram.types import (CallbackQuery, ChatPermissions, InlineKeyboardButton,
-                               InlineKeyboardMarkup, Message)
+    from aiogram.types import (CallbackQuery, ChatPermissions, FSInputFile,
+                               InlineKeyboardButton, InlineKeyboardMarkup, Message)
 
     bot = Bot(GUARD_BOT_TOKEN)
     dp = Dispatcher()
@@ -617,6 +624,44 @@ async def run(notify=None):
         except Exception:
             log.warning("Не удалось записать активность %s", uid)
 
+    async def post_contest():
+        """Баннер конкурса: предыдущий удаляем, чтобы в чате всегда висел один."""
+        if not (RULES_CHAT_ID and os.path.exists(CONTEST_BANNER)):
+            return
+        prev = await db.get_kv("contest_msg")
+        if prev and ":" in prev:
+            chat, mid = prev.rsplit(":", 1)
+            try:
+                await bot.delete_message(int(chat), int(mid))
+            except Exception:
+                pass          # уже удалён вручную / нет прав — не критично
+        try:
+            m = await bot.send_photo(int(RULES_CHAT_ID), FSInputFile(CONTEST_BANNER),
+                                     caption=CONTEST_CAPTION, parse_mode="HTML")
+            await db.set_kv("contest_msg", f"{int(RULES_CHAT_ID)}:{m.message_id}")
+        except Exception:
+            log.warning("Не удалось опубликовать баннер конкурса")
+
+    async def contest_poster():
+        """Публикация баннера конкурса по расписанию (по умолчанию 11:00 и 19:00)."""
+        if not RULES_CHAT_ID:
+            return
+        times = [t.strip() for t in CONTEST_TIMES.split(",") if t.strip()]
+        while True:
+            try:
+                now = datetime.now(KYIV)
+                slots = []
+                for t in times:
+                    hh, mm = map(int, t.split(":"))
+                    slots.append(now.replace(hour=hh, minute=mm, second=0, microsecond=0))
+                future = [s for s in slots if s > now]
+                nxt = min(future) if future else min(slots) + timedelta(days=1)
+                await asyncio.sleep(max(30, (nxt - now).total_seconds()))
+                await post_contest()
+            except Exception:
+                log.exception("Ошибка постинга баннера конкурса")
+                await asyncio.sleep(300)
+
     async def announce_winners(winners, start, end):
         medals = ["🥇", "🥈", "🥉"]
         lines = [f"🏆 <b>Самые активные за неделю</b> "
@@ -627,8 +672,14 @@ async def run(notify=None):
                          f"<i>({w['points']} сообщ., дней в чате: {w['days']})</i>")
         lines += ["", "Бонус уже на балансе — можно потратить в магазине.",
                   "Неделя началась заново. Считаются содержательные сообщения, флуд — нет 😉"]
+        text = "\n".join(lines)
+        img = award_image.render(winners, os.path.join("promo", "award_week.png"))
         try:
-            await bot.send_message(int(RULES_CHAT_ID), "\n".join(lines), parse_mode="HTML")
+            if img:   # баннер с никами победителей
+                await bot.send_photo(int(RULES_CHAT_ID), FSInputFile(img),
+                                     caption=text, parse_mode="HTML")
+            else:
+                await bot.send_message(int(RULES_CHAT_ID), text, parse_mode="HTML")
         except Exception:
             log.warning("Не удалось объявить победителей в чате")
         for w in winners:
@@ -763,10 +814,12 @@ async def run(notify=None):
     log.info("Guard-бот запущен. RULES_CHAT_ID=%r, ADMIN=%s, таймаут=%s c",
              RULES_CHAT_ID, GUARD_ADMIN_ID, RULES_TIMEOUT)
     awards = asyncio.create_task(weekly_awards())
+    contest = asyncio.create_task(contest_poster())
     try:
         await dp.start_polling(bot)
     finally:
         awards.cancel()
+        contest.cancel()
 
 
 if __name__ == "__main__":
