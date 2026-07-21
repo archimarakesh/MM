@@ -121,6 +121,10 @@ h1.page-title em{font-style:normal;color:inherit}
 .view{display:none;animation:viewIn .45s var(--ease)}
 .view.active{display:block}
 @keyframes viewIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.view.slide-left{animation:slideL .34s var(--ease)}
+.view.slide-right{animation:slideR .34s var(--ease)}
+@keyframes slideL{from{opacity:.35;transform:translateX(42px)}to{opacity:1;transform:none}}
+@keyframes slideR{from{opacity:.35;transform:translateX(-42px)}to{opacity:1;transform:none}}
 .reveal{opacity:0;transform:translateY(18px);
   transition:opacity .55s var(--ease),transform .55s var(--ease)}
 .reveal.in{opacity:1;transform:none}
@@ -999,6 +1003,47 @@ document.querySelectorAll('.sheet').forEach(sh => {
   sh.addEventListener('touchend', endDrag);
   sh.addEventListener('touchcancel', endDrag);
 });
+
+/* свайп влево/вправо — листание основных разделов */
+const SWIPE_VIEWS = ['shop', 'egrow', 'history', 'profile', 'support'];
+function swipeGo(v, dir) {
+  go(v);
+  const el = document.getElementById('view-' + v), cls = dir < 0 ? 'slide-left' : 'slide-right';
+  el.classList.remove('slide-left', 'slide-right');
+  void el.offsetWidth;                      // рефлоу — рестарт анимации
+  el.classList.add(cls);
+  el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
+}
+(function initSwipeNav() {
+  let sx = 0, sy = 0, tracking = false;
+  const scrollableX = node => {             // старт на горизонтально-прокручиваемом — не листаем
+    for (let n = node; n && n !== document.body; n = n.parentElement) {
+      if (n.scrollWidth > n.clientWidth + 4) {
+        const ox = getComputedStyle(n).overflowX;
+        if (ox === 'auto' || ox === 'scroll') return true;
+      }
+    }
+    return false;
+  };
+  document.addEventListener('touchstart', e => {
+    tracking = false;
+    if (e.touches.length !== 1) return;
+    if (document.querySelector('.sheet.open')) return;   // открыта шторка
+    if (scrollableX(e.target)) return;
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (!tracking) return; tracking = false;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.6) return;   // не горизонтальный жест
+    const cur = (document.querySelector('.view.active') || {}).id;
+    const i = SWIPE_VIEWS.indexOf(cur ? cur.replace('view-', '') : '');
+    if (i < 0) return;                       // topup/admin — вне листания
+    const ni = dx < 0 ? i + 1 : i - 1;
+    if (ni < 0 || ni >= SWIPE_VIEWS.length) return;
+    swipeGo(SWIPE_VIEWS[ni], dx < 0 ? -1 : 1);
+  }, { passive: true });
+})();
 
 /* ═══════════ Toast ═══════════ */
 let toastT;
