@@ -1015,34 +1015,44 @@ function swipeGo(v, dir) {
   el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
 }
 (function initSwipeNav() {
-  let sx = 0, sy = 0, tracking = false;
-  const scrollableX = node => {             // старт на горизонтально-прокручиваемом — не листаем
+  let sx = 0, sy = 0, active = false, scrollEl = null, scrollStart = 0;
+  const nearestScrollableX = node => {      // ближайший горизонтально-прокручиваемый предок
     for (let n = node; n && n !== document.body; n = n.parentElement) {
       if (n.scrollWidth > n.clientWidth + 4) {
         const ox = getComputedStyle(n).overflowX;
-        if (ox === 'auto' || ox === 'scroll') return true;
+        if (ox === 'auto' || ox === 'scroll') return n;
       }
     }
-    return false;
+    return null;
   };
-  document.addEventListener('touchstart', e => {
-    tracking = false;
-    if (e.touches.length !== 1) return;
-    if (document.querySelector('.sheet.open')) return;   // открыта шторка
-    if (scrollableX(e.target)) return;
-    sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
-  }, { passive: true });
-  document.addEventListener('touchend', e => {
-    if (!tracking) return; tracking = false;
-    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
-    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.6) return;   // не горизонтальный жест
+  const onDown = (x, y, target) => {
+    active = false;
+    if (document.querySelector('.sheet.open')) return;   // открыта шторка — не листаем
+    scrollEl = nearestScrollableX(target);
+    scrollStart = scrollEl ? scrollEl.scrollLeft : 0;
+    sx = x; sy = y; active = true;
+  };
+  const onUp = (x, y) => {
+    if (!active) return; active = false;
+    if (scrollEl && Math.abs(scrollEl.scrollLeft - scrollStart) > 4) return;  // элемент сам прокрутился
+    const dx = x - sx, dy = y - sy;
+    if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.2) return;       // не горизонтальный жест
     const cur = (document.querySelector('.view.active') || {}).id;
     const i = SWIPE_VIEWS.indexOf(cur ? cur.replace('view-', '') : '');
     if (i < 0) return;                       // topup/admin — вне листания
     const ni = dx < 0 ? i + 1 : i - 1;
     if (ni < 0 || ni >= SWIPE_VIEWS.length) return;
     swipeGo(SWIPE_VIEWS[ni], dx < 0 ? -1 : 1);
-  }, { passive: true });
+  };
+  if (window.PointerEvent) {
+    document.addEventListener('pointerdown', e => { if (e.isPrimary !== false) onDown(e.clientX, e.clientY, e.target); }, { passive: true });
+    document.addEventListener('pointerup', e => onUp(e.clientX, e.clientY), { passive: true });
+  } else {
+    document.addEventListener('touchstart', e => { if (e.touches.length === 1) onDown(e.touches[0].clientX, e.touches[0].clientY, e.target); }, { passive: true });
+    document.addEventListener('touchend', e => { const t = e.changedTouches[0]; onUp(t.clientX, t.clientY); }, { passive: true });
+    document.addEventListener('mousedown', e => onDown(e.clientX, e.clientY, e.target), { passive: true });
+    document.addEventListener('mouseup', e => onUp(e.clientX, e.clientY), { passive: true });
+  }
 })();
 
 /* ═══════════ Toast ═══════════ */
