@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import qrcode
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 
@@ -493,8 +493,23 @@ if BOT_TOKEN:
                                  parse_mode="HTML")
 
 
+# ── вебсокеты: мгновенные обновления вместо опроса ───────────────────────────
+WS_CLIENTS: dict[int, set] = {}
+
+
+async def ws_push(user_id: int):
+    """Сигнал открытому приложению обновиться (данные оно заберёт обычным запросом)."""
+    for ws in list(WS_CLIENTS.get(user_id, ())):
+        try:
+            await ws.send_json({"t": "sync"})
+        except Exception:
+            WS_CLIENTS.get(user_id, set()).discard(ws)
+
+
 async def notify(chat_id: int, text: str):
     """Уведомление в Telegram; ошибки не роняют API."""
+    if chat_id:
+        await ws_push(chat_id)   # заодно мгновенно обновляем открытое мини-приложение
     if not bot or not chat_id:
         return
     try:
@@ -621,6 +636,33 @@ async def _snap(uid: int) -> dict:
     snap["card_auto"] = paydome.enabled()
     snap["card_fee"] = CARD_FEE_PCT if paydome.enabled() else 0
     return snap
+
+
+@app.websocket("/ws")
+async def ws_endpoint(ws: WebSocket):
+    """Держим соединение с приложением; авторизация — тем же initData Telegram."""
+    await ws.accept()
+    try:
+        init_data = await asyncio.wait_for(ws.receive_text(), timeout=15)
+    except Exception:
+        await ws.close()
+        return
+    user = auth.validate(init_data, BOT_TOKEN)
+    if not user:
+        await ws.close(code=4401)
+        return
+    uid = int(user["id"])
+    WS_CLIENTS.setdefault(uid, set()).add(ws)
+    log.info("WS подключён: %s (всего %s)", uid, sum(len(s) for s in WS_CLIENTS.values()))
+    try:
+        while True:
+            await ws.receive_text()          # пинги клиента держат соединение живым
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        WS_CLIENTS.get(uid, set()).discard(ws)
+        if not WS_CLIENTS.get(uid):
+            WS_CLIENTS.pop(uid, None)
 
 
 @app.get("/")

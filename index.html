@@ -953,11 +953,34 @@ async function adminSync() {
   } catch (e) { /* тихо: следующая попытка через 5 сек */ }
   finally { adminSyncing = false; }
 }
+/* вебсокет: сервер сам сообщает, когда данные изменились — опрос больше не нужен */
+let ws = null, wsRetry = 0, wsPing = null;
+function connectWS() {
+  if (!tg?.initData || location.protocol === 'file:' || ws) return;
+  let sock;
+  try { sock = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws'); }
+  catch (e) { return scheduleWS(); }
+  ws = sock;
+  sock.onopen = () => {
+    wsRetry = 0;
+    sock.send(tg.initData);                       // рукопожатие: та же подпись Telegram
+    clearInterval(wsPing);
+    wsPing = setInterval(() => { try { sock.send('p'); } catch (e) {} }, 25000);  // держим канал живым
+  };
+  sock.onmessage = () => { softSync(true); adminSync(); };
+  sock.onclose = () => { if (ws === sock) ws = null; clearInterval(wsPing); scheduleWS(); };
+  sock.onerror = () => { try { sock.close(); } catch (e) {} };
+}
+function scheduleWS() {
+  wsRetry = Math.min(wsRetry + 1, 6);
+  setTimeout(connectWS, 1000 * wsRetry);          // переподключение с нарастающей паузой
+}
 function startAutoSync() {
   clearInterval(syncTimer);
   const tick = () => { softSync(true); adminSync(); };
-  syncTimer = setInterval(tick, 5000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+  syncTimer = setInterval(tick, 20000);           // подстраховка, если вебсокет недоступен
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); connectWS(); } });
+  connectWS();
 }
 const fmt = n => n.toLocaleString('ru-RU');
 /* HTML-escape пользовательских строк (защита от XSS в админке) */
@@ -2972,7 +2995,7 @@ function revealNow(root) {
 }
 
 /* ═══════════ Старт ═══════════ */
-const BUILD = 'v9';   // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
+const BUILD = 'v10';  // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
 document.getElementById('buildTag').textContent = BUILD;
 renderGoods(); renderOrders(); renderSupport(); renderFaq();
 initProfile(); syncBalance(); syncSettings(); initLock();
