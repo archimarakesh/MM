@@ -208,6 +208,22 @@ async def init():
                 status     INT NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS shares_user_idx ON shares(user_id);
             CREATE INDEX IF NOT EXISTS shares_plan_idx ON shares(plan_id);
+            CREATE TABLE IF NOT EXISTS chat_activity(
+                user_id BIGINT NOT NULL,
+                day     DATE   NOT NULL,
+                points  INT    NOT NULL DEFAULT 0,
+                msgs    INT    NOT NULL DEFAULT 0,
+                strikes INT    NOT NULL DEFAULT 0,
+                name    TEXT,
+                PRIMARY KEY(user_id, day));
+            CREATE TABLE IF NOT EXISTS activity_awards(
+                week_start DATE   NOT NULL,
+                place      INT    NOT NULL,
+                user_id    BIGINT NOT NULL,
+                amount     BIGINT NOT NULL,
+                score      INT    NOT NULL DEFAULT 0,
+                created    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY(week_start, place));
             CREATE TABLE IF NOT EXISTS grows(
                 id         BIGSERIAL PRIMARY KEY,
                 user_id    BIGINT NOT NULL,
@@ -1481,6 +1497,86 @@ async def advance_grow_stages() -> list:
                 if finished:
                     notes += await _payout_plan(c, p["id"])
     return notes
+
+
+# ── активность в чате (еженедельные награды) ─────────────────────────────────
+ACTIVITY_DAY_CAP = 25    # потолок очков в сутки — чтобы нельзя было нафлудить приз
+ACTIVITY_DAY_BONUS = 8   # премия за каждый день, когда человек был активен
+ACTIVITY_STRIKE_FINE = 15  # штраф за нарушение (предупреждение от модератора)
+
+
+async def bump_activity(user_id: int, name: str, points: int = 1):
+    """Плюс очко за содержательное сообщение, но не выше дневного потолка."""
+    async with _pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO chat_activity(user_id, day, points, msgs, name)
+            VALUES($1, CURRENT_DATE, LEAST($3, $4), 1, $2)
+            ON CONFLICT (user_id, day) DO UPDATE
+            SET points = LEAST(chat_activity.points + $3, $4),
+                msgs   = chat_activity.msgs + 1,
+                name   = COALESCE(EXCLUDED.name, chat_activity.name)
+        """, user_id, name, points, ACTIVITY_DAY_CAP)
+
+
+async def bump_strike(user_id: int, name: str = ""):
+    """Нарушение — минус к недельному счёту, чтобы спам не приносил призов."""
+    async with _pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO chat_activity(user_id, day, strikes, name)
+            VALUES($1, CURRENT_DATE, 1, $2)
+            ON CONFLICT (user_id, day) DO UPDATE SET strikes = chat_activity.strikes + 1
+        """, user_id, name or None)
+
+
+_TOP_SQL = """
+    SELECT user_id, MAX(name) AS name,
+           SUM(points) AS pts, COUNT(DISTINCT day) AS days, SUM(strikes) AS strikes,
+           SUM(points) + $3 * COUNT(DISTINCT day) - $4 * SUM(strikes) AS score
+    FROM chat_activity
+    WHERE day >= $1 AND day <= $2
+    GROUP BY user_id
+    HAVING SUM(points) > 0
+    ORDER BY score DESC, pts DESC
+    LIMIT $5
+"""
+
+
+async def top_activity(week_start, week_end, limit: int = 3) -> list:
+    async with _pool.acquire() as c:
+        rows = await c.fetch(_TOP_SQL, week_start, week_end,
+                             ACTIVITY_DAY_BONUS, ACTIVITY_STRIKE_FINE, limit)
+    return [{"user_id": r["user_id"], "name": r["name"] or "участник",
+             "points": r["pts"], "days": r["days"], "score": int(r["score"])}
+            for r in rows if r["score"] > 0]
+
+
+async def award_activity_week(week_start, week_end, prizes: list) -> list:
+    """Начисляет призы топ-участникам (в locked — как бонус, без вывода).
+    Идемпотентно: за одну неделю награждаем один раз."""
+    async with _pool.acquire() as c, c.transaction():
+        if await c.fetchval("SELECT 1 FROM activity_awards WHERE week_start=$1 LIMIT 1", week_start):
+            return []
+        rows = await c.fetch(_TOP_SQL, week_start, week_end,
+                             ACTIVITY_DAY_BONUS, ACTIVITY_STRIKE_FINE, len(prizes))
+        out = []
+        for i, r in enumerate(rows):
+            if r["score"] <= 0:
+                continue
+            amount = prizes[i]
+            uid = r["user_id"]
+            # человек мог ещё не открывать приложение — заводим ему счёт
+            await c.execute("INSERT INTO users(tg_id, name) VALUES($1,$2) "
+                            "ON CONFLICT (tg_id) DO NOTHING", uid, r["name"])
+            await c.execute("UPDATE users SET balance=balance+$1, locked=locked+$1 "
+                            "WHERE tg_id=$2", amount, uid)
+            await c.execute("""
+                INSERT INTO activity_awards(week_start, place, user_id, amount, score)
+                VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING
+            """, week_start, i + 1, uid, amount, int(r["score"]))
+            out.append({"place": i + 1, "user_id": uid, "name": r["name"] or "участник",
+                        "amount": amount, "score": int(r["score"]),
+                        "points": r["pts"], "days": r["days"]})
+        return out
 
 
 # ── перенос аккаунта ─────────────────────────────────────────────────────────

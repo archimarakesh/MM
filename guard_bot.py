@@ -19,6 +19,13 @@ import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import db
+
+KYIV = ZoneInfo("Europe/Kyiv")
+ACTIVITY_PRIZES = [400, 300, 200]   # призы за 1-3 место, ₴ на баланс (бонусные, как приветственные)
+ACTIVITY_HOUR = 12                  # понедельник, по Киеву
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("guard")
@@ -128,8 +135,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")
 
 
-async def run():
-    """Запуск guard-бота (polling). No-op, если GUARD_BOT_TOKEN не задан."""
+async def run(notify=None):
+    """Запуск guard-бота (polling). No-op, если GUARD_BOT_TOKEN не задан.
+    notify — функция отправки личного сообщения через основной бот (для победителей)."""
     if not GUARD_BOT_TOKEN:
         log.info("GUARD_BOT_TOKEN не задан — guard-бот выключен")
         return
@@ -546,6 +554,10 @@ async def run():
         _warns[key] = lst
         n = len(lst)
         uid, name = message.from_user.id, target_name
+        try:
+            await db.bump_strike(uid, name)   # нарушение бьёт по недельному рейтингу активности
+        except Exception:
+            log.warning("Не удалось записать нарушение в активность")
         if n >= WARN_MUTE_AT:
             _warns[key] = []
             until = datetime.now(timezone.utc) + timedelta(minutes=MUTE_MINUTES)
@@ -564,6 +576,96 @@ async def run():
             await log_action("⚠️", f"Предупреждение {n}/{WARN_MUTE_AT} (авто)", message.chat,
                              "автомодерация", name, uid, reason)
 
+    @dp.message(Command("top"))
+    async def cmd_top(message: Message):
+        """Текущий рейтинг активности за идущую неделю."""
+        if RULES_CHAT_ID and str(message.chat.id) != str(RULES_CHAT_ID):
+            return
+        today = datetime.now(KYIV).date()
+        start = today - timedelta(days=today.weekday())     # понедельник этой недели
+        try:
+            rows = await db.top_activity(start, today, 10)
+        except Exception:
+            return
+        if not rows:
+            await message.answer("На этой неделе очков пока никто не набрал.")
+            return
+        medals = ["🥇", "🥈", "🥉"]
+        lines = [f"🏆 <b>Топ активных за неделю</b> (с {start.strftime('%d.%m')})", ""]
+        for i, r in enumerate(rows):
+            mark = medals[i] if i < 3 else f"{i + 1}."
+            prize = f" · <b>{ACTIVITY_PRIZES[i]} ₴</b>" if i < len(ACTIVITY_PRIZES) else ""
+            lines.append(f"{mark} {_esc(r['name'])} — {r['score']} очк.{prize}")
+        lines += ["", "Награждение — в понедельник в 12:00. Считаются содержательные "
+                      "сообщения; флуд и нарушения снижают счёт."]
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    _last_pt = {}                                          # анти-очередь по очкам
+    WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ]{3,}")   # хотя бы одно живое слово
+
+    async def track_activity(uid: int, name: str, message):
+        """Очко за содержательное сообщение. Короткие реплики, команды, эмодзи,
+        стикеры и очереди подряд не считаются — иначе приз можно нафлудить."""
+        text = (message.text or message.caption or "").strip()
+        if len(text) < 4 or text.startswith("/") or not WORD_RE.search(text):
+            return
+        if time.time() - _last_pt.get(uid, 0) < 20:        # не чаще очка в 20 секунд
+            return
+        _last_pt[uid] = time.time()
+        try:
+            await db.bump_activity(uid, name)
+        except Exception:
+            log.warning("Не удалось записать активность %s", uid)
+
+    async def announce_winners(winners, start, end):
+        medals = ["🥇", "🥈", "🥉"]
+        lines = [f"🏆 <b>Самые активные за неделю</b> "
+                 f"({start.strftime('%d.%m')}–{end.strftime('%d.%m')})", ""]
+        for w in winners:
+            lines.append(f"{medals[w['place'] - 1]} <b>{_esc(w['name'])}</b> — "
+                         f"<b>{w['amount']} ₴</b> на баланс "
+                         f"<i>({w['points']} сообщ., дней в чате: {w['days']})</i>")
+        lines += ["", "Бонус уже на балансе — можно потратить в магазине.",
+                  "Неделя началась заново. Считаются содержательные сообщения, флуд — нет 😉"]
+        try:
+            await bot.send_message(int(RULES_CHAT_ID), "\n".join(lines), parse_mode="HTML")
+        except Exception:
+            log.warning("Не удалось объявить победителей в чате")
+        for w in winners:
+            if notify:
+                try:
+                    await notify(w["user_id"],
+                                 f"🏆 Вы вошли в топ-{w['place']} самых активных в чате за неделю!\n"
+                                 f"Начислено <b>{w['amount']} ₴</b> на баланс.")
+                except Exception:
+                    pass
+
+    async def weekly_awards():
+        """Каждый понедельник в 12:00 по Киеву награждаем тройку самых активных."""
+        if not RULES_CHAT_ID:
+            log.info("RULES_CHAT_ID не задан — награды за активность выключены")
+            return
+        while True:
+            try:
+                now = datetime.now(KYIV)
+                nxt = now.replace(hour=ACTIVITY_HOUR, minute=0, second=0, microsecond=0)
+                days = (7 - now.weekday()) % 7          # weekday(): понедельник = 0
+                if days == 0 and nxt <= now:
+                    days = 7
+                nxt += timedelta(days=days)
+                await asyncio.sleep(max(30, (nxt - now).total_seconds()))
+                end = nxt.date() - timedelta(days=1)    # вчера — воскресенье
+                start = end - timedelta(days=6)         # прошлый понедельник
+                winners = await db.award_activity_week(start, end, ACTIVITY_PRIZES)
+                if winners:
+                    await announce_winners(winners, start, end)
+                    log.info("Награды за активность выданы: %s", len(winners))
+                else:
+                    log.info("Награды за активность: победителей нет (или уже выданы)")
+            except Exception:
+                log.exception("Ошибка наград за активность")
+                await asyncio.sleep(300)
+
     @dp.message()
     async def moderate(message: Message):
         if message.chat.type == "private":
@@ -577,6 +679,7 @@ async def run():
             return
         key = (message.chat.id, uid)
         name = message.from_user.full_name
+        await track_activity(uid, name, message)   # рейтинг активности за неделю
 
         # спам стикерами: до 3 подряд, 4-й — нарушение
         if message.sticker:
@@ -659,7 +762,11 @@ async def run():
 
     log.info("Guard-бот запущен. RULES_CHAT_ID=%r, ADMIN=%s, таймаут=%s c",
              RULES_CHAT_ID, GUARD_ADMIN_ID, RULES_TIMEOUT)
-    await dp.start_polling(bot)
+    awards = asyncio.create_task(weekly_awards())
+    try:
+        await dp.start_polling(bot)
+    finally:
+        awards.cancel()
 
 
 if __name__ == "__main__":

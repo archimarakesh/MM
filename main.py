@@ -550,7 +550,7 @@ async def lifespan(_: FastAPI):
     tracker = asyncio.create_task(np_tracker())
     harvester = asyncio.create_task(grow_harvester())
     poster = asyncio.create_task(promo_poster())
-    guard = asyncio.create_task(guard_bot.run())  # отдельный бот-охранник чата, свой токен
+    guard = asyncio.create_task(guard_bot.run(notify))  # бот-охранник чата, свой токен
     card_task = asyncio.create_task(card_checker())
     yield
     checker.cancel()
