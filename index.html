@@ -917,6 +917,8 @@ function applySnapshot(d) {
     document.getElementById('adminRow').style.display = d.is_admin ? '' : 'none';
   }
   save(); syncBalance(); renderOrders(); renderGoods(); syncSettings();
+  // открытая карточка заказа тоже должна показать свежий статус/ТТН
+  if (document.getElementById('sheet-order').classList.contains('open')) renderOrderBody(curOrderIdx);
 }
 async function serverSync() {
   if (!tg?.initData || location.protocol === 'file:') return;
@@ -927,6 +929,19 @@ async function serverSync() {
     applySnapshot(d);
   } catch (e) { API.ok = false; /* сервера нет — остаёмся в демо-режиме */ }
   configureLock();  // настроить экран блокировки по данным с сервера (или локально)
+}
+/* фоновое обновление: статусы заказов меняет админ, приложение должно их подхватывать само */
+let syncing = false, lastSync = 0, syncTimer = null;
+async function softSync(force) {
+  if (syncing || document.hidden) return;
+  if (!force && Date.now() - lastSync < 5000) return;   // не чаще раза в 5 сек
+  syncing = true; lastSync = Date.now();
+  try { await serverSync(); } finally { syncing = false; }
+}
+function startAutoSync() {
+  clearInterval(syncTimer);
+  syncTimer = setInterval(() => softSync(true), 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) softSync(true); });
 }
 const fmt = n => n.toLocaleString('ru-RU');
 /* HTML-escape пользовательских строк (защита от XSS в админке) */
@@ -946,7 +961,7 @@ function go(v) {
   });
   el.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.v === v));
-  if (v === 'history') renderOrders();
+  if (v === 'history') { renderOrders(); softSync(); }   // подтянуть свежие статусы заказов
   if (v === 'topup') renderTopup();
   if (v === 'egrow') renderEgrow();
   window.scrollTo({ top: 0 });
@@ -1347,9 +1362,10 @@ function renderOrders() {
   observeReveals();
 }
 let curOrderIdx = 0;
-function openOrder(i) {
+function renderOrderBody(i) {
   curOrderIdx = i;
   const o = S.orders[i];
+  if (!o) return;
   document.getElementById('orderBody').innerHTML = `
     <h2>${o.id}</h2>
     <p class="sheet-sub">${o.product} · ${o.grams} г · ${o.date} · <b style="color:var(--gold-soft)">${fmt(o.total)} ₴</b></p>
@@ -1388,8 +1404,8 @@ function openOrder(i) {
           ${[1, 2, 3, 4, 5].map(n => `<span onclick="rateOrder(${n})" style="color:${(o.stars || 0) >= n ? 'var(--gold)' : 'rgba(255,255,255,.18)'}">★</span>`).join('')}
         </div>
       </div>` : ''}`;
-  openSheet('order');
 }
+function openOrder(i) { renderOrderBody(i); openSheet('order'); }
 async function rateOrder(n) {
   const o = S.orders[curOrderIdx];
   haptic('medium');
@@ -2940,12 +2956,13 @@ function revealNow(root) {
 }
 
 /* ═══════════ Старт ═══════════ */
-const BUILD = 'v7';   // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
+const BUILD = 'v8';   // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
 document.getElementById('buildTag').textContent = BUILD;
 renderGoods(); renderOrders(); renderSupport(); renderFaq();
 initProfile(); syncBalance(); syncSettings(); initLock();
 observeReveals();
 serverSync();
+startAutoSync();
 </script>
 </body>
 </html>
