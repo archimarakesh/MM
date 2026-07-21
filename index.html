@@ -939,13 +939,14 @@ const STATUSES = ['Оплачен', 'В работе', 'В пути', 'Полу�
 function go(v) {
   haptic('light');
   document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
-  document.getElementById('view-' + v).classList.add('active');
+  const el = document.getElementById('view-' + v);
+  el.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.v === v));
   if (v === 'history') renderOrders();
   if (v === 'topup') renderTopup();
   if (v === 'egrow') renderEgrow();
   window.scrollTo({ top: 0 });
-  requestAnimationFrame(observeReveals);
+  revealNow(el);   // синхронно — иначе кадр с opacity:0 успевает отрисоваться и раздел мигает
 }
 
 /* ═══════════ Шторки ═══════════ */
@@ -2924,9 +2925,18 @@ const io = new IntersectionObserver(es => es.forEach(e => {
 function observeReveals() {
   document.querySelectorAll('.reveal:not(.in)').forEach(el => io.observe(el));
 }
+function revealNow(root) {
+  // то, что уже в кадре — показываем сразу (без мигания при смене раздела),
+  // остальное оставляем на плавное проявление при скролле
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  root.querySelectorAll('.reveal:not(.in)').forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (r.top < vh && r.bottom > 0) el.classList.add('in'); else io.observe(el);
+  });
+}
 
 /* ═══════════ Старт ═══════════ */
-const BUILD = 'swipe-4 · 20.07';   // метка сборки — видно в «Поддержке», чтобы ловить старый кэш
+const BUILD = 'swipe-5 · 20.07';   // метка сборки — видно в «Поддержке», чтобы ловить старый кэш
 document.getElementById('buildTag').textContent = BUILD;
 renderGoods(); renderOrders(); renderSupport(); renderFaq();
 initProfile(); syncBalance(); syncSettings(); initLock();
