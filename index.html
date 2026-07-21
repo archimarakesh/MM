@@ -682,7 +682,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div><h3 style="color:var(--danger)">Удалить аккаунт</h3><p>Баланс, заказы и история — безвозвратно</p></div>
     <div class="arr" style="margin-left:auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.05);color:var(--muted)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></div>
   </div>
-  <p class="note">Magic Market · сборка <span id="buildTag">—</span></p>
+  <p class="note">Magic Market · <span id="buildTag">—</span></p>
 </div>
 
 <div class="sheet" id="sheet-delacc">
@@ -2940,7 +2940,7 @@ function revealNow(root) {
 }
 
 /* ═══════════ Старт ═══════════ */
-const BUILD = 'swipe-6 · 20.07';   // метка сборки — видно в «Настройках», чтобы ловить старый кэш
+const BUILD = 'v7';   // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
 document.getElementById('buildTag').textContent = BUILD;
 renderGoods(); renderOrders(); renderSupport(); renderFaq();
 initProfile(); syncBalance(); syncSettings(); initLock();
