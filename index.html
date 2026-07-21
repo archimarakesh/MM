@@ -118,7 +118,7 @@ h1.page-title em{font-style:normal;color:inherit}
 .btn[disabled]{opacity:.4;pointer-events:none}
 
 /* ── страницы ── */
-.view{display:none;animation:viewIn .45s var(--ease)}
+.view{display:none;animation:viewIn .45s var(--ease);touch-action:pan-y}
 .view.active{display:block}
 @keyframes viewIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 .view.slide-left{animation:slideL .34s var(--ease)}
@@ -1014,7 +1014,7 @@ function swipeGo(v, dir) {
   go(v);
 }
 (function initSwipeNav() {
-  let sx = 0, sy = 0, active = false, locked = null, scrollEl = null;
+  let sx = 0, sy = 0, lastX = 0, active = false, locked = null, scrollEl = null;
   const nearestScrollableX = node => {      // ближайший горизонтально-прокручиваемый предок
     for (let n = node; n && n !== document.body; n = n.parentElement) {
       if (n.scrollWidth > n.clientWidth + 4) {
@@ -1028,7 +1028,7 @@ function swipeGo(v, dir) {
     active = false; locked = null;
     if (document.querySelector('.sheet.open')) return;   // открыта шторка — не листаем
     scrollEl = nearestScrollableX(target);
-    sx = x; sy = y; active = true;
+    sx = lastX = x; sy = y; active = true;
   };
   const nav = dx => {
     const cur = (document.querySelector('.view.active') || {}).id;
@@ -1046,11 +1046,12 @@ function swipeGo(v, dir) {
       locked = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
     }
     if (locked !== 'h') return;                           // вертикаль — обычный скролл
-    if (scrollEl) {                                       // карусель может прокрутиться сама — отдаём ей
-      const maxL = scrollEl.scrollWidth - scrollEl.clientWidth;
-      if (dx < 0 ? scrollEl.scrollLeft < maxL - 1 : scrollEl.scrollLeft > 1) return;
-    }
     if (e && e.cancelable) e.preventDefault();            // забираем жест у вебвью
+    if (scrollEl) {                 // жест начат на ленте фото — крутим её сами, страницы не листаем
+      scrollEl.scrollLeft -= x - lastX;                   // (touch-action:pan-y не даёт браузеру сделать это)
+      lastX = x;
+      return;
+    }
     // листаем прямо в движении: Android присылает touchcancel вместо touchend,
     // поэтому ждать конца жеста нельзя
     if (Math.abs(dx) >= 45) { active = false; nav(dx); }
