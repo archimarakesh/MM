@@ -1007,12 +1007,11 @@ document.querySelectorAll('.sheet').forEach(sh => {
 /* свайп влево/вправо — листание основных разделов */
 const SWIPE_VIEWS = ['shop', 'egrow', 'history', 'profile', 'support'];
 function swipeGo(v, dir) {
-  go(v);
   const el = document.getElementById('view-' + v), cls = dir < 0 ? 'slide-left' : 'slide-right';
   el.classList.remove('slide-left', 'slide-right');
-  void el.offsetWidth;                      // рефлоу — рестарт анимации
-  el.classList.add(cls);
+  el.classList.add(cls);                     // класс ДО показа — играет одна анимация (слайд), без мерцания
   el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
+  go(v);
 }
 (function initSwipeNav() {
   let sx = 0, sy = 0, active = false, locked = null, scrollEl = null, scrollStart = 0;
@@ -1036,8 +1035,10 @@ function swipeGo(v, dir) {
     if (!active) return;
     const dx = x - sx, dy = y - sy;
     if (locked === null) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;  // ещё мало — ждём направление
-      locked = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+      // решаем рано (4px): Android определяет «это скролл» на первом же движении,
+      // и после него preventDefault уже не примут (e.cancelable станет false)
+      if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      locked = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
     }
     // горизонтальный жест вне карусели — забираем себе, чтобы вебвью не «угнал» его
     if (locked === 'h' && !scrollEl && e && e.cancelable) e.preventDefault();
