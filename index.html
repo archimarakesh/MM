@@ -1014,7 +1014,7 @@ function swipeGo(v, dir) {
   go(v);
 }
 (function initSwipeNav() {
-  let sx = 0, sy = 0, active = false, locked = null, scrollEl = null, scrollStart = 0;
+  let sx = 0, sy = 0, active = false, locked = null, scrollEl = null;
   const nearestScrollableX = node => {      // ближайший горизонтально-прокручиваемый предок
     for (let n = node; n && n !== document.body; n = n.parentElement) {
       if (n.scrollWidth > n.clientWidth + 4) {
@@ -1028,27 +1028,9 @@ function swipeGo(v, dir) {
     active = false; locked = null;
     if (document.querySelector('.sheet.open')) return;   // открыта шторка — не листаем
     scrollEl = nearestScrollableX(target);
-    scrollStart = scrollEl ? scrollEl.scrollLeft : 0;
     sx = x; sy = y; active = true;
   };
-  const move = (x, y, e) => {
-    if (!active) return;
-    const dx = x - sx, dy = y - sy;
-    if (locked === null) {
-      // решаем рано (4px): Android определяет «это скролл» на первом же движении,
-      // и после него preventDefault уже не примут (e.cancelable станет false)
-      if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
-      locked = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
-    }
-    // горизонтальный жест вне карусели — забираем себе, чтобы вебвью не «угнал» его
-    if (locked === 'h' && !scrollEl && e && e.cancelable) e.preventDefault();
-  };
-  const end = (x, y) => {
-    if (!active) return; active = false;
-    if (locked !== 'h') return;                                              // вертикаль — это скролл
-    if (scrollEl && Math.abs(scrollEl.scrollLeft - scrollStart) > 4) return; // карусель сама прокрутилась
-    const dx = x - sx;
-    if (Math.abs(dx) < 45) return;
+  const nav = dx => {
     const cur = (document.querySelector('.view.active') || {}).id;
     const i = SWIPE_VIEWS.indexOf(cur ? cur.replace('view-', '') : '');
     if (i < 0) return;                       // topup/admin — вне листания
@@ -1056,13 +1038,32 @@ function swipeGo(v, dir) {
     if (ni < 0 || ni >= SWIPE_VIEWS.length) return;
     swipeGo(SWIPE_VIEWS[ni], dx < 0 ? -1 : 1);
   };
+  const move = (x, y, e) => {
+    if (!active) return;
+    const dx = x - sx, dy = y - sy;
+    if (locked === null) {
+      if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;   // решаем рано, до вердикта браузера
+      locked = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+    }
+    if (locked !== 'h') return;                           // вертикаль — обычный скролл
+    if (scrollEl) {                                       // карусель может прокрутиться сама — отдаём ей
+      const maxL = scrollEl.scrollWidth - scrollEl.clientWidth;
+      if (dx < 0 ? scrollEl.scrollLeft < maxL - 1 : scrollEl.scrollLeft > 1) return;
+    }
+    if (e && e.cancelable) e.preventDefault();            // забираем жест у вебвью
+    // листаем прямо в движении: Android присылает touchcancel вместо touchend,
+    // поэтому ждать конца жеста нельзя
+    if (Math.abs(dx) >= 45) { active = false; nav(dx); }
+  };
+  const end = () => { active = false; locked = null; };
   document.addEventListener('touchstart', e => { if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY, e.target); }, { passive: true });
   document.addEventListener('touchmove', e => { if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY, e); }, { passive: false });
-  document.addEventListener('touchend', e => { const t = e.changedTouches[0]; end(t.clientX, t.clientY); }, { passive: true });
+  document.addEventListener('touchend', end, { passive: true });
+  document.addEventListener('touchcancel', end, { passive: true });
   let mdown = false;
   document.addEventListener('mousedown', e => { mdown = true; start(e.clientX, e.clientY, e.target); }, { passive: true });
   document.addEventListener('mousemove', e => { if (mdown) move(e.clientX, e.clientY, null); }, { passive: true });
-  document.addEventListener('mouseup', e => { if (mdown) { mdown = false; end(e.clientX, e.clientY); } }, { passive: true });
+  document.addEventListener('mouseup', () => { mdown = false; end(); }, { passive: true });
 })();
 
 /* ═══════════ Toast ═══════════ */
