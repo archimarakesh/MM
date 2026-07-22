@@ -1750,10 +1750,20 @@ function cardBlock() {
 /* просмотрщик квитанций */
 function openViewer(src) {
   if (!src) return;
+  src = String(src);
+  // только наши пути (/photo/…) или data-URL разрешённых типов
+  const okData = /^data:(image\/(jpeg|png|webp)|application\/pdf);base64,[A-Za-z0-9+/=\s]+$/.test(src);
+  const okPath = /^\/[\w./?=&-]*$/.test(src);
+  if (!okData && !okPath) return toast('Файл не распознан');
   const b = document.getElementById('viewerBody');
-  b.innerHTML = src.startsWith('data:application/pdf')
-    ? `<iframe src="${src}" style="width:92vw;height:80vh;border:none;border-radius:12px;background:#fff"></iframe>`
-    : `<img src="${src}" style="max-width:92vw;max-height:82vh;border-radius:12px">`;
+  b.innerHTML = '';
+  const pdf = src.startsWith('data:application/pdf');
+  const el = document.createElement(pdf ? 'iframe' : 'img');
+  el.style.cssText = pdf
+    ? 'width:92vw;height:80vh;border:none;border-radius:12px;background:#fff'
+    : 'max-width:92vw;max-height:82vh;border-radius:12px';
+  el.src = src;              // свойство, а не HTML — атрибут подставить нельзя
+  b.appendChild(el);
   document.getElementById('viewer').style.display = 'flex';
   haptic('light');
 }
@@ -1902,8 +1912,12 @@ function initProfile() {
   document.getElementById('profName').textContent = name;
   document.getElementById('profId').textContent = 'ID ' + id + (tgUser?.username ? ' · @' + tgUser.username : '');
   const av = document.getElementById('avatar');
-  if (tgUser?.photo_url) av.innerHTML = `<img src="${tgUser.photo_url}" alt="">`;
-  else av.textContent = (name[0] || 'M').toUpperCase();
+  if (tgUser?.photo_url) {
+    av.innerHTML = '';
+    const img = document.createElement('img');   // через свойство, без склейки HTML
+    img.alt = ''; img.src = tgUser.photo_url;
+    av.appendChild(img);
+  } else av.textContent = (name[0] || 'M').toUpperCase();
   document.getElementById('refLink').textContent = refUrl(id);
 }
 const refUrl = id => `t.me/Magic_Marketplace_bot?start=ref_${id}`;
