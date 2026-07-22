@@ -1073,6 +1073,19 @@ async def admin_promos() -> dict:
 
 
 # ── серверный пин-код ────────────────────────────────────────────────────────
+async def pin_state(tg_id: int) -> dict:
+    """Состояние аккаунта для казино: есть ли человек в магазине и стоит ли пин."""
+    async with _pool.acquire() as c:
+        u = await c.fetchrow(
+            "SELECT pin_hash, pin_locked_until FROM users WHERE tg_id=$1", tg_id)
+    if not u:
+        return {"exists": False, "has_pin": False, "locked_until": None}
+    locked = u["pin_locked_until"]
+    now = datetime.now(timezone.utc)
+    return {"exists": True, "has_pin": bool(u["pin_hash"]),
+            "locked_until": locked.isoformat() if locked and locked > now else None}
+
+
 async def verify_pin(tg_id: int, pin: str) -> dict:
     """Проверка пина с серверным счётчиком попыток и часовой блокировкой."""
     async with _pool.acquire() as c, c.transaction():

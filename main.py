@@ -1253,6 +1253,50 @@ async def api_wallet_credit(request: Request):
     return await _wallet_move(request, 1, "credit")
 
 
+# ── пин для казино: вход в Magic Casino по пину магазина ────────────────────
+@app.post("/api/wallet/pin_state")
+async def api_wallet_pin_state(request: Request):
+    """Есть ли аккаунт и пин — казино решает, показывать вход или регистрацию."""
+    b = await request.json()
+    _wallet_auth(b)
+    uid = pint(b.get("user_id"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    return await db.pin_state(uid)
+
+
+@app.post("/api/wallet/pin_verify")
+async def api_wallet_pin_verify(request: Request):
+    """Проверка пина из казино. Счётчик попыток общий с магазином."""
+    b = await request.json()
+    _wallet_auth(b)
+    uid = pint(b.get("user_id"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    if not rate_limit(f"pin:{uid}", 12, 300):
+        raise HTTPException(429, "Слишком много попыток — подождите")
+    return await db.verify_pin(uid, str(b.get("pin", "")))
+
+
+@app.post("/api/wallet/pin_set")
+async def api_wallet_pin_set(request: Request):
+    """Регистрация из казино: создаём аккаунт магазина (если его нет) и ставим пин.
+    Если пин уже стоит, без старого пина set_pin откажет — чужой пин не перезапишешь."""
+    b = await request.json()
+    _wallet_auth(b)
+    uid = pint(b.get("user_id"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    if not rate_limit(f"pinset:{uid}", 6, 300):
+        raise HTTPException(429, "Слишком много попыток — подождите")
+    await db.upsert_user(uid, str(b.get("name") or f"user{uid}")[:64],
+                         (str(b.get("username") or "").strip() or None))
+    try:
+        return await db.set_pin(uid, str(b.get("pin", "")), str(b.get("old", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/np/cities")
 async def api_np_cities(request: Request):
     """Поиск населённых пунктов в справочнике НП (Address.searchSettlements)."""
