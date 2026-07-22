@@ -44,10 +44,16 @@ async def get_card(amount_uah: int) -> dict:
             if r.status != 200:
                 raise ValueError(f"PayDome GetCard {r.status}: {(await r.text())[:120]}")
             d = await r.json()
+    raw = d.get("amount")
+    # видно, уникализирует ли сервис сумму копейками: если raw дробное, а мы округляем —
+    # клиент переведёт не ту сумму и платёж не распознается (номер карты не логируем)
+    log.info("PayDome GetCard: отправили %s, вернулось amount=%r (%s), к оплате %s, payment=%s",
+             amount_uah * UNIT, raw, type(raw).__name__, round((raw or 0) / UNIT),
+             d.get("paymentId"))
     return {
         "card": d.get("card"),
         "payment_id": d.get("paymentId"),
-        "pay_uah": round((d.get("amount") or 0) / UNIT),   # сколько показать к оплате
+        "pay_uah": round((raw or 0) / UNIT),   # сколько показать к оплате
     }
 
 
