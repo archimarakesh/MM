@@ -513,7 +513,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
       </div>
       <h1 class="page-title" style="margin:0;font-size:22px">Пополнение баланса</h1>
     </div>
-    <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="500"></div>
+    <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="200"></div>
     <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
     <div id="tuBody"></div>
     <div class="section-head"><h2>Промокод</h2><span>🎟</span></div>
@@ -1529,6 +1529,10 @@ function tuOptions() {
   return o;
 }
 async function renderTopup() {
+  // без суммы карта не показывается (у неё минимум) — подставляем его сразу,
+  // иначе пользователь видит неполный список способов и не понимает почему
+  const sum = document.getElementById('tuSum');
+  if (!sum.value) sum.value = CARD_MIN;
   renderTopupChips();
   renderTuBody();
   renderPayHistory();
@@ -3002,7 +3006,7 @@ function revealNow(root) {
 }
 
 /* ═══════════ Старт ═══════════ */
-const BUILD = 'v10';  // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
+const BUILD = 'v11';  // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
 document.getElementById('buildTag').textContent = BUILD;
 renderGoods(); renderOrders(); renderSupport(); renderFaq();
 initProfile(); syncBalance(); syncSettings(); initLock();
