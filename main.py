@@ -967,6 +967,10 @@ async def api_card_cancel(request: Request):
 @app.post("/api/paydome/webhook")
 async def api_paydome_webhook(request: Request):
     """Вебхук PayDome — только триггер: перепроверяем статус через API и зачисляем при Paid."""
+    # эндпоинт открытый: подделать оплату нельзя (статус берём из API), но спамить им
+    # можно — каждый вызов идёт наружу к PayDome, поэтому ограничиваем по IP
+    if not rate_limit(f"pdhook:{client_ip(request)}", 120, 60):
+        return {"ok": True}
     try:
         b = await request.json()
     except Exception:
