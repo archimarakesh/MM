@@ -208,6 +208,15 @@ async def init():
                 status     INT NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS shares_user_idx ON shares(user_id);
             CREATE INDEX IF NOT EXISTS shares_plan_idx ON shares(plan_id);
+            CREATE TABLE IF NOT EXISTS wallet_ops(
+                op_id         TEXT PRIMARY KEY,          -- идемпотентность: повтор не спишет дважды
+                user_id       BIGINT NOT NULL,
+                delta         BIGINT NOT NULL,           -- <0 списание, >0 начисление
+                kind          TEXT NOT NULL,             -- bet / win / прочее
+                ref           TEXT,                      -- ссылка на раунд во внешнем сервисе
+                balance_after BIGINT NOT NULL,
+                created       TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE INDEX IF NOT EXISTS wallet_ops_user_idx ON wallet_ops(user_id, created DESC);
             CREATE TABLE IF NOT EXISTS chat_activity(
                 user_id BIGINT NOT NULL,
                 day     DATE   NOT NULL,
@@ -1577,6 +1586,49 @@ async def award_activity_week(week_start, week_end, prizes: list) -> list:
                         "amount": amount, "score": int(r["score"]),
                         "points": r["pts"], "days": r["days"]})
         return out
+
+
+# ── общий кошелёк для внешних сервисов ───────────────────────────────────────
+async def wallet_balance(tg_id: int) -> dict:
+    async with _pool.acquire() as c:
+        u = await c.fetchrow("SELECT balance, locked FROM users WHERE tg_id=$1", tg_id)
+    if not u:
+        raise ValueError("Пользователь не найден")
+    locked = u["locked"] or 0
+    return {"balance": u["balance"], "locked": locked,
+            "withdrawable": max(0, u["balance"] - locked)}
+
+
+async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = None) -> dict:
+    """Движение по кошельку: amount>0 — начисление, amount<0 — списание.
+
+    Списывать можно ТОЛЬКО выводимые средства — бонусы (locked) неприкосновенны.
+    Идемпотентно по op_id: повтор запроса вернёт прежний результат, а не спишет дважды."""
+    op_id = str(op_id or "").strip()
+    if not op_id or len(op_id) > 64:
+        raise ValueError("Неверный op_id")
+    if amount == 0:
+        raise ValueError("Нулевая операция")
+    async with _pool.acquire() as c, c.transaction():
+        # пользователя блокируем ПЕРВЫМ: тогда параллельный повтор с тем же op_id
+        # дождётся коммита и увидит готовую запись, а не словит конфликт ключа
+        u = await c.fetchrow("SELECT balance, locked FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        if not u:
+            raise ValueError("Пользователь не найден")
+        prev = await c.fetchrow("SELECT balance_after FROM wallet_ops WHERE op_id=$1", op_id)
+        if prev:
+            return {"balance": prev["balance_after"], "duplicate": True}
+        locked = u["locked"] or 0
+        if amount < 0 and u["balance"] - locked < -amount:
+            raise ValueError("Недостаточно средств — бонусные деньги в игре не участвуют")
+        new_balance = u["balance"] + amount
+        await c.execute("UPDATE users SET balance=$1 WHERE tg_id=$2", new_balance, tg_id)
+        await c.execute("""
+            INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
+            VALUES($1,$2,$3,$4,$5,$6)
+        """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), new_balance)
+        return {"balance": new_balance, "locked": locked,
+                "withdrawable": max(0, new_balance - locked), "duplicate": False}
 
 
 # ── перенос аккаунта ─────────────────────────────────────────────────────────

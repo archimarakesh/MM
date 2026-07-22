@@ -4,6 +4,7 @@ import base64
 import html
 import io
 import logging
+import hmac
 import os
 import random
 import re
@@ -52,6 +53,8 @@ PROMO_POSTS = [
     ("promo/egrow-1.png", ""),
     ("promo/egrow-4.png", ""),
 ]
+# общий секрет с внешними сервисами (казино и т.п.). Пусто — кошелёк наружу закрыт
+WALLET_TOKEN = os.getenv("WALLET_TOKEN", "")
 CARD_MIN = 200               # пополнение картой — от 200 ₴, меньше только криптой
 CARD_LIMIT = 10000           # оплата картой — до 10 000 ₴, свыше только крипта
 # сервисный сбор на авто-оплату картой (PayDome берёт 12% — часть перекладываем на юзера).
@@ -1205,6 +1208,51 @@ async def api_transfer_redeem(request: Request):
 
 
 # ── админка ──────────────────────────────────────────────────────────────────
+def _wallet_auth(body: dict):
+    """Доступ к кошельку — только по общему секрету. Без WALLET_TOKEN эндпоинты закрыты."""
+    if not WALLET_TOKEN or not hmac.compare_digest(str(body.get("token") or ""), WALLET_TOKEN):
+        raise HTTPException(403, "Нет доступа")
+
+
+@app.post("/api/wallet/balance")
+async def api_wallet_balance(request: Request):
+    b = await request.json()
+    _wallet_auth(b)
+    try:
+        return await db.wallet_balance(pint(b.get("user_id")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+async def _wallet_move(request: Request, sign: int, kind_default: str):
+    b = await request.json()
+    _wallet_auth(b)
+    uid, amount = pint(b.get("user_id")), pint(b.get("amount"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    if not 0 < amount <= 1_000_000:
+        raise HTTPException(400, "Неверная сумма")
+    if not rate_limit(f"wallet:{uid}", 120, 60):
+        raise HTTPException(429, "Слишком часто")
+    try:
+        return await db.wallet_op(uid, sign * amount, str(b.get("op_id", "")),
+                                  str(b.get("kind") or kind_default), b.get("ref"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/wallet/debit")
+async def api_wallet_debit(request: Request):
+    """Списание (ставка). Только из выводимых средств."""
+    return await _wallet_move(request, -1, "bet")
+
+
+@app.post("/api/wallet/credit")
+async def api_wallet_credit(request: Request):
+    """Начисление (выигрыш). Попадает в обычный баланс — его можно вывести."""
+    return await _wallet_move(request, 1, "credit")
+
+
 @app.post("/api/np/cities")
 async def api_np_cities(request: Request):
     """Поиск населённых пунктов в справочнике НП (Address.searchSettlements)."""
