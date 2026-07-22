@@ -52,7 +52,8 @@ PROMO_POSTS = [
     ("promo/egrow-1.png", ""),
     ("promo/egrow-4.png", ""),
 ]
-CARD_LIMIT = 5000            # оплата картой — до 5 000 ₴, свыше только крипта
+CARD_MIN = 200               # пополнение картой — от 200 ₴, меньше только криптой
+CARD_LIMIT = 10000           # оплата картой — до 10 000 ₴, свыше только крипта
 # сервисный сбор на авто-оплату картой (PayDome берёт 12% — часть перекладываем на юзера).
 # 5% сверху ≈ покрывает ~4.4 п.п. из 12% комиссии; остальное на нас. Меняется env CARD_FEE_PCT.
 CARD_FEE_PCT = float(os.getenv("CARD_FEE_PCT", "5") or 5)
@@ -814,8 +815,8 @@ async def api_topup_receipt(request: Request):
     b = await request.json()
     amount = pint(b.get("amount"))
     receipt = str(b.get("receipt", ""))
-    if amount <= 0:
-        raise HTTPException(400, "Неверная сумма")
+    if amount < CARD_MIN:
+        raise HTTPException(400, f"Картой — от {CARD_MIN} ₴, меньшую сумму пополните криптой")
     if b.get("method") != "card":
         raise HTTPException(400, "Квитанция — только для оплаты картой")
     if amount > CARD_LIMIT:
@@ -913,8 +914,8 @@ async def api_card_create(request: Request):
         raise HTTPException(400, "Авто-оплата картой сейчас недоступна")
     b = await request.json()
     amount = pint(b.get("amount"))   # сколько юзер хочет получить на баланс
-    if amount < 10:
-        raise HTTPException(400, "Минимальная сумма — 10 ₴")
+    if amount < CARD_MIN:
+        raise HTTPException(400, f"Картой — от {CARD_MIN} ₴, меньшую сумму пополните криптой")
     if amount > CARD_LIMIT:
         raise HTTPException(400, f"Картой — до {CARD_LIMIT} ₴, для больших сумм используйте крипту")
     charge = round(amount * (1 + CARD_FEE_PCT / 100))   # к оплате с сервисным сбором

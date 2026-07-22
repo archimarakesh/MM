@@ -1246,7 +1246,8 @@ function customGramsInput(v) {
 
 /* ═══════════ Checkout ═══════════ */
 let payMethod = 'balance';
-const CARD_LIMIT = 5000; // лимит оплаты картой при пополнении
+const CARD_MIN = 200;     // минимум для пополнения картой (меньше — только крипта)
+const CARD_LIMIT = 10000; // лимит оплаты картой при пополнении
 /* ── выбор адреса из справочника Новой Почты ── */
 let coCitySel = null, coWhSel = null, coKind = '', coCityRes = [], coWhRes = [], npTimer = null;
 function resetCheckoutAddr() {
@@ -1521,8 +1522,9 @@ function tuAmount() { return parseInt(document.getElementById('tuSum').value, 10
 function tuOptions() {
   if (!API.ok) return [{ key: 'demo', label: 'Демо-зачисление' }];
   const o = [];
-  if (S.cardAuto && tuAmount() <= CARD_LIMIT) o.push({ key: 'cardauto', label: 'Карта' });
-  if (PAY.card_number && tuAmount() <= CARD_LIMIT) o.push({ key: 'card', label: S.cardAuto ? 'Карта (квитанция)' : 'Карта' });
+  const cardOk = tuAmount() >= CARD_MIN && tuAmount() <= CARD_LIMIT;
+  if (S.cardAuto && cardOk) o.push({ key: 'cardauto', label: 'Карта' });
+  if (PAY.card_number && cardOk) o.push({ key: 'card', label: S.cardAuto ? 'Карта (квитанция)' : 'Карта' });
   if (availCryptos().length) o.push({ key: 'crypto', label: 'Криптовалюта' });
   return o;
 }
@@ -1554,7 +1556,9 @@ function renderTopupChips() {
     ? opts.map(o => `<div class="wchip ${sel(o) ? 'sel' : ''}" onclick="tuSel('${o.key}')">${o.label}</div>`).join('')
     : '<p class="note" style="margin:0">Способы оплаты пока не настроены — загляните позже.</p>') +
     (API.ok && PAY.card_number && tuAmount() > CARD_LIMIT
-      ? `<p class="note" style="width:100%;margin:4px 0 0">💳 Картой — до ${fmt(CARD_LIMIT)} ₴. Для этой суммы используйте крипту.</p>` : '');
+      ? `<p class="note" style="width:100%;margin:4px 0 0">💳 Картой — до ${fmt(CARD_LIMIT)} ₴. Для этой суммы используйте крипту.</p>`
+      : API.ok && PAY.card_number && tuAmount() > 0 && tuAmount() < CARD_MIN
+        ? `<p class="note" style="width:100%;margin:4px 0 0">💳 Картой — от ${fmt(CARD_MIN)} ₴. Меньшую сумму можно пополнить криптой.</p>` : '');
 }
 document.getElementById('tuSum').addEventListener('input', () => {
   if (API.ok) renderTopupChips();
@@ -1680,7 +1684,8 @@ async function cancelInvoice() {
 /* ── PayDome: авто-карта ── */
 async function createCardPay() {
   const v = parseInt(document.getElementById('tuSum').value, 10);
-  if (!v || v < 10) return toast('Укажите сумму от 10 ₴');
+  if (!v || v < CARD_MIN) return toast(`Картой — от ${fmt(CARD_MIN)} ₴`);
+  if (v > CARD_LIMIT) return toast(`Картой — до ${fmt(CARD_LIMIT)} ₴, для больших сумм используйте крипту`);
   try { CARD = await API.call('/api/card/create', { amount: v }); CARD.status = 0; }
   catch (e) { return toast(e.message); }
   haptic('medium'); renderTuBody(); startCardPoll();
@@ -1808,7 +1813,7 @@ document.getElementById('tuFile').addEventListener('change', e => {
 });
 async function submitCard() {
   const v = parseInt(document.getElementById('tuSum').value, 10);
-  if (!v || v <= 0) return toast('Укажите сумму');
+  if (!v || v < CARD_MIN) return toast(`Картой — от ${fmt(CARD_MIN)} ₴`);
   if (v > CARD_LIMIT) return toast(`Картой — до ${fmt(CARD_LIMIT)} ₴, для больших сумм используйте крипту`);
   if (!tuReceipt) return toast('Приложите квитанцию');
   try { applySnapshot(await API.call('/api/topup/receipt', { amount: v, method: 'card', receipt: tuReceipt })); }
@@ -2138,7 +2143,7 @@ const FAQ = [
   { q: '🛍 Как сделать заказ?',
     a: 'Откройте <b>Магазин</b> → выберите товар → укажите вес: быстрые кнопки или своё число до 100 г (чем больше вес, тем дешевле грамм — действует 5 ступеней скидки). Нужно больше 100 г — кнопка «написать админу». Далее <b>«Оформить заказ»</b>, заполните имя, телефон, город и отделение Новой Почты, выберите оплату и подтвердите.' },
   { q: '💳 Какие есть способы оплаты?',
-    a: '<b>С баланса</b> — списывается сразу.<br><b>Картой</b> — переводите на реквизиты и прикладываете квитанцию (фото или PDF), заказ подтверждаем вручную. Лимит — до 5 000 ₴, выше — только крипта.<br><b>Крипта (USDT TRC-20 / BTC)</b> — счёт с QR-кодом и точной суммой на 30 минут, зачисление автоматическое после подтверждения сети.' },
+    a: '<b>С баланса</b> — списывается сразу.<br><b>Картой</b> — переводите на реквизиты и прикладываете квитанцию (фото или PDF), заказ подтверждаем вручную. Лимит — от 200 ₴ до 10 000 ₴, вне этих рамок — только крипта.<br><b>Крипта (USDT TRC-20 / BTC)</b> — счёт с QR-кодом и точной суммой на 30 минут, зачисление автоматическое после подтверждения сети.' },
   { q: '➕ Как пополнить баланс?',
     a: 'Тапните баланс в шапке или <b>«Пополнить»</b> в профиле. Карта — перевод + квитанция (проверяем вручную); крипта — счёт с QR, зачисляется само. Внизу страницы — история всех операций со статусами.' },
   { q: '💸 Как вывести деньги с баланса?',
