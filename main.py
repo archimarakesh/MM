@@ -6,6 +6,7 @@ import io
 import logging
 import os
 import random
+import re
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -495,6 +496,7 @@ if BOT_TOKEN:
 
 # ── вебсокеты: мгновенные обновления вместо опроса ───────────────────────────
 WS_CLIENTS: dict[int, set] = {}
+WS_MAX_PER_USER = 5    # вкладки/устройства одного человека; больше — это уже не про удобство
 
 
 async def ws_push(user_id: int):
@@ -652,7 +654,14 @@ async def ws_endpoint(ws: WebSocket):
         await ws.close(code=4401)
         return
     uid = int(user["id"])
-    WS_CLIENTS.setdefault(uid, set()).add(ws)
+    conns = WS_CLIENTS.setdefault(uid, set())
+    while len(conns) >= WS_MAX_PER_USER:   # один аккаунт не должен занимать память бесконечно
+        old = conns.pop()
+        try:
+            await old.close()
+        except Exception:
+            pass
+    conns.add(ws)
     log.info("WS подключён: %s (всего %s)", uid, sum(len(s) for s in WS_CLIENTS.values()))
     try:
         while True:
@@ -727,6 +736,9 @@ async def product_photo(pid: int, idx: int, size: str = "f"):
 @app.post("/api/auth")
 async def api_auth(request: Request):
     u = tg_user(request)
+    # самый тяжёлый запрос (полный снапшот) — ограничиваем, иначе его можно закольцевать
+    if not rate_limit(f"auth:{u['id']}", 30, 60):
+        raise HTTPException(429, "Слишком часто — подождите минуту")
     name = " ".join(filter(None, [u.get("first_name"), u.get("last_name")]))
     await db.upsert_user(u["id"], name, u.get("username"))
     await db.touch_device(u["id"], client_device(request), client_ip(request))
@@ -1162,7 +1174,7 @@ async def api_np_cities(request: Request):
     u = tg_user(request)
     if not rate_limit(f"npc:{u['id']}", 30, 60):
         raise HTTPException(429, "Слишком часто — подождите минуту")
-    q = str((await request.json()).get("q", "")).strip()
+    q = str((await request.json()).get("q", "")).strip()[:64]
     if len(q) < 2:
         return {"cities": []}
     key = os.getenv("NP_API_KEY", "")
@@ -1188,13 +1200,17 @@ async def api_np_cities(request: Request):
 async def api_np_warehouses(request: Request):
     """Отделения и почтоматы города из справочника НП (Address.getWarehouses)."""
     u = tg_user(request)
-    if not rate_limit(f"npw:{u['id']}", 40, 60):
+    # один вызов может породить несколько запросов к НП — лимит ниже, чем у поиска городов
+    if not rate_limit(f"npw:{u['id']}", 20, 60):
         raise HTTPException(429, "Слишком часто — подождите минуту")
     b = await request.json()
-    city_ref = str(b.get("city_ref", "")).strip()
-    q = str(b.get("q", "")).strip()
-    kind = str(b.get("kind", "")).strip()   # ''|'branch'|'postomat'
-    if not city_ref:
+    city_ref = str(b.get("city_ref", "")).strip()[:64]
+    q = str(b.get("q", "")).strip()[:64]
+    kind = str(b.get("kind", "")).strip()
+    if kind not in ("", "branch", "postomat"):
+        kind = ""
+    # ref у НП — GUID; не пропускаем в их API произвольный мусор
+    if not city_ref or not re.fullmatch(r"[0-9a-fA-F-]{8,64}", city_ref):
         return {"warehouses": []}
     key = os.getenv("NP_API_KEY", "")
     if not key:
@@ -1205,7 +1221,7 @@ async def api_np_warehouses(request: Request):
     all_wh = []
     try:
         async with aiohttp.ClientSession() as s:
-            for page in range(1, 6):        # до 5 страниц × 500 — покрывает даже Киев
+            for page in range(1, 4):        # до 3 страниц × 500 — хватает и на Киев
                 payload = {"apiKey": key, "modelName": "Address", "calledMethod": "getWarehouses",
                            "methodProperties": {**base, "Page": str(page)}}
                 async with s.post(NP_API, json=payload,
