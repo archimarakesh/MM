@@ -227,7 +227,9 @@ async def run(notify=None):
         try:
             m = await bot.send_message(
                 chat.id,
-                f"👋 <b>{_esc(u.full_name)}</b>, добро пожаловать!\n\n{RULES_TEXT}\n\n"
+                # tg://user — настоящий тег: кликабелен и шлёт уведомление даже без @username
+                f"👋 <a href=\"tg://user?id={u.id}\"><b>{_esc(u.full_name)}</b></a>, "
+                f"добро пожаловать!\n\n{RULES_TEXT}\n\n"
                 "Нажимая кнопку, вы подтверждаете согласие с правилами.\n"
                 f"⏳ Успейте в течение {mins} мин — иначе автоматический кик.",
                 parse_mode="HTML", reply_markup=kb)
