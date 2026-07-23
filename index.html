@@ -2360,7 +2360,7 @@ function renderAdmin(tab) {
         </div>
       </div></div>`).join('') : '<div class="empty"><p>Нет заявок на вывод</p></div>';
   } else if (tab === 'topups') {
-    b.innerHTML = AD.topups.length ? AD.topups.map((t, i) => `
+    const pending = AD.topups.length ? AD.topups.map((t, i) => `
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${fmt(t.amount)} ₴ · ${TU_LABELS[t.method] || esc(t.method)}</b>
           <span style="font-size:11px;color:var(--muted-2)">${dt(t.created)}</span></div>
@@ -2371,6 +2371,25 @@ function renderAdmin(tab) {
           <button class="btn btn-ghost" style="padding:12px" onclick="decideTopup(${t.id}, false)">Отклонить</button>
         </div>
       </div></div>`).join('') : '<div class="empty"><p>Нет квитанций на проверке</p></div>';
+    // единая история всех способов: квитанция, крипта, карта — включая «в обработке»
+    const TH_KIND = { receipt: '🧾 квитанция', crypto: '🪙 крипта', card: '💳 карта' };
+    const TH_ST = {
+      0: ['в обработке', 'var(--warn)'],
+      1: ['зачислено', 'var(--ok, #4ec98a)'],
+      2: ['отклонено / истекло', 'var(--danger, #e07a5f)'],
+    };
+    const hist = (AD.topup_history || []).map(h => {
+      const [stTxt, stCol] = TH_ST[h.status] || ['?', 'var(--muted)'];
+      return `
+      <div class="set-row" style="cursor:default">
+        <div><h3 style="font-size:13px">${fmt(h.amount)} ₴ · ${TH_KIND[h.kind] || esc(h.kind)}${h.detail ? ' ' + esc(h.detail) : ''}</h3>
+        <p>${esc(h.user)}${h.username ? ' · @' + esc(h.username) : ''} · ID ${h.user_id} · ${dt(h.created)}</p></div>
+        <b style="margin-left:auto;font-size:11px;white-space:nowrap;color:${stCol}">${stTxt}</b>
+      </div>`;
+    }).join('');
+    b.innerHTML = pending +
+      `<div class="section-head" style="margin-top:16px"><h2>История пополнений</h2></div>` +
+      (hist || '<div class="empty"><p>Пополнений ещё не было</p></div>');
   } else if (tab === 'promo') {
     const pr = AD.promos || { codes: [], stats: [] };
     b.innerHTML = `

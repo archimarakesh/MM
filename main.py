@@ -1435,6 +1435,7 @@ async def api_admin_data(request: Request):
         "grow_plans": await db.get_grow_plans(include_inactive=True),
         "settings": await db.get_settings(),
         "topups": await db.admin_topups(),
+        "topup_history": await db.admin_topup_history(),
         "withdrawals": await db.admin_withdrawals(),
         "orders": await db.admin_orders(),
         "sales": await db.sales_stats(),

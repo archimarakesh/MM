@@ -704,6 +704,40 @@ async def admin_topups() -> list:
     } for r in rows]
 
 
+async def admin_topup_history(limit: int = 120) -> list:
+    """Все пополнения одной лентой: квитанции, крипта (только пополнения,
+    без счетов за заказы) и карта. Статусы: 0 в обработке, 1 зачислено,
+    2 отклонено/истекло."""
+    async with _pool.acquire() as c:
+        await _expire_invoices(c)
+        rows = await c.fetch("""
+            SELECT * FROM (
+                SELECT t.user_id, t.amount, 'receipt' AS kind,
+                       COALESCE(t.method, '') AS detail, t.status, t.created
+                FROM topups t
+                UNION ALL
+                SELECT i.user_id, i.amount_uah, 'crypto',
+                       i.currency || COALESCE(' · ' || left(i.txid, 12), ''), i.status, i.created
+                FROM invoices i WHERE i.order_id IS NULL
+                UNION ALL
+                SELECT p.user_id, p.amount_uah, 'card',
+                       COALESCE('•' || right(p.card, 4), ''), p.status, p.created
+                FROM card_payments p
+            ) x ORDER BY created DESC LIMIT $1
+        """, limit)
+        uids = list({r["user_id"] for r in rows})
+        users = await c.fetch(
+            "SELECT tg_id, name, username FROM users WHERE tg_id = ANY($1)", uids) if uids else []
+    um = {u["tg_id"]: u for u in users}
+    return [{
+        "user_id": r["user_id"],
+        "user": (um[r["user_id"]]["name"] if r["user_id"] in um else None) or "?",
+        "username": um[r["user_id"]]["username"] if r["user_id"] in um else None,
+        "amount": r["amount"], "kind": r["kind"], "detail": r["detail"],
+        "status": r["status"], "created": r["created"],
+    } for r in rows]
+
+
 async def topup_decide(topup_id: int, approve: bool) -> dict:
     """Возвращает {user_id, amount, approved} для уведомления."""
     async with _pool.acquire() as c, c.transaction():
