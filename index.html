@@ -2380,10 +2380,18 @@ function renderAdmin(tab) {
     };
     const hist = (AD.topup_history || []).map(h => {
       const [stTxt, stCol] = TH_ST[h.status] || ['?', 'var(--muted)'];
+      // зависший карточный/крипто-платёж админ может решить сам по квитанции
+      const acts = h.status === 0 && h.kind !== 'receipt' ? `
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-gold" style="padding:8px 14px;font-size:12px"
+            onclick="resolvePayment('${h.kind}', ${h.id}, true)">Зачислить</button>
+          <button class="btn btn-ghost" style="padding:8px 14px;font-size:12px"
+            onclick="resolvePayment('${h.kind}', ${h.id}, false)">Отменить</button>
+        </div>` : '';
       return `
-      <div class="set-row" style="cursor:default">
+      <div class="set-row" style="cursor:default;flex-wrap:wrap">
         <div><h3 style="font-size:13px">${fmt(h.amount)} ₴ · ${TH_KIND[h.kind] || esc(h.kind)}${h.detail ? ' ' + esc(h.detail) : ''}</h3>
-        <p>${esc(h.user)}${h.username ? ' · @' + esc(h.username) : ''} · ID ${h.user_id} · ${dt(h.created)}</p></div>
+        <p>${esc(h.user)}${h.username ? ' · @' + esc(h.username) : ''} · ID ${h.user_id} · ${dt(h.created)}</p>${acts}</div>
         <b style="margin-left:auto;font-size:11px;white-space:nowrap;color:${stCol}">${stTxt}</b>
       </div>`;
     }).join('');
@@ -2775,6 +2783,18 @@ async function decideTopup(id, approve) {
   catch (e) { return toast(e.message); }
   haptic('medium'); toast(approve ? 'Зачислено ✓' : 'Отклонено');
   renderAdmin('topups');
+}
+function resolvePayment(kind, id, approve) {
+  const msg = approve ? 'Зачислить платёж вручную?' : 'Отменить платёж?';
+  const go = async () => {
+    try {
+      AD.topup_history = (await API.call('/api/admin/payment/resolve', { kind, id, approve })).topup_history;
+    } catch (e) { return toast(e.message); }
+    haptic('medium'); toast(approve ? 'Зачислено ✓' : 'Отменено');
+    renderAdmin('topups');
+  };
+  if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
+  else if (confirm(msg)) go();
 }
 async function genPromos() {
   const amount = parseInt(document.getElementById('promoAmount').value, 10);

@@ -1427,6 +1427,22 @@ async def api_np_warehouses(request: Request):
     return {"warehouses": out}
 
 
+@app.post("/api/admin/payment/resolve")
+async def api_admin_payment_resolve(request: Request):
+    """Ручное решение зависшего платежа: человек оплатил, API не подтвердил."""
+    admin_user(request)
+    b = await request.json()
+    try:
+        res = await db.admin_payment_resolve(
+            str(b.get("kind", "")), pint(b.get("id")), bool(b.get("approve")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res["approved"]:
+        await notify(res["user_id"],
+                     f"✅ Оплата подтверждена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+    return {"topup_history": await db.admin_topup_history()}
+
+
 @app.post("/api/admin/data")
 async def api_admin_data(request: Request):
     admin_user(request)

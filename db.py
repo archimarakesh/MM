@@ -712,15 +712,15 @@ async def admin_topup_history(limit: int = 120) -> list:
         await _expire_invoices(c)
         rows = await c.fetch("""
             SELECT * FROM (
-                SELECT t.user_id, t.amount, 'receipt' AS kind,
+                SELECT t.id, t.user_id, t.amount, 'receipt' AS kind,
                        COALESCE(t.method, '') AS detail, t.status, t.created
                 FROM topups t
                 UNION ALL
-                SELECT i.user_id, i.amount_uah, 'crypto',
+                SELECT i.id, i.user_id, i.amount_uah, 'crypto',
                        i.currency || COALESCE(' · ' || left(i.txid, 12), ''), i.status, i.created
                 FROM invoices i WHERE i.order_id IS NULL
                 UNION ALL
-                SELECT p.user_id, p.amount_uah, 'card',
+                SELECT p.id, p.user_id, p.amount_uah, 'card',
                        COALESCE('•' || right(p.card, 4), ''), p.status, p.created
                 FROM card_payments p
             ) x ORDER BY created DESC LIMIT $1
@@ -730,12 +730,42 @@ async def admin_topup_history(limit: int = 120) -> list:
             "SELECT tg_id, name, username FROM users WHERE tg_id = ANY($1)", uids) if uids else []
     um = {u["tg_id"]: u for u in users}
     return [{
-        "user_id": r["user_id"],
+        "id": r["id"], "user_id": r["user_id"],
         "user": (um[r["user_id"]]["name"] if r["user_id"] in um else None) or "?",
         "username": um[r["user_id"]]["username"] if r["user_id"] in um else None,
         "amount": r["amount"], "kind": r["kind"], "detail": r["detail"],
         "status": r["status"], "created": r["created"],
     } for r in rows]
+
+
+async def admin_payment_resolve(kind: str, pid: int, approve: bool) -> dict:
+    """Ручное решение по зависшему платежу «в обработке»: карта или крипто-счёт
+    (пополнение). Человек оплатил, а API не подтвердил — админ зачисляет по
+    квитанции сам. Начисление — как в автоматическом пути, без реф-бонуса."""
+    async with _pool.acquire() as c, c.transaction():
+        if kind == "card":
+            r = await c.fetchrow(
+                "SELECT * FROM card_payments WHERE id=$1 AND status=0 FOR UPDATE", pid)
+            if not r:
+                raise ValueError("Платёж не найден или уже решён")
+            await c.execute("UPDATE card_payments SET status=$2 WHERE id=$1",
+                            pid, 1 if approve else 2)
+            uid, amount = r["user_id"], r["amount_uah"]
+        elif kind == "crypto":
+            r = await c.fetchrow(
+                "SELECT * FROM invoices WHERE id=$1 AND status=0 AND order_id IS NULL FOR UPDATE",
+                pid)
+            if not r:
+                raise ValueError("Счёт не найден или уже решён")
+            await c.execute(
+                "UPDATE invoices SET status=$2, txid=COALESCE(txid, 'manual') WHERE id=$1",
+                pid, 1 if approve else 2)
+            uid, amount = r["user_id"], r["amount_uah"]
+        else:
+            raise ValueError("Неизвестный тип платежа")
+        if approve:
+            await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2", amount, uid)
+    return {"user_id": uid, "amount": amount, "approved": approve}
 
 
 async def topup_decide(topup_id: int, approve: bool) -> dict:
