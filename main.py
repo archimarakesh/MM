@@ -998,22 +998,68 @@ async def api_account_delete(request: Request):
     return {"ok": True}
 
 
-async def _is_member(chat_id: str, user_id: int) -> bool:
+@app.get("/health")
+async def health():
+    """Диагностика бонуса: заданы ли ID и что бот видит в канале/чате."""
+    out = {"bot": bool(bot),
+           "bonus_channel_set": bool(BONUS_CHANNEL_ID),
+           "bonus_chat_set": bool(BONUS_CHAT_ID),
+           "bonus_amount": BONUS_AMOUNT}
+    if bot:
+        me = await bot.get_me()
+        for key, cid in (("channel", BONUS_CHANNEL_ID), ("chat", BONUS_CHAT_ID)):
+            if not cid:
+                out[key] = "ID не задан"
+                continue
+            cid = str(cid).strip()
+            ref = int(cid) if cid.lstrip("-").isdigit() else cid
+            try:
+                c = await bot.get_chat(ref)
+                st = await bot.get_chat_member(ref, me.id)
+                out[key] = f"«{c.title}» — статус бота: {st.status}"
+            except Exception as e:
+                out[key] = f"ошибка: {e}"[:160]
+    return out
+
+
+async def _member_state(chat_id: str, user_id: int) -> str:
+    """'yes' / 'no' / 'err' — отличаем «не подписан» от «бот не может проверить».
+    Для каналов бот обязан быть админом, иначе get_chat_member недоступен."""
+    cid = str(chat_id).strip()
+    ref = int(cid) if cid.lstrip("-").isdigit() else cid   # -100… или @username
     try:
-        m = await bot.get_chat_member(int(chat_id), user_id)
-        return m.status in ("member", "administrator", "creator")
-    except Exception:
-        return False
+        m = await bot.get_chat_member(ref, user_id)
+        # restricted — участник с ограничениями, для бонуса считается подписанным
+        return "yes" if m.status in ("member", "administrator", "creator", "restricted") else "no"
+    except Exception as e:
+        log.warning("Бонус: get_chat_member(%s) не сработал: %s", cid, e)
+        return "err"
+
+
+_bonus_err_notified = 0.0   # чтобы не спамить админу на каждый клик
 
 
 @app.post("/api/bonus/claim")
 async def api_bonus_claim(request: Request):
+    global _bonus_err_notified
     u = tg_user(request)
     if not (bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID):
         raise HTTPException(400, "Бонус временно недоступен")
-    if not (await _is_member(BONUS_CHANNEL_ID, u["id"])
-            and await _is_member(BONUS_CHAT_ID, u["id"])):
-        raise HTTPException(400, "Подпишитесь на канал и вступите в чат, затем нажмите ещё раз")
+    ch = await _member_state(BONUS_CHANNEL_ID, u["id"])
+    cht = await _member_state(BONUS_CHAT_ID, u["id"])
+    if "err" in (ch, cht):
+        now = time.time()
+        if now - _bonus_err_notified > 3600:
+            _bonus_err_notified = now
+            await notify(ADMIN_ID,
+                         "⚠️ Бонус не работает: бот не может проверить участника "
+                         f"(канал: {ch}, чат: {cht}). Проверьте, что бот — админ в канале "
+                         "и состоит в чате, а BONUS_CHANNEL_ID/BONUS_CHAT_ID верные.")
+        raise HTTPException(400, "Не получилось проверить подписку — попробуйте позже")
+    if ch == "no":
+        raise HTTPException(400, "Не видим подписку на канал — подпишитесь и нажмите ещё раз")
+    if cht == "no":
+        raise HTTPException(400, "Не видим вас в чате — вступите и нажмите ещё раз")
     try:
         await db.claim_bonus(u["id"], BONUS_AMOUNT,
                              client_device(request), client_ip(request))
