@@ -8,6 +8,7 @@ import hmac
 import os
 import random
 import re
+import secrets
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -505,6 +506,34 @@ if BOT_TOKEN:
     async def cmd_chatid(message: Message):
         await message.answer(f"ID этого чата: <code>{message.chat.id}</code>",
                              parse_mode="HTML")
+
+    @dp.message(Command("give"))
+    async def cmd_give(message: Message, command: CommandObject):
+        """Ручное начисление без чека: /give <id> <сумма> [комментарий].
+        Сумма может быть отрицательной — спишутся только выводимые средства."""
+        if not ADMIN_ID or message.from_user.id != ADMIN_ID:
+            return
+        parts = (command.args or "").split(maxsplit=2)
+        if len(parts) < 2 or not parts[0].lstrip("-").isdigit() \
+                or not parts[1].lstrip("-").isdigit():
+            await message.answer("Формат: <code>/give ID сумма [комментарий]</code>",
+                                 parse_mode="HTML")
+            return
+        uid, amount = int(parts[0]), int(parts[1])
+        note = parts[2] if len(parts) > 2 else "ручное начисление"
+        try:
+            res = await db.wallet_op(uid, amount,
+                                     f"admin:{uid}:{secrets.token_hex(4)}",
+                                     "admin", note)
+        except ValueError as e:
+            await message.answer(f"❌ {e}")
+            return
+        await message.answer(
+            f"✅ {'Начислено' if amount > 0 else 'Списано'} {abs(amount)} ₴ "
+            f"пользователю <code>{uid}</code>. Баланс: {res.get('balance', '?')} ₴.",
+            parse_mode="HTML")
+        if amount > 0:
+            await notify(uid, f"💰 Вам начислено <b>{amount} ₴</b> на баланс.")
 
     @dp.message(Command("promo"))
     async def cmd_promo(message: Message):
