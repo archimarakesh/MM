@@ -193,6 +193,9 @@ h1.page-title em{font-style:normal;color:inherit}
 .admin-stats>div{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
 .admin-stats b{display:block;font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
 .admin-stats span{font-size:10.5px;color:var(--muted-2);line-height:1.3}
+/* красная точка: есть заказ в работу или оплата на проверку */
+.rdot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:2px;
+  background:#e05050;box-shadow:0 0 6px rgba(224,80,80,.85)}
 .stat-list{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
 .stat-list>div{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:3px 0}
 .np-live{border:1px solid var(--line);border-radius:var(--r-lg);padding:6px 12px;margin:10px 0}
@@ -659,7 +662,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <p class="sheet-sub">Безопасность и управление аккаунтом.</p>
   <div class="set-row" id="adminRow" style="display:none" onclick="openAdmin()">
     <div class="link-ico">👑</div>
-    <div><h3>Админка</h3><p>Товары, заказы, оплаты</p></div>
+    <div><h3>Админка <span class="rdot" id="adminDot" style="display:none"></span></h3><p>Товары, заказы, оплаты</p></div>
     <div class="arr" style="margin-left:auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.05);color:var(--muted)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></div>
   </div>
   <div class="set-row" onclick="startPinChange()">
@@ -915,6 +918,11 @@ function applySnapshot(d) {
   if ('is_admin' in d) {
     S.isAdmin = d.is_admin;
     document.getElementById('adminRow').style.display = d.is_admin ? '' : 'none';
+  }
+  if (d.admin_todo) {
+    S.adminTodo = d.admin_todo;
+    const n = (d.admin_todo.orders || 0) + (d.admin_todo.topups || 0) + (d.admin_todo.withdrawals || 0);
+    document.getElementById('adminDot').style.display = n ? '' : 'none';
   }
   save(); syncBalance(); renderOrders(); renderGoods(); syncSettings();
   // открытая карточка заказа тоже должна показать свежий статус/ТТН
@@ -2253,10 +2261,14 @@ async function openAdmin() {
 }
 function renderAdmin(tab) {
   adminTab = tab;
+  // точка = требует действий: заказ проверить/взять в работу, оплата на проверке
+  const dot = ' <span class="rdot"></span>';
+  const ordersTodo = AD.orders.filter(o => o.status === -1 || o.status === 0).length;
   const tabs = [
-    ['products', 'Товары'], ['grow', 'E-grow'], ['orders', 'Заказы'],
-    ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}` : '')],
-    ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}` : '')],
+    ['products', 'Товары'], ['grow', 'E-grow'],
+    ['orders', 'Заказы' + (ordersTodo ? ` · ${ordersTodo}${dot}` : '')],
+    ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}${dot}` : '')],
+    ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}${dot}` : '')],
     ['promo', 'Промокоды'], ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>

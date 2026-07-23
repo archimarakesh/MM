@@ -761,6 +761,16 @@ async def sales_stats() -> dict:
     }
 
 
+async def admin_todo() -> dict:
+    """Что ждёт действий админа — для красных точек в приложении.
+    Заказы: -1 проверить оплату, 0 взять в работу. Пополнения/выводы: на проверке."""
+    async with _pool.acquire() as c:
+        o = await c.fetchval("SELECT COUNT(*) FROM orders WHERE status IN (-1, 0)")
+        t = await c.fetchval("SELECT COUNT(*) FROM topups WHERE status=0")
+        w = await c.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status=0")
+    return {"orders": o, "topups": t, "withdrawals": w}
+
+
 async def admin_orders() -> list:
     async with _pool.acquire() as c:
         await _auto_deliver(c)

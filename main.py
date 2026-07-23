@@ -668,6 +668,9 @@ def admin_user(request: Request) -> dict:
 async def _snap(uid: int) -> dict:
     snap = await db.snapshot(uid)
     snap["is_admin"] = bool(ADMIN_ID) and uid == ADMIN_ID
+    if snap["is_admin"]:
+        # красные точки: заказы в работу и оплаты на проверку
+        snap["admin_todo"] = await db.admin_todo()
     snap["bonus_offer"] = (not snap.get("bonus_claimed")
                            and bool(bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID))
     snap["bonus_amount"] = BONUS_AMOUNT
