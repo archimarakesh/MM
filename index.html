@@ -2407,9 +2407,13 @@ function renderAdmin(tab) {
           <button class="btn btn-ghost" style="padding:8px 14px;font-size:12px"
             onclick="resolvePayment('${h.kind}', ${h.id}, false)">Отменить</button>
         </div>` : '';
+      // для крипты — ссылка на транзакцию в обозревателе (tronscan для TRC/TRX)
+      const tx = h.kind === 'crypto' && h.txid && h.txid !== 'manual'
+        ? ` <a href="https://tronscan.org/#/transaction/${esc(h.txid)}" target="_blank"
+             rel="noopener" style="color:var(--gold-soft);text-decoration:none">tx↗</a>` : '';
       return `
       <div class="set-row" style="cursor:default;flex-wrap:wrap">
-        <div><h3 style="font-size:13px">${fmt(h.amount)} ₴ · ${TH_KIND[h.kind] || esc(h.kind)}${h.detail ? ' ' + esc(h.detail) : ''}</h3>
+        <div><h3 style="font-size:13px">${fmt(h.amount)} ₴ · ${TH_KIND[h.kind] || esc(h.kind)}${h.detail ? ' ' + esc(h.detail) : ''}${tx}</h3>
         <p>${esc(h.user)}${h.username ? ' · @' + esc(h.username) : ''} · ID ${h.user_id} · ${dt(h.created)}</p>${acts}</div>
         <b style="margin-left:auto;font-size:11px;white-space:nowrap;color:${stCol}">${stTxt}</b>
       </div>`;

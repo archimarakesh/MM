@@ -731,15 +731,17 @@ async def admin_topup_history(limit: int = 120) -> list:
         rows = await c.fetch("""
             SELECT * FROM (
                 SELECT t.id, t.user_id, t.amount, 'receipt' AS kind,
-                       COALESCE(t.method, '') AS detail, t.status, t.created
+                       COALESCE(t.method, '') AS detail, NULL AS txid,
+                       t.status, t.created
                 FROM topups t
                 UNION ALL
                 SELECT i.id, i.user_id, i.amount_uah, 'crypto',
-                       i.currency || COALESCE(' · ' || left(i.txid, 12), ''), i.status, i.created
+                       i.currency, i.txid, i.status, i.created
                 FROM invoices i WHERE i.order_id IS NULL
                 UNION ALL
                 SELECT p.id, p.user_id, p.amount_uah, 'card',
-                       COALESCE('•' || right(p.card, 4), ''), p.status, p.created
+                       COALESCE('•' || right(p.card, 4), ''), NULL,
+                       p.status, p.created
                 FROM card_payments p
             ) x ORDER BY created DESC LIMIT $1
         """, limit)
@@ -752,7 +754,7 @@ async def admin_topup_history(limit: int = 120) -> list:
         "user": (um[r["user_id"]]["name"] if r["user_id"] in um else None) or "?",
         "username": um[r["user_id"]]["username"] if r["user_id"] in um else None,
         "amount": r["amount"], "kind": r["kind"], "detail": r["detail"],
-        "status": r["status"], "created": r["created"],
+        "txid": r["txid"], "status": r["status"], "created": r["created"],
     } for r in rows]
 
 
