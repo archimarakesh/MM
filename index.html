@@ -516,6 +516,9 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
       </div>
       <h1 class="page-title" style="margin:0;font-size:22px">Пополнение баланса</h1>
     </div>
+    <button class="btn btn-ghost" id="casinoBack" style="display:none;margin-bottom:14px"
+      onclick="tg?.openTelegramLink ? tg.openTelegramLink(S.casinoLink) : location.href = S.casinoLink">
+      🎰 Вернуться в казино</button>
     <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="200"></div>
     <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
     <div id="tuBody"></div>
@@ -812,6 +815,8 @@ if (tg) {
   applyInsets();
 }
 const tgUser = tg?.initDataUnsafe?.user;
+// deep-link из казино: t.me/<бот>/<апп>?startapp=topup → сразу на пополнение
+window._wantTopup = tg?.initDataUnsafe?.start_param === 'topup';
 const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 
 /* ═══════════ Данные ═══════════ */
@@ -923,6 +928,13 @@ function applySnapshot(d) {
     S.adminTodo = d.admin_todo;
     const n = (d.admin_todo.orders || 0) + (d.admin_todo.topups || 0) + (d.admin_todo.withdrawals || 0);
     document.getElementById('adminDot').style.display = n ? '' : 'none';
+  }
+  if ('casino_link' in d) S.casinoLink = d.casino_link || '';
+  // пришли из казино на пополнение: открываем страницу и даём кнопку возврата
+  if (window._wantTopup && !window._topupOpened) {
+    window._topupOpened = true;
+    document.getElementById('casinoBack').style.display = S.casinoLink ? '' : 'none';
+    go('topup');
   }
   save(); syncBalance(); renderOrders(); renderGoods(); syncSettings();
   // открытая карточка заказа тоже должна показать свежий статус/ТТН

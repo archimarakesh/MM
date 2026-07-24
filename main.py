@@ -729,6 +729,8 @@ async def _snap(uid: int) -> dict:
     snap["bonus_amount"] = BONUS_AMOUNT
     snap["card_auto"] = paydome.enabled()
     snap["card_fee"] = CARD_FEE_PCT if paydome.enabled() else 0
+    # ссылка «вернуться в казино» — если пришли на пополнение из Magic Casino
+    snap["casino_link"] = os.getenv("CASINO_TG_LINK", "")
     return snap
 
 
