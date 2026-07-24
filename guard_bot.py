@@ -789,11 +789,14 @@ async def run(notify=None):
         if not message.from_user or message.sender_chat or message.from_user.is_bot:
             return  # каналы/анонимные админы/боты не модерируем
         uid = message.from_user.id
+        # очки — всем, кроме владельца (он платит призы); модерация админов
+        # по-прежнему не касается
+        if uid != GUARD_ADMIN_ID:
+            await track_activity(uid, message.from_user.full_name, message)
         if await is_admin(message.chat.id, uid):
             return
         key = (message.chat.id, uid)
         name = message.from_user.full_name
-        await track_activity(uid, name, message)   # рейтинг активности за неделю
 
         # спам стикерами: до 3 подряд, 4-й — нарушение
         if message.sticker:
