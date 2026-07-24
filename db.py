@@ -1610,26 +1610,25 @@ ACTIVITY_STRIKE_FINE = 15  # штраф за нарушение (предупр�
 async def bump_activity(user_id: int, name: str, points: int = 1):
     """Плюс очко за содержательное сообщение, но не выше дневного потолка."""
     async with _pool.acquire() as c:
+        # $3/$4 с явным ::int: LEAST из двух голых параметров не даёт Postgres
+        # вывести тип — запрос падал на подготовке, и очки не писались вовсе
         await c.execute("""
             INSERT INTO chat_activity(user_id, day, points, msgs, name)
-            VALUES($1, CURRENT_DATE, LEAST($3, $4), 1, $2)
+            VALUES($1, CURRENT_DATE, LEAST($3::int, $4::int), 1, $2)
             ON CONFLICT (user_id, day) DO UPDATE
-            SET points = LEAST(chat_activity.points + $3, $4),
+            SET points = LEAST(chat_activity.points + $3::int, $4::int),
                 msgs   = chat_activity.msgs + 1,
                 name   = COALESCE(EXCLUDED.name, chat_activity.name)
         """, user_id, name, points, ACTIVITY_DAY_CAP)
 
 
 async def activity_selftest(week_start) -> str:
-    """Самопроверка счётчика активности: пробная запись + сводка недели."""
+    """Самопроверка счётчика: гоняем НАСТОЯЩИЙ bump_activity, не копию SQL —
+    иначе ошибка в боевом запросе останется незамеченной."""
     async with _pool.acquire() as c:
         await c.execute("DELETE FROM chat_activity WHERE user_id=-1")
-        await c.execute("""
-            INSERT INTO chat_activity(user_id, day, points, msgs, name)
-            VALUES(-1, CURRENT_DATE, 1, 1, 'selftest')
-            ON CONFLICT (user_id, day) DO UPDATE
-            SET points = chat_activity.points + 1, msgs = chat_activity.msgs + 1
-        """)
+    await bump_activity(-1, "selftest")
+    async with _pool.acquire() as c:
         row = await c.fetchrow(
             "SELECT points, msgs FROM chat_activity WHERE user_id=-1 AND day=CURRENT_DATE")
         await c.execute("DELETE FROM chat_activity WHERE user_id=-1")
