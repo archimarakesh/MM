@@ -82,6 +82,7 @@ WHITELIST = ("magic_marketplace_bot", "magicmarket_boss",
 
 # состояние в памяти (сбрасывается при рестарте — мягко в пользу юзеров)
 _warns: dict = {}       # key -> [метки времени] общий счётчик
+_bad_cd: dict = {}      # key -> метка времени последнего предупреждения за мат
 _link_strikes: dict = {}  # key -> [метки времени] ссылки/реклама
 _msg_times: dict = {}   # key -> [метки времени] для флуда
 _stickers: dict = {}    # key -> счётчик подряд идущих стикеров
@@ -181,13 +182,16 @@ async def run(notify=None):
         except Exception:
             log.warning("Журнал не доставлен — админ не нажал Start у guard-бота?")
 
-    async def log_action(icon: str, action: str, chat, by, target_name, target_id, reason: str):
+    async def log_action(icon: str, action: str, chat, by, target_name, target_id,
+                         reason: str, snippet: str | None = None):
+        extra = f"\n✉️ Сообщение: «{_esc(str(snippet)[:200])}»" if snippet else ""
         await journal(
             f"{icon} <b>{action}</b>\n"
             f"👤 Кого: {_esc(target_name)} (ID <code>{target_id}</code>)\n"
             f"🛡 Кто: {_esc(by)}\n"
             f"💬 Чат: {_esc(getattr(chat, 'title', chat))}\n"
-            f"📝 Причина: {_esc(reason or 'не указана')}\n"
+            f"📝 Причина: {_esc(reason or 'не указана')}"
+            f"{extra}\n"
             f"🕒 {_now()}")
 
     async def is_admin(chat_id: int, user_id: int) -> bool:
@@ -563,6 +567,9 @@ async def run(notify=None):
         _warns[key] = lst
         n = len(lst)
         uid, name = message.from_user.id, target_name
+        # текст нарушения — в журнал, иначе не разобрать, за что прилетело
+        snippet = (message.text or message.caption
+                   or ("[стикер]" if message.sticker else "[медиа]"))
         try:
             await db.bump_strike(uid, name)   # нарушение бьёт по недельному рейтингу активности
         except Exception:
@@ -578,12 +585,12 @@ async def run(notify=None):
                             f"🔇 <b>{_esc(name)}</b> получает мут на {MUTE_MINUTES} мин — "
                             f"предел предупреждений ({_esc(reason)}).")
             await log_action("🔇", f"Мут {MUTE_MINUTES} мин (авто)", message.chat,
-                             "автомодерация", name, uid, reason)
+                             "автомодерация", name, uid, reason, snippet)
         else:
             await send_temp(message.chat.id,
                             f"⚠️ <b>{_esc(name)}</b>, предупреждение {n}/{WARN_MUTE_AT} — {_esc(reason)}.")
             await log_action("⚠️", f"Предупреждение {n}/{WARN_MUTE_AT} (авто)", message.chat,
-                             "автомодерация", name, uid, reason)
+                             "автомодерация", name, uid, reason, snippet)
 
     @dp.message(Command("top"))
     async def cmd_top(message: Message):
@@ -728,11 +735,12 @@ async def run(notify=None):
         if not message.from_user or message.sender_chat or message.from_user.is_bot:
             return  # каналы/анонимные админы/боты не модерируем
         uid = message.from_user.id
+        # очки активности — всем, включая админов (модерация их не касается)
+        await track_activity(uid, message.from_user.full_name, message)
         if await is_admin(message.chat.id, uid):
             return
         key = (message.chat.id, uid)
         name = message.from_user.full_name
-        await track_activity(uid, name, message)   # рейтинг активности за неделю
 
         # спам стикерами: до 3 подряд, 4-й — нарушение
         if message.sticker:
@@ -766,22 +774,25 @@ async def run(notify=None):
                 await send_temp(message.chat.id,
                                 f"🚫 <b>{_esc(name)}</b> забанен(а) за рекламу/ссылки (повторно).")
                 await log_action("🚫", "Бан (реклама/ссылки, авто)", message.chat,
-                                 "автомодерация", name, uid, "реклама/ссылки, 2-е нарушение")
+                                 "автомодерация", name, uid, "реклама/ссылки, 2-е нарушение", text)
             else:
                 await send_temp(message.chat.id,
                                 f"⚠️ <b>{_esc(name)}</b>, ссылки и реклама запрещены — сообщение удалено. "
                                 "Повтор — бан.")
                 await log_action("🔗", "Удаление (реклама/ссылки, авто)", message.chat,
-                                 "автомодерация", name, uid, "реклама/ссылки, 1-е предупреждение")
+                                 "автомодерация", name, uid, "реклама/ссылки, 1-е предупреждение", text)
             return
 
-        # мат/оскорбления
+        # мат/оскорбления: сообщение убираем всегда, но предупреждение и страйк —
+        # не чаще раза в 2 минуты, иначе серия из трёх словечек мгновенно даёт мут
         if has_profanity(text):
             try:
                 await message.delete()
             except Exception:
                 pass
-            await add_warn(message, name, "мат/оскорбления")
+            if time.time() - _bad_cd.get(key, 0) > 120:
+                _bad_cd[key] = time.time()
+                await add_warn(message, name, "мат/оскорбления")
             return
 
         # капс
