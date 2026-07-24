@@ -1109,15 +1109,15 @@ async def touch_device(tg_id: int, device: str, ip: str):
 
 
 async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
-    """Одноразовый бонус: раз на аккаунт, устройство и IP. Зачисляется в locked
-    (нельзя вывести, только потратить в магазине). Advisory-локи закрывают гонку."""
+    """Одноразовый бонус: раз на аккаунт и устройство. IP не проверяем —
+    мобильные операторы сажают тысячи людей на один адрес (CGNAT), и честным
+    прилетали ложные отказы; сам IP пишем в bonus_claims для разборов.
+    Зачисляется в locked (нельзя вывести, только потратить в магазине)."""
     device, ip = device[:64], ip[:64]
     async with _pool.acquire() as c, c.transaction():
-        # сериализуем параллельные заявки с одного устройства/IP
+        # сериализуем параллельные заявки с одного устройства
         if device:
             await c.execute("SELECT pg_advisory_xact_lock(hashtext('dev:'||$1))", device)
-        if ip:
-            await c.execute("SELECT pg_advisory_xact_lock(hashtext('ip:'||$1))", ip)
         claimed = await c.fetchval(
             "SELECT bonus_claimed FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         if claimed:
@@ -1125,9 +1125,6 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
         if device and await c.fetchval(
                 "SELECT 1 FROM bonus_claims WHERE device_hash=$1 LIMIT 1", device):
             raise ValueError("С этого устройства бонус уже получали")
-        if ip and await c.fetchval(
-                "SELECT 1 FROM bonus_claims WHERE ip=$1 LIMIT 1", ip):
-            raise ValueError("С этого IP бонус уже получали")
         await c.execute(
             "UPDATE users SET bonus_claimed=true, balance=balance+$1, locked=locked+$1 WHERE tg_id=$2",
             amount, tg_id)
