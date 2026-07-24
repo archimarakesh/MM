@@ -1604,7 +1604,7 @@ async def advance_grow_stages() -> list:
 # ── активность в чате (еженедельные награды) ─────────────────────────────────
 ACTIVITY_DAY_CAP = 60    # потолок очков в сутки — чтобы нельзя было нафлудить приз
 ACTIVITY_DAY_BONUS = 8   # премия за каждый день, когда человек был активен
-ACTIVITY_STRIKE_FINE = 15  # штраф за нарушение (предупреждение от модератора)
+ACTIVITY_STRIKE_FINE = 5  # штраф за нарушение (предупреждение от модератора)
 
 
 async def bump_activity(user_id: int, name: str, points: int = 1):
@@ -1678,9 +1678,12 @@ async def top_activity(week_start, week_end, limit: int = 3) -> list:
     async with _pool.acquire() as c:
         rows = await c.fetch(_TOP_SQL, week_start, week_end,
                              ACTIVITY_DAY_BONUS, ACTIVITY_STRIKE_FINE, limit)
+    # людей с очками показываем всегда: ушедший в минус из-за штрафов счёт
+    # прижимаем к нулю, а не прячем человека из списка (призы всё равно
+    # только при положительном счёте — см. award_activity_week)
     return [{"user_id": r["user_id"], "name": r["name"] or "участник",
-             "points": r["pts"], "days": r["days"], "score": int(r["score"])}
-            for r in rows if r["score"] > 0]
+             "points": r["pts"], "days": r["days"], "score": max(0, int(r["score"]))}
+            for r in rows]
 
 
 async def award_activity_week(week_start, week_end, prizes: list) -> list:
