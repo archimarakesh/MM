@@ -225,6 +225,12 @@ async def init():
                 strikes INT    NOT NULL DEFAULT 0,
                 name    TEXT,
                 PRIMARY KEY(user_id, day));
+            -- страховка от старой схемы: IF NOT EXISTS таблицу не обновляет
+            ALTER TABLE chat_activity ADD COLUMN IF NOT EXISTS points INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_activity ADD COLUMN IF NOT EXISTS msgs INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_activity ADD COLUMN IF NOT EXISTS strikes INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_activity ADD COLUMN IF NOT EXISTS name TEXT;
+            CREATE UNIQUE INDEX IF NOT EXISTS chat_activity_ud ON chat_activity(user_id, day);
             CREATE TABLE IF NOT EXISTS activity_awards(
                 week_start DATE   NOT NULL,
                 place      INT    NOT NULL,
