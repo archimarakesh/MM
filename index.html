@@ -815,8 +815,8 @@ if (tg) {
   applyInsets();
 }
 const tgUser = tg?.initDataUnsafe?.user;
-// deep-link из казино: t.me/<бот>/<апп>?startapp=topup → сразу на пополнение
-window._wantTopup = tg?.initDataUnsafe?.start_param === 'topup';
+// deep-link из казино: startapp=topup_<токен> → сразу на пополнение без пина
+window._wantTopup = (tg?.initDataUnsafe?.start_param || '').startsWith('topup');
 const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 
 /* ═══════════ Данные ═══════════ */
@@ -930,6 +930,7 @@ function applySnapshot(d) {
     document.getElementById('adminDot').style.display = n ? '' : 'none';
   }
   if ('casino_link' in d) S.casinoLink = d.casino_link || '';
+  if (d.pin_skip) S.pinSkip = true;   // пришли из казино — пин там уже вводили
   // пришли из казино на пополнение: открываем страницу и даём кнопку возврата
   if (window._wantTopup && !window._topupOpened) {
     window._topupOpened = true;
@@ -2963,6 +2964,7 @@ function initLock() {
 function configureLock() {
   const lock = document.getElementById('lock');
   if (!lock.classList.contains('show')) return;
+  if (S.pinSkip) { lock.classList.remove('show'); return; }   // сквозной проход из казино
   const title = document.getElementById('lockTitle');
   const pad = document.getElementById('lockPad');
   const dots = document.getElementById('lockDots');

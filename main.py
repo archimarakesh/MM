@@ -1,6 +1,7 @@
 """Magic Market — FastAPI (фронт + API + админка) + aiogram-бот в одном процессе (Railway)."""
 import asyncio
 import base64
+import hashlib
 import html
 import io
 import logging
@@ -729,8 +730,9 @@ async def _snap(uid: int) -> dict:
     snap["bonus_amount"] = BONUS_AMOUNT
     snap["card_auto"] = paydome.enabled()
     snap["card_fee"] = CARD_FEE_PCT if paydome.enabled() else 0
-    # ссылка «вернуться в казино» — если пришли на пополнение из Magic Casino
-    snap["casino_link"] = os.getenv("CASINO_TG_LINK", "")
+    # ссылка «вернуться в казино» с токеном: казино не спросит пин повторно
+    cas = os.getenv("CASINO_TG_LINK", "").split("?")[0]
+    snap["casino_link"] = f"{cas}?startapp=cs_{pass_token(uid)}" if cas else ""
     return snap
 
 
@@ -827,6 +829,34 @@ async def product_photo(pid: int, idx: int, size: str = "f"):
 
 
 # ── пользовательское API ─────────────────────────────────────────────────────
+# ── сквозной проход казино↔маркет: подписанный токен в deep-link ────────────
+def pass_token(uid: int, ttl: int = 1800) -> str:
+    exp = int(time.time()) + ttl
+    sig = hmac.new(WALLET_TOKEN.encode(), f"pass:{uid}:{exp}".encode(),
+                   hashlib.sha256).hexdigest()[:16]
+    return f"{exp}_{sig}"
+
+
+def pass_ok(uid: int, token: str) -> bool:
+    if not WALLET_TOKEN:
+        return False
+    try:
+        exp_s, sig = token.split("_", 1)
+        exp = int(exp_s)
+    except ValueError:
+        return False
+    if exp < time.time():
+        return False
+    want = hmac.new(WALLET_TOKEN.encode(), f"pass:{uid}:{exp}".encode(),
+                    hashlib.sha256).hexdigest()[:16]
+    return hmac.compare_digest(want, sig)
+
+
+def init_start_param(request: Request) -> str:
+    from urllib.parse import parse_qsl
+    return dict(parse_qsl(request.headers.get("X-Init-Data", ""))).get("start_param", "")
+
+
 @app.post("/api/auth")
 async def api_auth(request: Request):
     u = tg_user(request)
@@ -836,7 +866,12 @@ async def api_auth(request: Request):
     name = " ".join(filter(None, [u.get("first_name"), u.get("last_name")]))
     await db.upsert_user(u["id"], name, u.get("username"))
     await db.touch_device(u["id"], client_device(request), client_ip(request))
-    return await _snap(u["id"])
+    snap = await _snap(u["id"])
+    # пришли из казино с валидным токеном — пин там уже вводили, не спрашиваем
+    sp = init_start_param(request)
+    if sp.startswith("topup_") and pass_ok(u["id"], sp[6:]):
+        snap["pin_skip"] = True
+    return snap
 
 
 @app.post("/api/order")
