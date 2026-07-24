@@ -172,12 +172,12 @@ async def run(notify=None):
         ContentType.MIGRATE_FROM_CHAT_ID,
     }
 
-    async def journal(text: str):
+    async def journal(text: str, kb=None):
         """Запись в журнал — в личку админу (виден только ему)."""
         if not GUARD_ADMIN_ID:
             return
         try:
-            await bot.send_message(GUARD_ADMIN_ID, text, parse_mode="HTML")
+            await bot.send_message(GUARD_ADMIN_ID, text, parse_mode="HTML", reply_markup=kb)
         except Exception:
             log.warning("Журнал не доставлен — админ не нажал Start у guard-бота?")
 
@@ -496,6 +496,38 @@ async def run(notify=None):
         except Exception:
             pass
 
+    @dp.callback_query(F.data.startswith(("gban:", "gfree:", "gunmute:")))
+    async def on_guard_decision(cb: CallbackQuery):
+        """Решения админа из журнала: бан кандидата, помилование, снятие мута."""
+        if cb.from_user.id != GUARD_ADMIN_ID:
+            return await cb.answer("Только для администратора", show_alert=True)
+        try:
+            act, chat_id, uid = cb.data.split(":")
+            chat_id, uid = int(chat_id), int(uid)
+        except (ValueError, IndexError):
+            return await cb.answer()
+        if act == "gban":
+            try:
+                await bot.ban_chat_member(chat_id, uid)
+                done = "🚫 Забанен(а)"
+            except Exception:
+                return await cb.answer("Не удалось — проверьте права бота", show_alert=True)
+        else:
+            try:
+                await bot.restrict_chat_member(chat_id, uid, permissions=OPEN)
+                done = "🔊 Мут снят" if act == "gunmute" else "✅ Помилован(а), мут снят"
+            except Exception:
+                return await cb.answer("Не удалось — проверьте права бота", show_alert=True)
+        try:
+            await cb.message.edit_text(cb.message.html_text + f"\n\n<b>{done}</b>",
+                                       parse_mode="HTML")
+        except Exception:
+            try:
+                await cb.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+        await cb.answer(done)
+
     @dp.callback_query(F.data == "rclose")
     async def on_rclose(cb: CallbackQuery):
         if cb.from_user.id != GUARD_ADMIN_ID:
@@ -583,8 +615,16 @@ async def run(notify=None):
             await send_temp(message.chat.id,
                             f"🔇 <b>{_esc(name)}</b> получает мут на {MUTE_MINUTES} мин — "
                             f"предел предупреждений ({_esc(reason)}).")
-            await log_action("🔇", f"Мут {MUTE_MINUTES} мин (авто)", message.chat,
-                             "автомодерация", name, uid, reason, snippet)
+            await journal(
+                f"🔇 <b>Мут {MUTE_MINUTES} мин (авто)</b>\n"
+                f"👤 Кого: {_esc(name)} (ID <code>{uid}</code>)\n"
+                f"💬 Чат: {_esc(message.chat.title)}\n"
+                f"📝 Причина: {_esc(reason)}\n"
+                f"✉️ Сообщение: «{_esc(str(snippet)[:200])}»\n🕒 {_now()}",
+                InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="🔊 Снять мут",
+                                         callback_data=f"gunmute:{message.chat.id}:{uid}"),
+                ]]))
         else:
             await send_temp(message.chat.id,
                             f"⚠️ <b>{_esc(name)}</b>, предупреждение {n}/{WARN_MUTE_AT} — {_esc(reason)}.")
@@ -756,7 +796,7 @@ async def run(notify=None):
 
         text = message.text or message.caption or ""
 
-        # реклама/ссылки — отдельный 2-страйк → бан
+        # реклама/ссылки — 2-й страйк: мут и решение о бане за админом
         if bad_link(text):
             try:
                 await message.delete()
@@ -766,14 +806,27 @@ async def run(notify=None):
             lst.append(time.time())
             _link_strikes[key] = lst
             if len(lst) >= LINK_BAN_AT:
+                until = datetime.now(timezone.utc) + timedelta(minutes=MUTE_MINUTES)
                 try:
-                    await bot.ban_chat_member(message.chat.id, uid)
+                    await bot.restrict_chat_member(message.chat.id, uid,
+                                                   permissions=MUTED, until_date=until)
                 except Exception:
                     pass
                 await send_temp(message.chat.id,
-                                f"🚫 <b>{_esc(name)}</b> забанен(а) за рекламу/ссылки (повторно).")
-                await log_action("🚫", "Бан (реклама/ссылки, авто)", message.chat,
-                                 "автомодерация", name, uid, "реклама/ссылки, 2-е нарушение", text)
+                                f"🔇 <b>{_esc(name)}</b>: повторная реклама — мут, "
+                                "решение о бане за администратором.")
+                await journal(
+                    f"🚫 <b>Кандидат на бан: реклама/ссылки повторно</b>\n"
+                    f"👤 Кто: {_esc(name)} (ID <code>{uid}</code>)\n"
+                    f"💬 Чат: {_esc(message.chat.title)}\n"
+                    f"✉️ Сообщение: «{_esc(text[:200])}»\n"
+                    f"🔇 Пока выдан мут на {MUTE_MINUTES} мин.\n🕒 {_now()}",
+                    InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="🚫 Забанить",
+                                             callback_data=f"gban:{message.chat.id}:{uid}"),
+                        InlineKeyboardButton(text="✅ Помиловать",
+                                             callback_data=f"gfree:{message.chat.id}:{uid}"),
+                    ]]))
             else:
                 await send_temp(message.chat.id,
                                 f"⚠️ <b>{_esc(name)}</b>, ссылки и реклама запрещены — сообщение удалено. "
