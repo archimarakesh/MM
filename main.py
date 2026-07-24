@@ -535,6 +535,30 @@ if BOT_TOKEN:
         if amount > 0:
             await notify(uid, f"💰 Вам начислено <b>{amount} ₴</b> на баланс.")
 
+    @dp.message(Command("markbonus"))
+    async def cmd_markbonus(message: Message, command: CommandObject):
+        """Пометить заказ бонусным для бухгалтерии: /markbonus MM-1005 [сумма].
+        Без суммы — весь заказ считается оплаченным бонусами."""
+        if not ADMIN_ID or message.from_user.id != ADMIN_ID:
+            return
+        parts = (command.args or "").split()
+        if not parts:
+            await message.answer("Формат: <code>/markbonus MM-1005 [сумма]</code>\n"
+                                 "Без суммы — весь заказ бонусный; 0 — снять пометку.",
+                                 parse_mode="HTML")
+            return
+        amount = None
+        if len(parts) > 1 and parts[1].isdigit():
+            amount = int(parts[1])
+        try:
+            r = await db.mark_bonus_part(parts[0].upper(), amount)
+        except ValueError as e:
+            await message.answer(f"❌ {e}")
+            return
+        await message.answer(
+            f"✅ {parts[0].upper()}: бонусами {r['bonus_part']} ₴ из {r['total']} ₴ — "
+            "бухгалтерия пересчитается сама.")
+
     @dp.message(Command("promo"))
     async def cmd_promo(message: Message):
         if not ADMIN_ID or message.from_user.id != ADMIN_ID:

@@ -823,6 +823,23 @@ async def grow_stats() -> dict:
     }
 
 
+async def mark_bonus_part(order_code: str, amount: int | None) -> dict:
+    """Ручная пометка старого заказа: какая часть была оплачена бонусами.
+    Без суммы — весь заказ считается бонусным."""
+    try:
+        oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
+    except (IndexError, ValueError):
+        raise ValueError("Неверный номер заказа")
+    async with _pool.acquire() as c:
+        r = await c.fetchrow("""
+            UPDATE orders SET bonus_part = LEAST(COALESCE($2::bigint, total), total)
+            WHERE id=$1 RETURNING total, bonus_part
+        """, oid, amount)
+    if not r:
+        raise ValueError("Заказ не найден")
+    return {"total": r["total"], "bonus_part": r["bonus_part"]}
+
+
 async def sales_stats() -> dict:
     """Бухгалтерия продаж. Заказ считается проданным с момента ТТН (статус 2+):
     посылка отправлена — деньги уже получены. Бонусные оплаты (промо, приветственные)
