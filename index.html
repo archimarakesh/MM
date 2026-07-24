@@ -517,7 +517,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
       <h1 class="page-title" style="margin:0;font-size:22px">Пополнение баланса</h1>
     </div>
     <button class="btn btn-ghost" id="casinoBack" style="display:none;margin-bottom:14px"
-      onclick="tg?.openTelegramLink ? tg.openTelegramLink(S.casinoLink) : location.href = S.casinoLink">
+      onclick="backToCasino()">
       🎰 Вернуться в казино</button>
     <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="200"></div>
     <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
@@ -943,6 +943,13 @@ function applySnapshot(d) {
   save(); syncBalance(); renderOrders(); renderGoods(); syncSettings();
   // открытая карточка заказа тоже должна показать свежий статус/ТТН
   if (document.getElementById('sheet-order').classList.contains('open')) renderOrderBody(curOrderIdx);
+}
+function backToCasino() {
+  if (tg?.openTelegramLink) {
+    tg.openTelegramLink(S.casinoLink);
+    // закрыть маркет, чтобы он не висел свёрнутым за казино
+    setTimeout(() => tg.close(), 300);
+  } else location.href = S.casinoLink;
 }
 async function serverSync() {
   if (!tg?.initData || location.protocol === 'file:') return;
