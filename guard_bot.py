@@ -631,6 +631,20 @@ async def run(notify=None):
             await log_action("⚠️", f"Предупреждение {n}/{WARN_MUTE_AT} (авто)", message.chat,
                              "автомодерация", name, uid, reason, snippet)
 
+    @dp.message(Command("acheck"))
+    async def cmd_acheck(message: Message):
+        """Самопроверка счётчика активности — только для админа."""
+        if message.from_user.id != GUARD_ADMIN_ID:
+            return
+        today = datetime.now(KYIV).date()
+        start = today - timedelta(days=today.weekday())
+        try:
+            report = await db.activity_selftest(start)
+            await message.answer(f"✅ Счётчик активности:\n{report}")
+        except Exception as e:
+            await message.answer(f"❌ Счётчик сломан:\n<code>{_esc(str(e)[:400])}</code>",
+                                 parse_mode="HTML")
+
     @dp.message(Command("top"))
     async def cmd_top(message: Message):
         """Текущий рейтинг активности за идущую неделю."""

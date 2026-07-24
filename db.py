@@ -1620,6 +1620,29 @@ async def bump_activity(user_id: int, name: str, points: int = 1):
         """, user_id, name, points, ACTIVITY_DAY_CAP)
 
 
+async def activity_selftest(week_start) -> str:
+    """Самопроверка счётчика активности: пробная запись + сводка недели."""
+    async with _pool.acquire() as c:
+        await c.execute("DELETE FROM chat_activity WHERE user_id=-1")
+        await c.execute("""
+            INSERT INTO chat_activity(user_id, day, points, msgs, name)
+            VALUES(-1, CURRENT_DATE, 1, 1, 'selftest')
+            ON CONFLICT (user_id, day) DO UPDATE
+            SET points = chat_activity.points + 1, msgs = chat_activity.msgs + 1
+        """)
+        row = await c.fetchrow(
+            "SELECT points, msgs FROM chat_activity WHERE user_id=-1 AND day=CURRENT_DATE")
+        await c.execute("DELETE FROM chat_activity WHERE user_id=-1")
+        stat = await c.fetchrow("""
+            SELECT COUNT(DISTINCT user_id) AS users, COALESCE(SUM(points),0) AS pts,
+                   COALESCE(SUM(msgs),0) AS msgs
+            FROM chat_activity WHERE day >= $1 AND user_id > 0
+        """, week_start)
+    return (f"запись/чтение: ok (points={row['points']}, msgs={row['msgs']})\n"
+            f"за неделю: участников {stat['users']}, очков {stat['pts']}, "
+            f"сообщений засчитано {stat['msgs']}")
+
+
 async def bump_strike(user_id: int, name: str = ""):
     """Нарушение — минус к недельному счёту, чтобы спам не приносил призов."""
     async with _pool.acquire() as c:
