@@ -1637,9 +1637,18 @@ async def activity_selftest(week_start) -> str:
                    COALESCE(SUM(msgs),0) AS msgs
             FROM chat_activity WHERE day >= $1 AND user_id > 0
         """, week_start)
+        today_rows = await c.fetch("""
+            SELECT name, points, msgs, strikes FROM chat_activity
+            WHERE day = CURRENT_DATE AND user_id > 0
+            ORDER BY points DESC LIMIT 15
+        """)
+    lines = [f"— {r['name'] or '?'}: {r['points']} очк., {r['msgs']} сообщ."
+             + (f", страйков {r['strikes']}" if r['strikes'] else "")
+             for r in today_rows]
     return (f"запись/чтение: ok (points={row['points']}, msgs={row['msgs']})\n"
             f"за неделю: участников {stat['users']}, очков {stat['pts']}, "
-            f"сообщений засчитано {stat['msgs']}")
+            f"сообщений засчитано {stat['msgs']}"
+            + ("\n\nсегодня:\n" + "\n".join(lines) if lines else ""))
 
 
 async def bump_strike(user_id: int, name: str = ""):
