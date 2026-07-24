@@ -2309,11 +2309,17 @@ function renderAdmin(tab) {
   } else if (tab === 'orders') {
     const sa = AD.sales || {};
     const salesStats = `
-      <div class="bezel" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
-        <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:15px">Продажи · выполнено</h2><span>${sa.count || 0} заказ.</span></div>
+      <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
+        <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:15px">Бухгалтерия</h2><span>${sa.count || 0} посыл. · с момента ТТН</span></div>
         <div class="admin-stats">
-          <div><b style="color:var(--gold-soft)">${fmt(sa.revenue || 0)} ₴</b><span>выручка с полученных</span></div>
-          <div><b>${fmt(sa.grams || 0)} г</b><span>продано веса</span></div>
+          <div><b>${fmt(sa.revenue || 0)} ₴</b><span>выручка всего · ${fmt(sa.grams || 0)} г</span></div>
+          <div><b style="color:var(--gold-soft)">${fmt(sa.real || 0)} ₴</b><span>реальными деньгами</span></div>
+          <div><b style="color:var(--muted)">${fmt(sa.bonus || 0)} ₴</b><span>бонусами/промо (не деньги)</span></div>
+          <div><b style="color:var(--danger)">−${fmt((sa.fee || 0) + (sa.shipping || 0))} ₴</b><span>вывод ${sa.fee_pct || 10}% (${fmt(sa.fee || 0)}) + НП ${fmt(sa.parcel_cost || 80)}×${sa.count || 0} (${fmt(sa.shipping || 0)})</span></div>
+        </div>
+        <div style="margin-top:11px;padding-top:11px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font-size:11px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;font-weight:700">Чистая прибыль</span>
+          <b style="font-size:19px;color:var(--ok)">${fmt(sa.profit || 0)} ₴</b>
         </div>
         ${(sa.by_product || []).length ? `<div class="stat-list">
           ${sa.by_product.map(x => `<div><span>${esc(x.product)} · ${x.cnt}× · ${fmt(x.grams)} г</span><b style="color:var(--txt)">${fmt(x.revenue)} ₴</b></div>`).join('')}

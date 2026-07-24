@@ -32,6 +32,10 @@ MAX_GRAMS = 100
 MAX_PHOTO_LEN = 400_000   # ~300 КБ картинки в base64
 MAX_PHOTOS = 4
 MAX_PENDING_ORDERS = 8    # незакрытых заказов на юзера (антиспам/сток)
+
+# бухгалтерия: комиссия на вывод прибыли и фикс-расход на отправку посылки
+WITHDRAW_FEE_PCT = int(os.getenv("WITHDRAW_FEE_PCT", "10") or 10)
+PARCEL_COST = int(os.getenv("PARCEL_COST", "80") or 80)
 MAX_PENDING_TOPUPS = 8    # квитанций на проверке на юзера
 SEED_PRODUCTS = [
     ("Golden Reserve", "Флагманская позиция", "🏆", "ХИТ", 120),
@@ -114,6 +118,8 @@ async def init():
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_status INT;
+            -- сколько из суммы заказа покрыто бонусами (locked) — для бухгалтерии
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS bonus_part BIGINT NOT NULL DEFAULT 0;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_status_text TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_eta TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_arrival TEXT;
@@ -568,12 +574,15 @@ async def _guard_pending_orders(c, tg_id: int):
         raise ValueError("Слишком много незавершённых заказов — оплатите или дождитесь обработки")
 
 
-async def _insert_order(c, tg_id, p, grams, total, status, pay, ship, receipt=None) -> int:
+async def _insert_order(c, tg_id, p, grams, total, status, pay, ship,
+                        receipt=None, bonus_part=0) -> int:
     return await c.fetchval("""
-        INSERT INTO orders(user_id, product_id, product, grams, total, status, pay, receipt, ship, date)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id
+        INSERT INTO orders(user_id, product_id, product, grams, total, status, pay,
+                           receipt, ship, date, bonus_part)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
     """, tg_id, p["id"], p["name"], grams, total, status, pay, receipt,
-        json.dumps(ship, ensure_ascii=False), datetime.now().strftime("%d.%m.%Y"))
+        json.dumps(ship, ensure_ascii=False), datetime.now().strftime("%d.%m.%Y"),
+        int(bonus_part))
 
 
 async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
@@ -585,9 +594,12 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
         if pay == "balance":
             if u["balance"] < total:
                 raise ValueError("Недостаточно средств — пополните баланс")
+            # какая часть оплачена бонусами: locked списывается первым
+            bonus_part = min(int(u["locked"] or 0), total)
             await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", total, tg_id)
             await _spend_locked(c, tg_id, total)
-            oid = await _insert_order(c, tg_id, p, grams, total, 0, "balance", ship)
+            oid = await _insert_order(c, tg_id, p, grams, total, 0, "balance", ship,
+                                      bonus_part=bonus_part)
             await _ref_bonus(c, tg_id, total)
         elif pay == "card":
             await _guard_pending_orders(c, tg_id)
@@ -812,20 +824,33 @@ async def grow_stats() -> dict:
 
 
 async def sales_stats() -> dict:
-    """Агрегаты по выполненным (полученным) заказам — для статистики продаж."""
+    """Бухгалтерия продаж. Заказ считается проданным с момента ТТН (статус 2+):
+    посылка отправлена — деньги уже получены. Бонусные оплаты (промо, приветственные)
+    учитываются отдельно: это не живые деньги. Чистая прибыль = реальная выручка
+    минус комиссия на вывод и минус фикс-расход на каждую посылку."""
     async with _pool.acquire() as c:
         await _auto_deliver(c)
         tot = await c.fetchrow("""
-            SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue, COALESCE(SUM(grams),0) AS grams
-            FROM orders WHERE status=3
+            SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
+                   COALESCE(SUM(grams),0) AS grams,
+                   COALESCE(SUM(bonus_part),0) AS bonus
+            FROM orders WHERE status >= 2
         """)
         by = await c.fetch("""
             SELECT product, COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
                    COALESCE(SUM(grams),0) AS grams
-            FROM orders WHERE status=3 GROUP BY product ORDER BY revenue DESC LIMIT 20
+            FROM orders WHERE status >= 2 GROUP BY product ORDER BY revenue DESC LIMIT 20
         """)
+    revenue, bonus = int(tot["revenue"]), int(tot["bonus"])
+    real = revenue - bonus
+    fee = round(real * WITHDRAW_FEE_PCT / 100)
+    shipping = int(tot["cnt"]) * PARCEL_COST
     return {
-        "count": tot["cnt"], "revenue": int(tot["revenue"]), "grams": int(tot["grams"]),
+        "count": tot["cnt"], "revenue": revenue, "grams": int(tot["grams"]),
+        "bonus": bonus, "real": real,
+        "fee_pct": WITHDRAW_FEE_PCT, "fee": fee,
+        "parcel_cost": PARCEL_COST, "shipping": shipping,
+        "profit": real - fee - shipping,
         "by_product": [{"product": b["product"], "cnt": b["cnt"],
                         "revenue": int(b["revenue"]), "grams": int(b["grams"])} for b in by],
     }
