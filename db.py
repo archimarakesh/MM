@@ -74,6 +74,9 @@ async def init():
                 ref_earned BIGINT NOT NULL DEFAULT 0,
                 created    TIMESTAMPTZ NOT NULL DEFAULT now());
             ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_claimed BOOLEAN NOT NULL DEFAULT false;
+            -- отметка «принял правила чата» (ставит guard-бот) — гейт для бонуса:
+            -- иначе бонус успевали забрать до автокика за непринятие правил
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS rules_accepted TIMESTAMPTZ;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS device_hash TEXT;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT;
             -- locked: часть баланса (бонус), которую нельзя вывести, только потратить в магазине
@@ -1110,6 +1113,24 @@ async def touch_device(tg_id: int, device: str, ip: str):
         """, tg_id, device[:64], ip[:64])
 
 
+async def accept_rules(tg_id: int) -> None:
+    """Отметка о принятии правил чата (кнопка у guard-бота). Аккаунта в
+    магазине может ещё не быть — тогда создаём заготовку, чтобы отметка
+    не потерялась до первого входа в апп."""
+    async with _pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO users(tg_id, rules_accepted) VALUES($1, now())
+            ON CONFLICT (tg_id) DO UPDATE
+                SET rules_accepted = COALESCE(users.rules_accepted, now())
+        """, tg_id)
+
+
+async def rules_accepted(tg_id: int) -> bool:
+    async with _pool.acquire() as c:
+        return bool(await c.fetchval(
+            "SELECT rules_accepted FROM users WHERE tg_id=$1", tg_id))
+
+
 async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
     """Одноразовый бонус: раз на аккаунт и устройство. IP не проверяем —
     мобильные операторы сажают тысячи людей на один адрес (CGNAT), и честным
@@ -1120,10 +1141,14 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
         # сериализуем параллельные заявки с одного устройства
         if device:
             await c.execute("SELECT pg_advisory_xact_lock(hashtext('dev:'||$1))", device)
-        claimed = await c.fetchval(
-            "SELECT bonus_claimed FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
-        if claimed:
+        row = await c.fetchrow(
+            "SELECT bonus_claimed, rules_accepted FROM users WHERE tg_id=$1 FOR UPDATE",
+            tg_id)
+        if row["bonus_claimed"]:
             raise ValueError("Бонус уже был получен")
+        if not row["rules_accepted"]:
+            raise ValueError("Примите правила чата — кнопка под приветствием "
+                             "(или команда /rules в чате)")
         if device and await c.fetchval(
                 "SELECT 1 FROM bonus_claims WHERE device_hash=$1 LIMIT 1", device):
             raise ValueError("С этого устройства бонус уже получали")

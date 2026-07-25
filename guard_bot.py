@@ -304,6 +304,11 @@ async def run(notify=None):
             await bot.restrict_chat_member(cb.message.chat.id, target, permissions=OPEN)
         except Exception:
             log.warning("Не удалось снять мьют с %s", target)
+        # отметка в базе магазина: без неё бонус за подписку не выдаётся
+        try:
+            await db.accept_rules(target)
+        except Exception:
+            log.exception("Не записалось принятие правил: %s", target)
         try:
             await cb.message.delete()
         except Exception:
@@ -433,7 +438,14 @@ async def run(notify=None):
                 await message.delete()
             except Exception:
                 pass
-        await bot.send_message(message.chat.id, RULES_TEXT, parse_mode="HTML")
+        # кнопка принятия и здесь: старожилы (до появления приветствия) могут
+        # подтвердить правила в любой момент — это условие бонуса за подписку
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Ознакомлен(а) с правилами",
+                                 callback_data=f"ack:{message.from_user.id}"),
+        ]])
+        await bot.send_message(message.chat.id, RULES_TEXT, parse_mode="HTML",
+                               reply_markup=kb)
 
     # ── жалобы участников → в журнал админу с кнопками действий ────────────────
     @dp.message(Command("report", "жалоба"))
