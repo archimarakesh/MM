@@ -53,6 +53,7 @@ PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace
 PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,18:00,21:00").split(",") if t.strip()]
 PROMO_POSTS = [
     ("promo/egrow-1.png", ""),
+    ("promo/egrow-3.jpg", ""),
     ("promo/egrow-4.png", ""),
 ]
 # общий секрет с внешними сервисами (казино и т.п.). Пусто — кошелёк наружу закрыт
@@ -397,7 +398,9 @@ async def publish_promo(items):
 
 
 async def promo_poster():
-    """Автопостинг промо в канал: 4 слота в день, каждая картинка по 2 раза."""
+    """Автопостинг промо в канал: слот времени = своя картинка, каждая постится
+    ровно один раз в день (перед публикацией сносится её вчерашняя копия).
+    Слотов больше, чем картинок, — лишние слоты пропускаются."""
     if not (bot and PROMO_CHANNEL_ID and PROMO_TIMES):
         log.warning("Промо-постинг выключен: нет бота или PROMO_CHANNEL_ID")
         return
@@ -418,7 +421,10 @@ async def promo_poster():
             slot_key = nxt.strftime("%Y-%m-%d %H:%M")
             if await db.get_kv("last_promo") == slot_key:
                 continue  # уже постили в этот слот (например, после рестарта)
-            path, caption = PROMO_POSTS[idx % len(PROMO_POSTS)]
+            if idx >= len(PROMO_POSTS):
+                await db.set_kv("last_promo", slot_key)
+                continue        # слотов больше, чем постов — этот пустой
+            path, caption = PROMO_POSTS[idx]
             if os.path.exists(path):
                 await publish_promo([(path, caption)])
                 await db.set_kv("last_promo", slot_key)
