@@ -9,7 +9,7 @@ ENV:
   GUARD_ADMIN_ID  — кому слать журнал (по умолчанию = ADMIN_ID). Админ должен нажать
                     Start в личке guard-бота, иначе журнал не дойдёт.
   RULES_CHAT_ID   — ID чата (если задан — guard работает только там).
-  RULES_TIMEOUT   — секунд на ознакомление (по умолчанию 300 = 5 мин).
+  RULES_TIMEOUT   — секунд на ознакомление (по умолчанию 600 = 10 мин).
 Guard-бот должен быть админом чата: ограничивать/банить участников и удалять сообщения.
 """
 import asyncio
@@ -40,7 +40,7 @@ log = logging.getLogger("guard")
 GUARD_BOT_TOKEN = os.getenv("GUARD_BOT_TOKEN", "")
 GUARD_ADMIN_ID = int(os.getenv("GUARD_ADMIN_ID", os.getenv("ADMIN_ID", "0")) or 0)
 RULES_CHAT_ID = os.getenv("RULES_CHAT_ID", "")
-RULES_TIMEOUT = int(os.getenv("RULES_TIMEOUT", "300") or 300)
+RULES_TIMEOUT = int(os.getenv("RULES_TIMEOUT", "600") or 600)
 
 RULES_TEXT = (
     "📜 <b>Правила Magic Market</b>\n\n"
