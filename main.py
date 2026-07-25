@@ -1392,6 +1392,33 @@ async def api_wallet_credit(request: Request):
     return await _wallet_move(request, 1, "credit")
 
 
+@app.post("/api/wallet/avatar")
+async def api_wallet_avatar(request: Request):
+    """Фото профиля для казино. Его бот видит только тех, кто жал Start,
+    а бот магазина знает всех покупателей — отдаём фото по общему секрету."""
+    body = await request.json()
+    _wallet_auth(body)
+    uid = int(body.get("user_id") or 0)
+    if not (bot and uid):
+        raise HTTPException(404, "Нет фото")
+    try:
+        photos = await bot.get_user_profile_photos(uid, limit=1)
+        if not photos.total_count or not photos.photos:
+            raise HTTPException(404, "Нет фото")
+        file = await bot.get_file(photos.photos[0][0].file_id)
+        url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+            async with s.get(url) as r:
+                if r.status != 200:
+                    raise HTTPException(404, "Нет фото")
+                data = await r.read()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(404, "Нет фото")
+    return Response(data, media_type="image/jpeg")
+
+
 # ── пин для казино: вход в Magic Casino по пину магазина ────────────────────
 @app.post("/api/wallet/pin_state")
 async def api_wallet_pin_state(request: Request):
