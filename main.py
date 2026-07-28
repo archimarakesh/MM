@@ -805,10 +805,10 @@ async def logo_webp():
     return FileResponse("logo.webp", headers=_IMMUTABLE)
 
 
-@app.get("/casino_promo.png")
-async def casino_promo():
-    # арт слота 777 — банер-переход в казино над каталогом
-    return FileResponse("casino_promo.png", headers=_IMMUTABLE)
+@app.get("/casino_banner.jpg")
+async def casino_banner():
+    # фон банера-перехода в казино над каталогом
+    return FileResponse("casino_banner.jpg", headers=_IMMUTABLE)
 
 
 @app.get("/growphoto/{pid}")
