@@ -910,7 +910,7 @@ async def admin_orders() -> list:
 
 
 async def set_ttn(order_code: str, ttn: str) -> dict:
-    """Возвращает {user_id, code, ttn} для уведомления покупателя."""
+    """Возвращает {user_id, code, ttn, old_ttn} для уведомления покупателя."""
     try:
         oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
     except (IndexError, ValueError):
@@ -919,11 +919,18 @@ async def set_ttn(order_code: str, ttn: str) -> dict:
         o = await c.fetchrow("SELECT * FROM orders WHERE id=$1", oid)
         if not o:
             raise ValueError("Заказ не найден")
+        changed = o["ttn"] and o["ttn"] != ttn.strip()
         await c.execute("""
             UPDATE orders SET ttn=$2, status=GREATEST(status, 2), shipped_at=COALESCE(shipped_at, now())
             WHERE id=$1
         """, oid, ttn.strip())
-        return {"user_id": o["user_id"], "code": order_code, "ttn": ttn.strip()}
+        if changed:  # старый статус НП относится к прежнему ТТН — сбрасываем, трекер подтянет заново
+            await c.execute("""
+                UPDATE orders SET np_status=NULL, np_status_text=NULL, np_eta=NULL, np_arrival=NULL
+                WHERE id=$1
+            """, oid)
+        return {"user_id": o["user_id"], "code": order_code,
+                "ttn": ttn.strip(), "old_ttn": o["ttn"]}
 
 
 async def order_to_work(order_code: str) -> dict:

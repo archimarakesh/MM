@@ -1657,9 +1657,14 @@ async def api_admin_ttn(request: Request):
         res = await db.set_ttn(str(b.get("order", "")), str(b.get("ttn", "")))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    await notify(res["user_id"],
-                 f"📦 Заказ <b>{res['code']}</b> в пути!\n"
-                 f"ТТН Новой Почты: <code>{res['ttn']}</code>")
+    if res["old_ttn"] and res["old_ttn"] != res["ttn"]:
+        await notify(res["user_id"],
+                     f"✏️ ТТН по заказу <b>{res['code']}</b> обновлён.\n"
+                     f"Новый ТТН Новой Почты: <code>{res['ttn']}</code>")
+    elif not res["old_ttn"]:
+        await notify(res["user_id"],
+                     f"📦 Заказ <b>{res['code']}</b> в пути!\n"
+                     f"ТТН Новой Почты: <code>{res['ttn']}</code>")
     return {"orders": await db.admin_orders()}
 
 
