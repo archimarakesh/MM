@@ -90,36 +90,30 @@ h1.page-title{font-weight:800;font-size:clamp(24px,7vw,30px);
   line-height:1.15;letter-spacing:-.02em;margin-bottom:4px}
 h1.page-title em{font-style:normal;color:inherit}
 .page-sub{color:var(--muted);font-size:13.5px;line-height:1.55;margin-bottom:20px}
-/* банер перехода в казино над каталогом */
-.casino-banner{position:relative;display:flex;align-items:center;gap:8px;margin:12px 0 2px;
-  padding:14px 8px 14px 16px;border-radius:20px;cursor:pointer;overflow:hidden;
-  border:1px solid rgba(212,175,55,.45);
-  background:
-    radial-gradient(120% 170% at 85% 30%,rgba(212,60,60,.16),transparent 55%),
-    radial-gradient(130% 160% at 12% -30%,rgba(212,175,55,.3),transparent 55%),
-    linear-gradient(135deg,#14361f 0%,#0b2213 45%,#071309 100%);
-  box-shadow:0 14px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08)}
+/* банер перехода в казино над каталогом: фон — арт с картами и семёркой */
+.casino-banner{position:relative;display:flex;align-items:center;justify-content:flex-end;
+  min-height:118px;margin:12px 0 2px;padding:14px 16px;border-radius:20px;cursor:pointer;
+  overflow:hidden;border:1px solid rgba(212,175,55,.45);
+  background:#0a0d12 url("/casino_banner.jpg") left center/cover no-repeat;
+  box-shadow:0 14px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.07)}
 .casino-banner:active{transform:scale(.985)}
-.cb-glow{position:absolute;right:6%;top:-46px;width:190px;height:190px;border-radius:50%;
-  background:radial-gradient(circle,rgba(232,201,106,.28),transparent 65%);pointer-events:none}
 .cb-shine{position:absolute;top:0;bottom:0;width:46px;transform:skewX(-18deg);
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.14),transparent);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);
   animation:cbShine 3.2s ease-in-out infinite;pointer-events:none}
 @keyframes cbShine{0%,55%{left:-60px}90%,100%{left:110%}}
-.cb-tx{flex:1;min-width:0;position:relative;z-index:1}
-.cb-tx b{display:block;font-weight:800;font-size:19px;letter-spacing:.1em;line-height:1;
+.cb-tx{position:relative;z-index:1;text-align:right}
+.cb-tx b{display:block;font-weight:800;font-size:20px;letter-spacing:.1em;line-height:1;
   background:linear-gradient(180deg,#fff3c9,#e8c96a 55%,#a97f16);
   -webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
-.cb-tx b i{font-style:normal;letter-spacing:.26em;display:block;font-size:12.5px;margin-top:3px;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.6))}
+.cb-tx b i{font-style:normal;letter-spacing:.28em;display:block;font-size:13px;margin-top:3px;
   color:#f3eee2;background:none;-webkit-text-fill-color:#f3eee2}
-.cb-tx span{display:block;font-size:10px;color:var(--muted);margin-top:6px;line-height:1.45}
+.cb-tx span{display:block;font-size:10px;color:#b9c2cf;margin-top:6px;line-height:1.45;
+  text-shadow:0 1px 3px rgba(0,0,0,.7)}
 .cb-cta{display:inline-block;margin-top:9px;font-weight:800;font-size:12px;color:#14100a;
   padding:7px 16px;border-radius:16px;white-space:nowrap;
   background:linear-gradient(135deg,#f0d27a,#c9992e);
   box-shadow:0 6px 14px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.5)}
-.cb-art{flex:none;width:158px;margin:-10px -2px -12px 0;position:relative;z-index:1;
-  filter:drop-shadow(0 6px 12px rgba(0,0,0,.5))}
 .section-head{display:flex;align-items:baseline;justify-content:space-between;margin:26px 0 12px}
 .section-head h2{font-weight:800;font-size:16.5px;letter-spacing:-.01em}
 .section-head span{font-size:11px;color:var(--muted-2);letter-spacing:.12em;text-transform:uppercase}
@@ -472,14 +466,12 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <section class="view active" id="view-shop">
     <!-- банер-переход в казино: общий баланс, играть можно сразу -->
     <div class="casino-banner" id="casinoBanner" style="display:none" onclick="backToCasino()">
-      <div class="cb-glow"></div>
       <div class="cb-shine"></div>
       <div class="cb-tx">
         <b>MAGIC<i>CASINO</i></b>
         <span>рулетка · покер · слоты<br>общий баланс с маркетом</span>
         <div class="cb-cta">🎰 Играть</div>
       </div>
-      <img class="cb-art" src="/casino_promo.png" alt="">
     </div>
     <h1 class="page-title" style="margin-top:10px">Каталог</h1>
     <p class="page-sub">Чем больше вес — тем ниже цена за грамм.<br>Доставка Новой Почтой по всей стране.</p>
