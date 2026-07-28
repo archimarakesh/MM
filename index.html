@@ -2292,7 +2292,7 @@ function renderAdmin(tab) {
     ['orders', 'Заказы' + (ordersTodo ? ` · ${ordersTodo}${dot}` : '')],
     ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}${dot}` : '')],
     ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}${dot}` : '')],
-    ['promo', 'Промокоды'], ['pay', 'Оплата'],
+    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
     `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
@@ -2447,6 +2447,26 @@ function renderAdmin(tab) {
       <div id="promoGenerated"></div>
       ${pr.stats.length ? `<div class="section-head"><h2>Выпущено</h2></div>` + pr.stats.map(s =>
         `<p class="note" style="margin:2px 0">${fmt(s.amount)} ₴ — использовано <b style="color:var(--txt)">${s.used}/${s.total}</b></p>`).join('') : ''}`;
+  } else if (tab === 'refs') {
+    b.innerHTML = '<p class="note">Загрузка…</p>';
+    API.call('/api/admin/referrals').then(d => {
+      if (adminTab !== 'refs') return;
+      const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]));
+      b.innerHTML = `
+        <div class="admin-stats" style="margin-bottom:12px">
+          <div><b>${fmt(d.total_invited)}</b><span>пришло по рефералкам</span></div>
+          <div><b>${fmt(d.total_earned)} ₴</b><span>выплачено бонусов (магазин + казино)</span></div>
+          <div><b>${fmt(d.buys_total)} ₴</b><span>покупки приглашённых · ${fmt(d.buys_n)} зак.</span></div>
+          <div><b>${fmt(d.buys_total30)} ₴</b><span>за 30 дней · ${fmt(d.buys_n30)} зак.</span></div>
+        </div>
+        <div class="section-head"><h2>Топ рефереров</h2></div>
+        ${d.top.length ? d.top.map(t => `
+          <div class="set-row" style="cursor:default">
+            <div><h3>${esc(t.name || 'Без имени')}${t.username ? ` · @${esc(t.username)}` : ''} · ${t.pct}%</h3>
+            <p>приглашено ${t.invited} · покупок ${fmt(t.orders)} на ${fmt(t.total)} ₴
+            (30 дн: ${fmt(t.orders30)} на ${fmt(t.total30)} ₴) · заработал ${fmt(t.ref_earned)} ₴</p></div>
+          </div>`).join('') : '<p class="note">рефереров пока нет</p>'}`;
+    }).catch(() => { if (adminTab === 'refs') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
   } else {
     const s = AD.settings;
     b.innerHTML = `

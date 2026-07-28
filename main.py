@@ -1571,6 +1571,13 @@ async def api_admin_payment_resolve(request: Request):
     return {"topup_history": await db.admin_topup_history()}
 
 
+@app.post("/api/admin/referrals")
+async def api_admin_referrals(request: Request):
+    """Статистика реферальной программы: топ рефереров и покупки приглашённых."""
+    admin_user(request)
+    return await db.admin_ref_stats()
+
+
 @app.post("/api/admin/data")
 async def api_admin_data(request: Request):
     admin_user(request)

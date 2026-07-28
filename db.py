@@ -1823,12 +1823,70 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
             raise ValueError("Недостаточно средств — бонусные деньги в игре не участвуют")
         new_balance = u["balance"] + amount
         await c.execute("UPDATE users SET balance=$1 WHERE tg_id=$2", new_balance, tg_id)
+        # реферальные выплаты казино приходят сюда с ref='referral' —
+        # учитываем их и в ref_earned, чтобы статистика была общей
+        if amount > 0 and (str(ref) == "referral" or str(kind) == "referral"):
+            await c.execute(
+                "UPDATE users SET ref_earned = ref_earned + $1 WHERE tg_id=$2",
+                amount, tg_id)
         await c.execute("""
             INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
             VALUES($1,$2,$3,$4,$5,$6)
         """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), new_balance)
         return {"balance": new_balance, "locked": locked,
                 "withdrawable": max(0, new_balance - locked), "duplicate": False}
+
+
+# ── статистика реферальной программы для админки ────────────────────────────
+async def admin_ref_stats() -> dict:
+    """Топ рефереров: приглашённые, покупки приглашённых (всего и за 30 дней),
+    заработано бонусов; плюс общие итоги программы."""
+    async with _pool.acquire() as c:
+        total_invited = int(await c.fetchval(
+            "SELECT COUNT(*) FROM users WHERE ref_by IS NOT NULL") or 0)
+        total_earned = int(await c.fetchval(
+            "SELECT COALESCE(SUM(ref_earned), 0) FROM users") or 0)
+        buys = await c.fetchrow("""
+            SELECT COUNT(o.id) AS n, COALESCE(SUM(o.total), 0) AS total,
+                   COUNT(o.id) FILTER (WHERE to_date(o.date, 'DD.MM.YYYY')
+                       >= CURRENT_DATE - 30) AS n30,
+                   COALESCE(SUM(o.total) FILTER (WHERE to_date(o.date, 'DD.MM.YYYY')
+                       >= CURRENT_DATE - 30), 0) AS total30
+            FROM orders o
+            JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
+            WHERE o.status >= 0 AND o.date IS NOT NULL
+        """)
+        top = await c.fetch("""
+            WITH inv AS (
+                SELECT ref_by AS r, COUNT(*) AS invited
+                FROM users WHERE ref_by IS NOT NULL GROUP BY ref_by),
+            pur AS (
+                SELECT u.ref_by AS r, COUNT(o.id) AS orders,
+                       COALESCE(SUM(o.total), 0) AS total,
+                       COUNT(o.id) FILTER (WHERE to_date(o.date, 'DD.MM.YYYY')
+                           >= CURRENT_DATE - 30) AS orders30,
+                       COALESCE(SUM(o.total) FILTER (WHERE to_date(o.date, 'DD.MM.YYYY')
+                           >= CURRENT_DATE - 30), 0) AS total30
+                FROM orders o
+                JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
+                WHERE o.status >= 0 AND o.date IS NOT NULL
+                GROUP BY u.ref_by)
+            SELECT ref.tg_id, ref.name, ref.username, ref.ref_earned,
+                   inv.invited,
+                   COALESCE(pur.orders, 0) AS orders, COALESCE(pur.total, 0) AS total,
+                   COALESCE(pur.orders30, 0) AS orders30, COALESCE(pur.total30, 0) AS total30
+            FROM inv
+            JOIN users ref ON ref.tg_id = inv.r
+            LEFT JOIN pur ON pur.r = inv.r
+            ORDER BY COALESCE(pur.total, 0) DESC, inv.invited DESC
+            LIMIT 30
+        """)
+    return {
+        "total_invited": total_invited, "total_earned": total_earned,
+        "buys_n": int(buys["n"] or 0), "buys_total": int(buys["total"] or 0),
+        "buys_n30": int(buys["n30"] or 0), "buys_total30": int(buys["total30"] or 0),
+        "top": [{**dict(t), "pct": round(ref_percent(t["invited"]) * 100)} for t in top],
+    }
 
 
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
