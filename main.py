@@ -1601,7 +1601,8 @@ async def api_np_warehouses(request: Request):
 
 @app.post("/api/admin/payment/resolve")
 async def api_admin_payment_resolve(request: Request):
-    """Ручное решение зависшего платежа: человек оплатил, API не подтвердил."""
+    """Ручное управление статусом платежа: зачислить (+баланс) или отменить
+    (списать, если раньше зачисляли) — в любую сторону."""
     admin_user(request)
     b = await request.json()
     try:
@@ -1609,9 +1610,12 @@ async def api_admin_payment_resolve(request: Request):
             str(b.get("kind", "")), pint(b.get("id")), bool(b.get("approve")))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if res["approved"]:
+    if res["credited"]:
         await notify(res["user_id"],
                      f"✅ Оплата подтверждена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+    elif res["reversed"]:
+        await notify(res["user_id"],
+                     f"⚠️ Пополнение на <b>{res['amount']} ₴</b> отменено — сумма списана с баланса.")
     return {"topup_history": await db.admin_topup_history()}
 
 
