@@ -126,6 +126,9 @@ async def init():
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_status_text TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_eta TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_arrival TEXT;
+            -- реальная метка времени заказа: date хранится строкой 'DD.MM.YYYY'
+            -- (для показа), а агрегаты по времени считаем по created
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS created TIMESTAMPTZ NOT NULL DEFAULT now();
             UPDATE orders SET ship=NULL WHERE status=3 AND ship IS NOT NULL;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
             CREATE TABLE IF NOT EXISTS topups(
@@ -1848,13 +1851,11 @@ async def admin_ref_stats() -> dict:
             "SELECT COALESCE(SUM(ref_earned), 0) FROM users") or 0)
         buys = await c.fetchrow("""
             SELECT COUNT(o.id) AS n, COALESCE(SUM(o.total), 0) AS total,
-                   COUNT(o.id) FILTER (WHERE to_date(o.date, 'DD.MM.YYYY')
-                       >= CURRENT_DATE - 30) AS n30,
-                   COALESCE(SUM(o.total) FILTER (WHERE to_date(o.date, 'DD.MM.YYYY')
-                       >= CURRENT_DATE - 30), 0) AS total30
+                   COUNT(o.id) FILTER (WHERE o.created >= now() - interval '30 days') AS n30,
+                   COALESCE(SUM(o.total) FILTER (WHERE o.created >= now() - interval '30 days'), 0) AS total30
             FROM orders o
             JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
-            WHERE o.status >= 0 AND o.date IS NOT NULL
+            WHERE o.status >= 0
         """)
         top = await c.fetch("""
             WITH inv AS (
@@ -1863,13 +1864,11 @@ async def admin_ref_stats() -> dict:
             pur AS (
                 SELECT u.ref_by AS r, COUNT(o.id) AS orders,
                        COALESCE(SUM(o.total), 0) AS total,
-                       COUNT(o.id) FILTER (WHERE to_date(o.date, 'DD.MM.YYYY')
-                           >= CURRENT_DATE - 30) AS orders30,
-                       COALESCE(SUM(o.total) FILTER (WHERE to_date(o.date, 'DD.MM.YYYY')
-                           >= CURRENT_DATE - 30), 0) AS total30
+                       COUNT(o.id) FILTER (WHERE o.created >= now() - interval '30 days') AS orders30,
+                       COALESCE(SUM(o.total) FILTER (WHERE o.created >= now() - interval '30 days'), 0) AS total30
                 FROM orders o
                 JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
-                WHERE o.status >= 0 AND o.date IS NOT NULL
+                WHERE o.status >= 0
                 GROUP BY u.ref_by)
             SELECT ref.tg_id, ref.name, ref.username, ref.ref_earned,
                    inv.invited,
@@ -1908,9 +1907,18 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         if old_id == new_id:
             raise ValueError("Это тот же аккаунт")
         old = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", old_id)
+        if not old:
+            raise ValueError("Аккаунт для переноса не найден")
+        # целевой аккаунт может ещё не существовать (перенос до первого входа)
+        await c.execute("INSERT INTO users(tg_id) VALUES($1) ON CONFLICT (tg_id) DO NOTHING", new_id)
+        # переносим И locked: иначе бонусные (невыводимые) деньги превратились бы
+        # в выводимый баланс на новом аккаунте (отмывание бонусов)
         await c.execute("""
-            UPDATE users SET balance=balance+$1, ref_earned=ref_earned+$2 WHERE tg_id=$3
-        """, old["balance"], old["ref_earned"], new_id)
+            UPDATE users SET balance=balance+$1, locked=locked+$2, ref_earned=ref_earned+$3,
+                bonus_claimed = bonus_claimed OR $4
+            WHERE tg_id=$5
+        """, old["balance"], old["locked"] or 0, old["ref_earned"],
+             old["bonus_claimed"], new_id)
         await c.execute("UPDATE orders SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE topups SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE invoices SET user_id=$1 WHERE user_id=$2", new_id, old_id)
@@ -1919,7 +1927,11 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         await c.execute("UPDATE shares SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE withdrawals SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE promos SET used_by=$1 WHERE used_by=$2", new_id, old_id)
-        await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2", new_id, old_id)
+        # приглашённых старого аккаунта переводим на новый, но не создаём
+        # самоссылку, если новый аккаунт сам был приглашён старым
+        await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2 AND tg_id <> $1",
+                        new_id, old_id)
+        await c.execute("UPDATE users SET ref_by=NULL WHERE tg_id=$1 AND ref_by=$1", new_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", old_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", old_id)
         return await snapshot(new_id, c)
