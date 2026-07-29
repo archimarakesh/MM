@@ -2462,10 +2462,15 @@ function renderAdmin(tab) {
       const tx = h.kind === 'crypto' && h.txid && h.txid !== 'manual'
         ? ` <a href="https://tronscan.org/#/transaction/${esc(h.txid)}" target="_blank"
              rel="noopener" style="color:var(--gold-soft);text-decoration:none">tx↗</a>` : '';
+      // для карты — номер заявки PayDome: по нему платёж ищется в кабинете провайдера
+      const ref = h.kind === 'card' && h.ref
+        ? `<p style="margin-top:3px">заявка PayDome:
+             <b style="color:var(--gold-soft);cursor:pointer;font-family:ui-monospace,monospace"
+                title="скопировать" onclick="copyText('${esc(h.ref)}')">${esc(h.ref)}</b></p>` : '';
       return `
       <div class="set-row" style="cursor:default;flex-wrap:wrap">
         <div><h3 style="font-size:13px">${fmt(h.amount)} ₴ · ${TH_KIND[h.kind] || esc(h.kind)}${h.detail ? ' ' + esc(h.detail) : ''}${tx}</h3>
-        <p>${esc(h.user)}${h.username ? ' · @' + esc(h.username) : ''} · ID ${h.user_id} · ${dt(h.created)}</p>${acts}</div>
+        <p>${esc(h.user)}${h.username ? ' · @' + esc(h.username) : ''} · ID ${h.user_id} · ${dt(h.created)}</p>${ref}${acts}</div>
         <b style="margin-left:auto;font-size:11px;white-space:nowrap;color:${stCol}">${stTxt}</b>
       </div>`;
     }).join('');
