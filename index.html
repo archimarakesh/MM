@@ -2450,13 +2450,17 @@ function renderAdmin(tab) {
     };
     const hist = (AD.topup_history || []).map(h => {
       const [stTxt, stCol] = TH_ST[h.status] || ['?', 'var(--muted)'];
-      // зависший карточный/крипто-платёж админ может решить сам по квитанции
-      const acts = h.status === 0 && h.kind !== 'receipt' ? `
+      // карточный/крипто-платёж админ может перевести в любой статус вручную:
+      // зачислить (+баланс) или отменить (списать, если раньше зачисляли)
+      const canManage = h.kind !== 'receipt';
+      const canCredit = canManage && h.status !== 1;   // ещё не зачислен
+      const canCancel = canManage && h.status !== 2;   // ещё не отменён
+      const acts = (canCredit || canCancel) ? `
         <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn btn-gold" style="padding:8px 14px;font-size:12px"
-            onclick="resolvePayment('${h.kind}', ${h.id}, true)">Зачислить</button>
-          <button class="btn btn-ghost" style="padding:8px 14px;font-size:12px"
-            onclick="resolvePayment('${h.kind}', ${h.id}, false)">Отменить</button>
+          ${canCredit ? `<button class="btn btn-gold" style="padding:8px 14px;font-size:12px"
+            onclick="resolvePayment('${h.kind}', ${h.id}, true, ${h.status})">${h.status === 2 ? 'Зачислить (вернуть)' : 'Зачислить'}</button>` : ''}
+          ${canCancel ? `<button class="btn btn-ghost" style="padding:8px 14px;font-size:12px"
+            onclick="resolvePayment('${h.kind}', ${h.id}, false, ${h.status})">${h.status === 1 ? 'Отменить и списать' : 'Отменить'}</button>` : ''}
         </div>` : '';
       // для крипты — ссылка на транзакцию в обозревателе (tronscan для TRC/TRX)
       const tx = h.kind === 'crypto' && h.txid && h.txid !== 'manual'
@@ -2895,13 +2899,16 @@ async function decideTopup(id, approve) {
   haptic('medium'); toast(approve ? 'Зачислено ✓' : 'Отклонено');
   renderAdmin('topups');
 }
-function resolvePayment(kind, id, approve) {
-  const msg = approve ? 'Зачислить платёж вручную?' : 'Отменить платёж?';
+function resolvePayment(kind, id, approve, status) {
+  // сообщение зависит от того, двигаем ли мы деньги: было ли уже зачислено
+  const msg = approve
+    ? (status === 2 ? 'Зачислить платёж и вернуть сумму на баланс?' : 'Зачислить платёж вручную — сумма уйдёт на баланс?')
+    : (status === 1 ? 'Отменить платёж и списать сумму с баланса пользователя?' : 'Отклонить платёж?');
   const go = async () => {
     try {
       AD.topup_history = (await API.call('/api/admin/payment/resolve', { kind, id, approve })).topup_history;
     } catch (e) { return toast(e.message); }
-    haptic('medium'); toast(approve ? 'Зачислено ✓' : 'Отменено');
+    haptic('medium'); toast(approve ? 'Зачислено ✓' : (status === 1 ? 'Отменено, списано' : 'Отклонено'));
     renderAdmin('topups');
   };
   if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });

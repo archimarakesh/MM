@@ -779,33 +779,49 @@ async def admin_topup_history(limit: int = 120) -> list:
 
 
 async def admin_payment_resolve(kind: str, pid: int, approve: bool) -> dict:
-    """Ручное решение по зависшему платежу «в обработке»: карта или крипто-счёт
-    (пополнение). Человек оплатил, а API не подтвердил — админ зачисляет по
-    квитанции сам. Начисление — как в автоматическом пути, без реф-бонуса."""
+    """Ручное управление статусом платежа (карта/крипто-пополнение) в любую
+    сторону. approve=True → «зачислено» (+баланс, если ещё не начисляли),
+    approve=False → «отклонено» (списываем баланс, если раньше зачисляли).
+    Баланс двигаем ровно по факту смены зачисления — повторное решение в тот
+    же статус запрещено, поэтому двойного начисления/списания не будет."""
+    tgt = 1 if approve else 2
     async with _pool.acquire() as c, c.transaction():
         if kind == "card":
             r = await c.fetchrow(
-                "SELECT * FROM card_payments WHERE id=$1 AND status=0 FOR UPDATE", pid)
+                "SELECT * FROM card_payments WHERE id=$1 FOR UPDATE", pid)
             if not r:
-                raise ValueError("Платёж не найден или уже решён")
-            await c.execute("UPDATE card_payments SET status=$2 WHERE id=$1",
-                            pid, 1 if approve else 2)
+                raise ValueError("Платёж не найден")
+            if r["status"] == tgt:
+                raise ValueError("Платёж уже в этом статусе")
+            await c.execute("UPDATE card_payments SET status=$2 WHERE id=$1", pid, tgt)
             uid, amount = r["user_id"], r["amount_uah"]
         elif kind == "crypto":
             r = await c.fetchrow(
-                "SELECT * FROM invoices WHERE id=$1 AND status=0 AND order_id IS NULL FOR UPDATE",
-                pid)
+                "SELECT * FROM invoices WHERE id=$1 AND order_id IS NULL FOR UPDATE", pid)
             if not r:
-                raise ValueError("Счёт не найден или уже решён")
+                raise ValueError("Счёт не найден")
+            if r["status"] == tgt:
+                raise ValueError("Счёт уже в этом статусе")
             await c.execute(
                 "UPDATE invoices SET status=$2, txid=COALESCE(txid, 'manual') WHERE id=$1",
-                pid, 1 if approve else 2)
+                pid, tgt)
             uid, amount = r["user_id"], r["amount_uah"]
         else:
             raise ValueError("Неизвестный тип платежа")
-        if approve:
+        was_credited = r["status"] == 1        # деньги уже были на балансе
+        credited = reversed_ = False
+        if approve and not was_credited:       # зачисляем впервые
             await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2", amount, uid)
-    return {"user_id": uid, "amount": amount, "approved": approve}
+            credited = True
+        elif not approve and was_credited:      # откатываем ранее зачисленное
+            await c.execute("""
+                UPDATE users SET balance = GREATEST(0, balance - $1),
+                                 locked  = LEAST(locked, GREATEST(0, balance - $1))
+                WHERE tg_id=$2
+            """, amount, uid)
+            reversed_ = True
+    return {"user_id": uid, "amount": amount, "approved": approve,
+            "credited": credited, "reversed": reversed_}
 
 
 async def topup_decide(topup_id: int, approve: bool) -> dict:
