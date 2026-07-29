@@ -905,28 +905,19 @@ let S = JSON.parse(localStorage.getItem(DB_KEY) || 'null') || {
 const save = () => localStorage.setItem(DB_KEY, JSON.stringify(S));
 
 /* ═══════════ API (Railway-бэкенд; без него — демо-режим) ═══════════ */
-let DEV = localStorage.getItem('mm_dev') || '';
+/* Случайный ID устройства вместо canvas-отпечатка: у одинаковых телефонов
+   отпечатки совпадали, и честные новички ловили «бонус уже получали».
+   localStorage в Telegram общий для всех аккаунтов на одном телефоне,
+   так что мультиаккаунт с одного устройства по-прежнему видно. */
+let DEV = localStorage.getItem('mm_dev2') || '';
 async function deviceHash() {
   if (DEV) return DEV;
   try {
-    const cv = document.createElement('canvas');
-    cv.width = 240; cv.height = 60;
-    const g = cv.getContext('2d');
-    g.textBaseline = 'top'; g.font = '16px Arial';
-    g.fillStyle = '#f60'; g.fillRect(10, 10, 100, 30);
-    g.fillStyle = '#069'; g.fillText('MagicMarket🌹', 4, 20);
-    const data = [
-      cv.toDataURL(), navigator.userAgent, navigator.platform, navigator.language,
-      screen.width, screen.height, screen.colorDepth,
-      Intl.DateTimeFormat().resolvedOptions().timeZone,
-      navigator.hardwareConcurrency, navigator.maxTouchPoints,
-    ].join('|');
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
-    DEV = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+    DEV = crypto.randomUUID().replace(/-/g, '');
   } catch (e) {
-    DEV = 'na';
+    DEV = [...Array(32)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
   }
-  localStorage.setItem('mm_dev', DEV);
+  localStorage.setItem('mm_dev2', DEV);
   return DEV;
 }
 const API = {

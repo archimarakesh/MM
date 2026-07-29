@@ -1177,6 +1177,8 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
     прилетали ложные отказы; сам IP пишем в bonus_claims для разборов.
     Зачисляется в locked (нельзя вывести, только потратить в магазине)."""
     device, ip = device[:64], ip[:64]
+    if device == "na":  # заглушка старого клиента, совпадала у всех — не сравниваем
+        device = ""
     async with _pool.acquire() as c, c.transaction():
         # сериализуем параллельные заявки с одного устройства
         if device:
