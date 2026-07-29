@@ -534,6 +534,17 @@ async def _spend_locked(c, tg_id: int, amount: int):
         "UPDATE users SET locked = GREATEST(0, locked - $1) WHERE tg_id=$2", amount, tg_id)
 
 
+# очередь реф-уведомлений: заполняется в _ref_bonus, main.py разбирает её и
+# шлёт рефереру DM после того, как транзакция оплаты успешно закоммитилась
+_REF_NOTIFY: list = []
+
+
+def pop_ref_notify() -> list:
+    q = _REF_NOTIFY[:]
+    _REF_NOTIFY.clear()
+    return q
+
+
 async def _ref_bonus(c, buyer_id: int, total: int):
     """Процент рефереру по его уровню — начисляется только после фактической оплаты."""
     ref_by = await c.fetchval("SELECT ref_by FROM users WHERE tg_id=$1", buyer_id)
@@ -543,6 +554,8 @@ async def _ref_bonus(c, buyer_id: int, total: int):
         await c.execute("""
             UPDATE users SET balance=balance+$1, ref_earned=ref_earned+$1 WHERE tg_id=$2
         """, bonus, ref_by)
+        if bonus > 0:
+            _REF_NOTIFY.append({"ref_by": ref_by, "bonus": bonus, "pct": round(ref_percent(invited) * 100)})
 
 
 async def _order_product_total(c, product_id: int, grams: int, lock: bool = False):
@@ -1838,6 +1851,32 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
         """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), new_balance)
         return {"balance": new_balance, "locked": locked,
                 "withdrawable": max(0, new_balance - locked), "duplicate": False}
+
+
+async def wallet_bonus(tg_id: int, amount: int, op_id: str,
+                       kind: str = "bonus", ref: str = None) -> dict:
+    """Начисление БОНУСА: идёт в locked (нельзя вывести, только тратить в
+    магазине). Используется рейкбеком из казино. Идемпотентно по op_id."""
+    op_id = str(op_id or "").strip()
+    if not op_id or len(op_id) > 64:
+        raise ValueError("Неверный op_id")
+    if amount <= 0:
+        raise ValueError("Сумма бонуса должна быть > 0")
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("INSERT INTO users(tg_id) VALUES($1) ON CONFLICT (tg_id) DO NOTHING", tg_id)
+        await c.execute("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        prev = await c.fetchrow("SELECT balance_after FROM wallet_ops WHERE op_id=$1", op_id)
+        if prev:
+            return {"balance": prev["balance_after"], "duplicate": True}
+        r = await c.fetchrow("""
+            UPDATE users SET balance=balance+$1, locked=locked+$1 WHERE tg_id=$2
+            RETURNING balance
+        """, amount, tg_id)
+        await c.execute("""
+            INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
+            VALUES($1,$2,$3,$4,$5,$6)
+        """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), r["balance"])
+        return {"balance": r["balance"], "duplicate": False}
 
 
 # ── статистика реферальной программы для админки ────────────────────────────
