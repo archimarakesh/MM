@@ -280,6 +280,7 @@ async def _settle(inv: dict, txid: str) -> bool:
         await notify(ADMIN_ID,
                      f"₿ Крипто-пополнение: счёт #{inv['id']}, +{res['amount']} ₴ "
                      f"({inv['amount_crypto']} {CRYPTO[inv['currency']]['label']}).")
+    await _drain_ref_notify()          # реферальные с этой оплаты
     return True
 
 
@@ -609,6 +610,15 @@ async def ws_push(user_id: int):
             WS_CLIENTS.get(user_id, set()).discard(ws)
 
 
+async def _drain_ref_notify():
+    """Разослать рефереру уведомление о начислении с покупки приглашённого."""
+    for r in db.pop_ref_notify():
+        await notify(r["ref_by"],
+                     f"🤝 <b>Реферальный бонус: +{r['bonus']} ₴</b>\n"
+                     f"Ваш приглашённый совершил покупку — начислено {r['pct']}% "
+                     f"на баланс.")
+
+
 async def notify(chat_id: int, text: str):
     """Уведомление в Telegram; ошибки не роняют API."""
     if chat_id:
@@ -909,6 +919,7 @@ async def api_order(request: Request):
                  f"{esc(snap.get('order_product'))} · {snap['order_grams']} г · {snap['order_total']} ₴\n"
                  f"{ship_txt}")
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
+    await _drain_ref_notify()          # реферальные с оплаты заказа балансом
     return snap
 
 
@@ -1417,6 +1428,25 @@ async def api_wallet_credit(request: Request):
     return await _wallet_move(request, 1, "credit")
 
 
+@app.post("/api/wallet/bonus")
+async def api_wallet_bonus(request: Request):
+    """Бонус (рейкбек казино): в locked — только на покупки в магазине, не вывод."""
+    b = await request.json()
+    _wallet_auth(b, request)
+    uid, amount = pint(b.get("user_id")), pint(b.get("amount"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    if not 0 < amount <= 1_000_000:
+        raise HTTPException(400, "Неверная сумма")
+    if not rate_limit(f"wallet:{uid}", 120, 60):
+        raise HTTPException(429, "Слишком часто")
+    try:
+        return await db.wallet_bonus(uid, amount, str(b.get("op_id", "")),
+                                     str(b.get("kind") or "bonus"), b.get("ref"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/wallet/avatar")
 async def api_wallet_avatar(request: Request):
     """Фото профиля для казино. Его бот видит только тех, кто жал Start,
@@ -1663,6 +1693,7 @@ async def api_admin_order(request: Request):
     if res["approved"]:
         await notify(res["user_id"],
                      f"✅ Оплата заказа <b>{res['code']}</b> подтверждена — принят в работу.")
+        await _drain_ref_notify()      # реферальные с подтверждённой картой оплаты
     else:
         await notify(res["user_id"],
                      f"❌ Оплата заказа <b>{res['code']}</b> не прошла проверку — заказ отменён. "
