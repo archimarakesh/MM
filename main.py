@@ -1364,16 +1364,24 @@ async def api_transfer_redeem(request: Request):
 
 
 # ── админка ──────────────────────────────────────────────────────────────────
-def _wallet_auth(body: dict):
-    """Доступ к кошельку — только по общему секрету. Без WALLET_TOKEN эндпоинты закрыты."""
-    if not WALLET_TOKEN or not hmac.compare_digest(str(body.get("token") or ""), WALLET_TOKEN):
-        raise HTTPException(403, "Нет доступа")
+def _wallet_auth(body: dict, request: Request = None):
+    """Доступ к кошельку — только по общему секрету. Без WALLET_TOKEN эндпоинты закрыты.
+    Неверные попытки троттлим по IP (защита от подбора токена); правильные вызовы
+    казино не считаются, поэтому его трафик не ограничивается."""
+    if WALLET_TOKEN and hmac.compare_digest(str(body.get("token") or ""), WALLET_TOKEN):
+        return
+    if request is not None:
+        ip = client_ip(request)
+        if not rate_limit(f"walletbad:{ip}", 20, 300):   # >20 промахов за 5 мин с IP
+            log.warning("wallet: перебор токена с %s", ip)
+            raise HTTPException(429, "Слишком много попыток")
+    raise HTTPException(403, "Нет доступа")
 
 
 @app.post("/api/wallet/balance")
 async def api_wallet_balance(request: Request):
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     try:
         return await db.wallet_balance(pint(b.get("user_id")))
     except ValueError as e:
@@ -1382,7 +1390,7 @@ async def api_wallet_balance(request: Request):
 
 async def _wallet_move(request: Request, sign: int, kind_default: str):
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     uid, amount = pint(b.get("user_id")), pint(b.get("amount"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
@@ -1414,7 +1422,7 @@ async def api_wallet_avatar(request: Request):
     """Фото профиля для казино. Его бот видит только тех, кто жал Start,
     а бот магазина знает всех покупателей — отдаём фото по общему секрету."""
     body = await request.json()
-    _wallet_auth(body)
+    _wallet_auth(body, request)
     uid = int(body.get("user_id") or 0)
     if not (bot and uid):
         raise HTTPException(404, "Нет фото")
@@ -1441,7 +1449,7 @@ async def api_wallet_avatar(request: Request):
 async def api_wallet_pin_state(request: Request):
     """Есть ли аккаунт и пин — казино решает, показывать вход или регистрацию."""
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     uid = pint(b.get("user_id"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
@@ -1452,7 +1460,7 @@ async def api_wallet_pin_state(request: Request):
 async def api_wallet_pin_verify(request: Request):
     """Проверка пина из казино. Счётчик попыток общий с магазином."""
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     uid = pint(b.get("user_id"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
@@ -1466,7 +1474,7 @@ async def api_wallet_pin_set(request: Request):
     """Регистрация из казино: создаём аккаунт магазина (если его нет) и ставим пин.
     Если пин уже стоит, без старого пина set_pin откажет — чужой пин не перезапишешь."""
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     uid = pint(b.get("user_id"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
