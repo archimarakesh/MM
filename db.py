@@ -126,6 +126,9 @@ async def init():
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_status_text TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_eta TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_arrival TEXT;
+            -- реальная метка времени заказа: date хранится строкой 'DD.MM.YYYY'
+            -- (для показа), а агрегаты по времени считаем по created
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS created TIMESTAMPTZ NOT NULL DEFAULT now();
             UPDATE orders SET ship=NULL WHERE status=3 AND ship IS NOT NULL;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
             CREATE TABLE IF NOT EXISTS topups(
@@ -531,6 +534,17 @@ async def _spend_locked(c, tg_id: int, amount: int):
         "UPDATE users SET locked = GREATEST(0, locked - $1) WHERE tg_id=$2", amount, tg_id)
 
 
+# очередь реф-уведомлений: заполняется в _ref_bonus, main.py разбирает её и
+# шлёт рефереру DM после того, как транзакция оплаты успешно закоммитилась
+_REF_NOTIFY: list = []
+
+
+def pop_ref_notify() -> list:
+    q = _REF_NOTIFY[:]
+    _REF_NOTIFY.clear()
+    return q
+
+
 async def _ref_bonus(c, buyer_id: int, total: int):
     """Процент рефереру по его уровню — начисляется только после фактической оплаты."""
     ref_by = await c.fetchval("SELECT ref_by FROM users WHERE tg_id=$1", buyer_id)
@@ -540,6 +554,8 @@ async def _ref_bonus(c, buyer_id: int, total: int):
         await c.execute("""
             UPDATE users SET balance=balance+$1, ref_earned=ref_earned+$1 WHERE tg_id=$2
         """, bonus, ref_by)
+        if bonus > 0:
+            _REF_NOTIFY.append({"ref_by": ref_by, "bonus": bonus, "pct": round(ref_percent(invited) * 100)})
 
 
 async def _order_product_total(c, product_id: int, grams: int, lock: bool = False):
@@ -735,16 +751,16 @@ async def admin_topup_history(limit: int = 120) -> list:
             SELECT * FROM (
                 SELECT t.id, t.user_id, t.amount, 'receipt' AS kind,
                        COALESCE(t.method, '') AS detail, NULL AS txid,
-                       t.status, t.created
+                       NULL AS ref, t.status, t.created
                 FROM topups t
                 UNION ALL
                 SELECT i.id, i.user_id, i.amount_uah, 'crypto',
-                       i.currency, i.txid, i.status, i.created
+                       i.currency, i.txid, NULL, i.status, i.created
                 FROM invoices i WHERE i.order_id IS NULL
                 UNION ALL
                 SELECT p.id, p.user_id, p.amount_uah, 'card',
                        COALESCE('•' || right(p.card, 4), ''), NULL,
-                       p.status, p.created
+                       p.payment_id, p.status, p.created
                 FROM card_payments p
             ) x ORDER BY created DESC LIMIT $1
         """, limit)
@@ -757,38 +773,55 @@ async def admin_topup_history(limit: int = 120) -> list:
         "user": (um[r["user_id"]]["name"] if r["user_id"] in um else None) or "?",
         "username": um[r["user_id"]]["username"] if r["user_id"] in um else None,
         "amount": r["amount"], "kind": r["kind"], "detail": r["detail"],
-        "txid": r["txid"], "status": r["status"], "created": r["created"],
+        "txid": r["txid"], "ref": r["ref"], "status": r["status"],
+        "created": r["created"],
     } for r in rows]
 
 
 async def admin_payment_resolve(kind: str, pid: int, approve: bool) -> dict:
-    """Ручное решение по зависшему платежу «в обработке»: карта или крипто-счёт
-    (пополнение). Человек оплатил, а API не подтвердил — админ зачисляет по
-    квитанции сам. Начисление — как в автоматическом пути, без реф-бонуса."""
+    """Ручное управление статусом платежа (карта/крипто-пополнение) в любую
+    сторону. approve=True → «зачислено» (+баланс, если ещё не начисляли),
+    approve=False → «отклонено» (списываем баланс, если раньше зачисляли).
+    Баланс двигаем ровно по факту смены зачисления — повторное решение в тот
+    же статус запрещено, поэтому двойного начисления/списания не будет."""
+    tgt = 1 if approve else 2
     async with _pool.acquire() as c, c.transaction():
         if kind == "card":
             r = await c.fetchrow(
-                "SELECT * FROM card_payments WHERE id=$1 AND status=0 FOR UPDATE", pid)
+                "SELECT * FROM card_payments WHERE id=$1 FOR UPDATE", pid)
             if not r:
-                raise ValueError("Платёж не найден или уже решён")
-            await c.execute("UPDATE card_payments SET status=$2 WHERE id=$1",
-                            pid, 1 if approve else 2)
+                raise ValueError("Платёж не найден")
+            if r["status"] == tgt:
+                raise ValueError("Платёж уже в этом статусе")
+            await c.execute("UPDATE card_payments SET status=$2 WHERE id=$1", pid, tgt)
             uid, amount = r["user_id"], r["amount_uah"]
         elif kind == "crypto":
             r = await c.fetchrow(
-                "SELECT * FROM invoices WHERE id=$1 AND status=0 AND order_id IS NULL FOR UPDATE",
-                pid)
+                "SELECT * FROM invoices WHERE id=$1 AND order_id IS NULL FOR UPDATE", pid)
             if not r:
-                raise ValueError("Счёт не найден или уже решён")
+                raise ValueError("Счёт не найден")
+            if r["status"] == tgt:
+                raise ValueError("Счёт уже в этом статусе")
             await c.execute(
                 "UPDATE invoices SET status=$2, txid=COALESCE(txid, 'manual') WHERE id=$1",
-                pid, 1 if approve else 2)
+                pid, tgt)
             uid, amount = r["user_id"], r["amount_uah"]
         else:
             raise ValueError("Неизвестный тип платежа")
-        if approve:
+        was_credited = r["status"] == 1        # деньги уже были на балансе
+        credited = reversed_ = False
+        if approve and not was_credited:       # зачисляем впервые
             await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2", amount, uid)
-    return {"user_id": uid, "amount": amount, "approved": approve}
+            credited = True
+        elif not approve and was_credited:      # откатываем ранее зачисленное
+            await c.execute("""
+                UPDATE users SET balance = GREATEST(0, balance - $1),
+                                 locked  = LEAST(locked, GREATEST(0, balance - $1))
+                WHERE tg_id=$2
+            """, amount, uid)
+            reversed_ = True
+    return {"user_id": uid, "amount": amount, "approved": approve,
+            "credited": credited, "reversed": reversed_}
 
 
 async def topup_decide(topup_id: int, approve: bool) -> dict:
@@ -1823,12 +1856,92 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
             raise ValueError("Недостаточно средств — бонусные деньги в игре не участвуют")
         new_balance = u["balance"] + amount
         await c.execute("UPDATE users SET balance=$1 WHERE tg_id=$2", new_balance, tg_id)
+        # реферальные выплаты казино приходят сюда с ref='referral' —
+        # учитываем их и в ref_earned, чтобы статистика была общей
+        if amount > 0 and (str(ref) == "referral" or str(kind) == "referral"):
+            await c.execute(
+                "UPDATE users SET ref_earned = ref_earned + $1 WHERE tg_id=$2",
+                amount, tg_id)
         await c.execute("""
             INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
             VALUES($1,$2,$3,$4,$5,$6)
         """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), new_balance)
         return {"balance": new_balance, "locked": locked,
                 "withdrawable": max(0, new_balance - locked), "duplicate": False}
+
+
+async def wallet_bonus(tg_id: int, amount: int, op_id: str,
+                       kind: str = "bonus", ref: str = None) -> dict:
+    """Начисление БОНУСА: идёт в locked (нельзя вывести, только тратить в
+    магазине). Используется рейкбеком из казино. Идемпотентно по op_id."""
+    op_id = str(op_id or "").strip()
+    if not op_id or len(op_id) > 64:
+        raise ValueError("Неверный op_id")
+    if amount <= 0:
+        raise ValueError("Сумма бонуса должна быть > 0")
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("INSERT INTO users(tg_id) VALUES($1) ON CONFLICT (tg_id) DO NOTHING", tg_id)
+        await c.execute("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        prev = await c.fetchrow("SELECT balance_after FROM wallet_ops WHERE op_id=$1", op_id)
+        if prev:
+            return {"balance": prev["balance_after"], "duplicate": True}
+        r = await c.fetchrow("""
+            UPDATE users SET balance=balance+$1, locked=locked+$1 WHERE tg_id=$2
+            RETURNING balance
+        """, amount, tg_id)
+        await c.execute("""
+            INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
+            VALUES($1,$2,$3,$4,$5,$6)
+        """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), r["balance"])
+        return {"balance": r["balance"], "duplicate": False}
+
+
+# ── статистика реферальной программы для админки ────────────────────────────
+async def admin_ref_stats() -> dict:
+    """Топ рефереров: приглашённые, покупки приглашённых (всего и за 30 дней),
+    заработано бонусов; плюс общие итоги программы."""
+    async with _pool.acquire() as c:
+        total_invited = int(await c.fetchval(
+            "SELECT COUNT(*) FROM users WHERE ref_by IS NOT NULL") or 0)
+        total_earned = int(await c.fetchval(
+            "SELECT COALESCE(SUM(ref_earned), 0) FROM users") or 0)
+        buys = await c.fetchrow("""
+            SELECT COUNT(o.id) AS n, COALESCE(SUM(o.total), 0) AS total,
+                   COUNT(o.id) FILTER (WHERE o.created >= now() - interval '30 days') AS n30,
+                   COALESCE(SUM(o.total) FILTER (WHERE o.created >= now() - interval '30 days'), 0) AS total30
+            FROM orders o
+            JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
+            WHERE o.status >= 0
+        """)
+        top = await c.fetch("""
+            WITH inv AS (
+                SELECT ref_by AS r, COUNT(*) AS invited
+                FROM users WHERE ref_by IS NOT NULL GROUP BY ref_by),
+            pur AS (
+                SELECT u.ref_by AS r, COUNT(o.id) AS orders,
+                       COALESCE(SUM(o.total), 0) AS total,
+                       COUNT(o.id) FILTER (WHERE o.created >= now() - interval '30 days') AS orders30,
+                       COALESCE(SUM(o.total) FILTER (WHERE o.created >= now() - interval '30 days'), 0) AS total30
+                FROM orders o
+                JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
+                WHERE o.status >= 0
+                GROUP BY u.ref_by)
+            SELECT ref.tg_id, ref.name, ref.username, ref.ref_earned,
+                   inv.invited,
+                   COALESCE(pur.orders, 0) AS orders, COALESCE(pur.total, 0) AS total,
+                   COALESCE(pur.orders30, 0) AS orders30, COALESCE(pur.total30, 0) AS total30
+            FROM inv
+            JOIN users ref ON ref.tg_id = inv.r
+            LEFT JOIN pur ON pur.r = inv.r
+            ORDER BY COALESCE(pur.total, 0) DESC, inv.invited DESC
+            LIMIT 30
+        """)
+    return {
+        "total_invited": total_invited, "total_earned": total_earned,
+        "buys_n": int(buys["n"] or 0), "buys_total": int(buys["total"] or 0),
+        "buys_n30": int(buys["n30"] or 0), "buys_total30": int(buys["total30"] or 0),
+        "top": [{**dict(t), "pct": round(ref_percent(t["invited"]) * 100)} for t in top],
+    }
 
 
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
@@ -1850,9 +1963,18 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         if old_id == new_id:
             raise ValueError("Это тот же аккаунт")
         old = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", old_id)
+        if not old:
+            raise ValueError("Аккаунт для переноса не найден")
+        # целевой аккаунт может ещё не существовать (перенос до первого входа)
+        await c.execute("INSERT INTO users(tg_id) VALUES($1) ON CONFLICT (tg_id) DO NOTHING", new_id)
+        # переносим И locked: иначе бонусные (невыводимые) деньги превратились бы
+        # в выводимый баланс на новом аккаунте (отмывание бонусов)
         await c.execute("""
-            UPDATE users SET balance=balance+$1, ref_earned=ref_earned+$2 WHERE tg_id=$3
-        """, old["balance"], old["ref_earned"], new_id)
+            UPDATE users SET balance=balance+$1, locked=locked+$2, ref_earned=ref_earned+$3,
+                bonus_claimed = bonus_claimed OR $4
+            WHERE tg_id=$5
+        """, old["balance"], old["locked"] or 0, old["ref_earned"],
+             old["bonus_claimed"], new_id)
         await c.execute("UPDATE orders SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE topups SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE invoices SET user_id=$1 WHERE user_id=$2", new_id, old_id)
@@ -1861,7 +1983,11 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         await c.execute("UPDATE shares SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE withdrawals SET user_id=$1 WHERE user_id=$2", new_id, old_id)
         await c.execute("UPDATE promos SET used_by=$1 WHERE used_by=$2", new_id, old_id)
-        await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2", new_id, old_id)
+        # приглашённых старого аккаунта переводим на новый, но не создаём
+        # самоссылку, если новый аккаунт сам был приглашён старым
+        await c.execute("UPDATE users SET ref_by=$1 WHERE ref_by=$2 AND tg_id <> $1",
+                        new_id, old_id)
+        await c.execute("UPDATE users SET ref_by=NULL WHERE tg_id=$1 AND ref_by=$1", new_id)
         await c.execute("DELETE FROM users WHERE tg_id=$1", old_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", old_id)
         return await snapshot(new_id, c)

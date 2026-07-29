@@ -280,6 +280,7 @@ async def _settle(inv: dict, txid: str) -> bool:
         await notify(ADMIN_ID,
                      f"₿ Крипто-пополнение: счёт #{inv['id']}, +{res['amount']} ₴ "
                      f"({inv['amount_crypto']} {CRYPTO[inv['currency']]['label']}).")
+    await _drain_ref_notify()          # реферальные с этой оплаты
     return True
 
 
@@ -609,6 +610,15 @@ async def ws_push(user_id: int):
             WS_CLIENTS.get(user_id, set()).discard(ws)
 
 
+async def _drain_ref_notify():
+    """Разослать рефереру уведомление о начислении с покупки приглашённого."""
+    for r in db.pop_ref_notify():
+        await notify(r["ref_by"],
+                     f"🤝 <b>Реферальный бонус: +{r['bonus']} ₴</b>\n"
+                     f"Ваш приглашённый совершил покупку — начислено {r['pct']}% "
+                     f"на баланс.")
+
+
 async def notify(chat_id: int, text: str):
     """Уведомление в Telegram; ошибки не роняют API."""
     if chat_id:
@@ -805,6 +815,12 @@ async def logo_webp():
     return FileResponse("logo.webp", headers=_IMMUTABLE)
 
 
+@app.get("/casino_banner.jpg")
+async def casino_banner():
+    # фон банера-перехода в казино над каталогом
+    return FileResponse("casino_banner.jpg", headers=_IMMUTABLE)
+
+
 @app.get("/growphoto/{pid}")
 async def grow_photo(pid: int, size: str = "f"):
     data = await db.grow_plan_photo(pid, "t" if size == "t" else "f")
@@ -903,6 +919,7 @@ async def api_order(request: Request):
                  f"{esc(snap.get('order_product'))} · {snap['order_grams']} г · {snap['order_total']} ₴\n"
                  f"{ship_txt}")
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
+    await _drain_ref_notify()          # реферальные с оплаты заказа балансом
     return snap
 
 
@@ -1358,16 +1375,24 @@ async def api_transfer_redeem(request: Request):
 
 
 # ── админка ──────────────────────────────────────────────────────────────────
-def _wallet_auth(body: dict):
-    """Доступ к кошельку — только по общему секрету. Без WALLET_TOKEN эндпоинты закрыты."""
-    if not WALLET_TOKEN or not hmac.compare_digest(str(body.get("token") or ""), WALLET_TOKEN):
-        raise HTTPException(403, "Нет доступа")
+def _wallet_auth(body: dict, request: Request = None):
+    """Доступ к кошельку — только по общему секрету. Без WALLET_TOKEN эндпоинты закрыты.
+    Неверные попытки троттлим по IP (защита от подбора токена); правильные вызовы
+    казино не считаются, поэтому его трафик не ограничивается."""
+    if WALLET_TOKEN and hmac.compare_digest(str(body.get("token") or ""), WALLET_TOKEN):
+        return
+    if request is not None:
+        ip = client_ip(request)
+        if not rate_limit(f"walletbad:{ip}", 20, 300):   # >20 промахов за 5 мин с IP
+            log.warning("wallet: перебор токена с %s", ip)
+            raise HTTPException(429, "Слишком много попыток")
+    raise HTTPException(403, "Нет доступа")
 
 
 @app.post("/api/wallet/balance")
 async def api_wallet_balance(request: Request):
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     try:
         return await db.wallet_balance(pint(b.get("user_id")))
     except ValueError as e:
@@ -1376,7 +1401,7 @@ async def api_wallet_balance(request: Request):
 
 async def _wallet_move(request: Request, sign: int, kind_default: str):
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     uid, amount = pint(b.get("user_id")), pint(b.get("amount"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
@@ -1403,12 +1428,31 @@ async def api_wallet_credit(request: Request):
     return await _wallet_move(request, 1, "credit")
 
 
+@app.post("/api/wallet/bonus")
+async def api_wallet_bonus(request: Request):
+    """Бонус (рейкбек казино): в locked — только на покупки в магазине, не вывод."""
+    b = await request.json()
+    _wallet_auth(b, request)
+    uid, amount = pint(b.get("user_id")), pint(b.get("amount"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    if not 0 < amount <= 1_000_000:
+        raise HTTPException(400, "Неверная сумма")
+    if not rate_limit(f"wallet:{uid}", 120, 60):
+        raise HTTPException(429, "Слишком часто")
+    try:
+        return await db.wallet_bonus(uid, amount, str(b.get("op_id", "")),
+                                     str(b.get("kind") or "bonus"), b.get("ref"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/wallet/avatar")
 async def api_wallet_avatar(request: Request):
     """Фото профиля для казино. Его бот видит только тех, кто жал Start,
     а бот магазина знает всех покупателей — отдаём фото по общему секрету."""
     body = await request.json()
-    _wallet_auth(body)
+    _wallet_auth(body, request)
     uid = int(body.get("user_id") or 0)
     if not (bot and uid):
         raise HTTPException(404, "Нет фото")
@@ -1435,7 +1479,7 @@ async def api_wallet_avatar(request: Request):
 async def api_wallet_pin_state(request: Request):
     """Есть ли аккаунт и пин — казино решает, показывать вход или регистрацию."""
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     uid = pint(b.get("user_id"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
@@ -1446,7 +1490,7 @@ async def api_wallet_pin_state(request: Request):
 async def api_wallet_pin_verify(request: Request):
     """Проверка пина из казино. Счётчик попыток общий с магазином."""
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     uid = pint(b.get("user_id"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
@@ -1460,7 +1504,7 @@ async def api_wallet_pin_set(request: Request):
     """Регистрация из казино: создаём аккаунт магазина (если его нет) и ставим пин.
     Если пин уже стоит, без старого пина set_pin откажет — чужой пин не перезапишешь."""
     b = await request.json()
-    _wallet_auth(b)
+    _wallet_auth(b, request)
     uid = pint(b.get("user_id"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
@@ -1557,7 +1601,8 @@ async def api_np_warehouses(request: Request):
 
 @app.post("/api/admin/payment/resolve")
 async def api_admin_payment_resolve(request: Request):
-    """Ручное решение зависшего платежа: человек оплатил, API не подтвердил."""
+    """Ручное управление статусом платежа: зачислить (+баланс) или отменить
+    (списать, если раньше зачисляли) — в любую сторону."""
     admin_user(request)
     b = await request.json()
     try:
@@ -1565,10 +1610,20 @@ async def api_admin_payment_resolve(request: Request):
             str(b.get("kind", "")), pint(b.get("id")), bool(b.get("approve")))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if res["approved"]:
+    if res["credited"]:
         await notify(res["user_id"],
                      f"✅ Оплата подтверждена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+    elif res["reversed"]:
+        await notify(res["user_id"],
+                     f"⚠️ Пополнение на <b>{res['amount']} ₴</b> отменено — сумма списана с баланса.")
     return {"topup_history": await db.admin_topup_history()}
+
+
+@app.post("/api/admin/referrals")
+async def api_admin_referrals(request: Request):
+    """Статистика реферальной программы: топ рефереров и покупки приглашённых."""
+    admin_user(request)
+    return await db.admin_ref_stats()
 
 
 @app.post("/api/admin/data")
@@ -1642,6 +1697,7 @@ async def api_admin_order(request: Request):
     if res["approved"]:
         await notify(res["user_id"],
                      f"✅ Оплата заказа <b>{res['code']}</b> подтверждена — принят в работу.")
+        await _drain_ref_notify()      # реферальные с подтверждённой картой оплаты
     else:
         await notify(res["user_id"],
                      f"❌ Оплата заказа <b>{res['code']}</b> не прошла проверку — заказ отменён. "

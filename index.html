@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Magic Market</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,7 +22,7 @@
   --line:rgba(255,255,255,.07);
   --txt:#f3eee2;
   --muted:#9a927f;
-  --muted-2:#6b6455;
+  --muted-2:#8f8672;
   --ok:#7fd48a;
   --warn:#e0b24d;
   --danger:#e07a5f;
@@ -90,6 +90,30 @@ h1.page-title{font-weight:800;font-size:clamp(24px,7vw,30px);
   line-height:1.15;letter-spacing:-.02em;margin-bottom:4px}
 h1.page-title em{font-style:normal;color:inherit}
 .page-sub{color:var(--muted);font-size:13.5px;line-height:1.55;margin-bottom:20px}
+/* банер перехода в казино над каталогом: фон — арт с картами и семёркой */
+.casino-banner{position:relative;display:flex;align-items:center;justify-content:flex-end;
+  min-height:118px;margin:12px 0 2px;padding:14px 16px;border-radius:20px;cursor:pointer;
+  overflow:hidden;border:1px solid rgba(212,175,55,.45);
+  background:#0a0d12 url("/casino_banner.jpg") left center/cover no-repeat;
+  box-shadow:0 14px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.07)}
+.casino-banner:active{transform:scale(.985)}
+.cb-shine{position:absolute;top:0;bottom:0;width:46px;transform:skewX(-18deg);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);
+  animation:cbShine 3.2s ease-in-out infinite;pointer-events:none}
+@keyframes cbShine{0%,55%{left:-60px}90%,100%{left:110%}}
+.cb-tx{position:relative;z-index:1;text-align:right}
+.cb-tx b{display:block;font-weight:800;font-size:20px;letter-spacing:.1em;line-height:1;
+  background:linear-gradient(180deg,#fff3c9,#e8c96a 55%,#a97f16);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.6))}
+.cb-tx b i{font-style:normal;letter-spacing:.28em;display:block;font-size:13px;margin-top:3px;
+  color:#f3eee2;background:none;-webkit-text-fill-color:#f3eee2}
+.cb-tx span{display:block;font-size:10px;color:#b9c2cf;margin-top:6px;line-height:1.45;
+  text-shadow:0 1px 3px rgba(0,0,0,.7)}
+.cb-cta{display:inline-block;margin-top:9px;font-weight:800;font-size:12px;color:#14100a;
+  padding:7px 16px;border-radius:16px;white-space:nowrap;
+  background:linear-gradient(135deg,#f0d27a,#c9992e);
+  box-shadow:0 6px 14px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.5)}
 .section-head{display:flex;align-items:baseline;justify-content:space-between;margin:26px 0 12px}
 .section-head h2{font-weight:800;font-size:16.5px;letter-spacing:-.01em}
 .section-head span{font-size:11px;color:var(--muted-2);letter-spacing:.12em;text-transform:uppercase}
@@ -449,6 +473,15 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 
   <!-- ══ МАГАЗИН ══ -->
   <section class="view active" id="view-shop">
+    <!-- банер-переход в казино: общий баланс, играть можно сразу -->
+    <div class="casino-banner" id="casinoBanner" style="display:none" onclick="backToCasino()">
+      <div class="cb-shine"></div>
+      <div class="cb-tx">
+        <b>MAGIC<i>CASINO</i></b>
+        <span>рулетка · покер · слоты<br>общий баланс с маркетом</span>
+        <div class="cb-cta">🎰 Играть</div>
+      </div>
+    </div>
     <h1 class="page-title" style="margin-top:10px">Каталог</h1>
     <p class="page-sub">Чем больше вес — тем ниже цена за грамм.<br>Доставка Новой Почтой по всей стране.</p>
     <div class="goods" id="goods"></div>
@@ -456,7 +489,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 
   <!-- ══ E-GROWING ══ -->
   <section class="view" id="view-egrow">
-    <div class="eyebrow">Craudfarming</div>
+    <div class="eyebrow">Crowdfarming</div>
     <h1 class="page-title">E-growing</h1>
     <p class="page-sub">Купите долю куста — чем раньше стадия, тем выше доходность.<br>Выплата после сбора урожая.</p>
     <div id="myGrows"></div>
@@ -497,10 +530,10 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
       </div>
     </div>
 
-    <div class="section-head"><h2>Реферальная программа</h2></div>
+    <div class="section-head" style="margin-top:12px"><h2>Реферальная программа</h2></div>
     <div class="bezel reveal">
       <div class="bezel-core">
-        <p style="font-size:12.5px;color:var(--muted);line-height:1.6">Приглашайте друзей — с каждой их покупки на ваш баланс капает <b style="color:var(--gold-soft)">бонус</b>. Чем больше приглашённых — тем выше процент.</p>
+        <p style="font-size:12.5px;color:var(--muted);line-height:1.6">Приглашайте друзей — с каждой их покупки на ваш баланс капает <b style="color:var(--gold-soft)">бонус</b>. А если друг играет в <b style="color:var(--gold-soft)">Magic Casino</b> — вам ежемесячно начисляется тот же процент от прибыли казино с его игр. Чем больше приглашённых — тем выше процент.</p>
         <div id="refLevels" style="margin-top:4px"></div>
         <div class="ref-stats">
           <div class="ref-stat"><b id="refCount">0</b><span>Приглашено</span></div>
@@ -938,7 +971,11 @@ function applySnapshot(d) {
     const n = (d.admin_todo.orders || 0) + (d.admin_todo.topups || 0) + (d.admin_todo.withdrawals || 0);
     document.getElementById('adminDot').style.display = n ? '' : 'none';
   }
-  if ('casino_link' in d) S.casinoLink = d.casino_link || '';
+  if ('casino_link' in d) {
+    S.casinoLink = d.casino_link || '';
+    const cb = document.getElementById('casinoBanner');
+    if (cb) cb.style.display = S.casinoLink ? '' : 'none';
+  }
   // пришли из казино — пин там уже вводили; флаг держим только в памяти:
   // S уходит в localStorage, и скип прилипал бы к устройству навсегда
   if (d.pin_skip) window._pinSkip = true;
@@ -2189,7 +2226,7 @@ const FAQ = [
   { q: '🌱 E-growing: как работает и когда выплата',
     a: 'Вы покупаете <b>долю куста</b> (кратно 10%, куст = 100%) на текущей стадии: 🌰 Семечко → 🌱 Саженец → 🌿 Вегетативная → 🌸 Предцвет → 🌷 Цветение → 🧺 Сбор. <b>Чем раньше вход — тем выше процент.</b><br>Вкладка <b>E-Grow</b> → программа → размер доли → «Купить». В карточке видны живые фото куста с датами, ваш процент, сумма выплаты и дни до конца цикла. После окончания сбора урожая вход и процент приходят на баланс автоматически.' },
   { q: '🎁 Бонус за подписку и рефералка',
-    a: '<b>Приветственный бонус:</b> подпишитесь на канал и вступите в чат, затем нажмите «Проверить и получить» — 100 ₴ на баланс. Одноразово: раз на аккаунт, устройство и IP.<br><b>Рефералка:</b> ссылка в <b>Профиле</b>. С каждой покупки приглашённого вам начисляется <b>5%</b> (до 10 друзей), <b>7%</b> (10–49), <b>10%</b> (50+).' },
+    a: '<b>Приветственный бонус:</b> подпишитесь на канал и вступите в чат, затем нажмите «Проверить и получить» — 100 ₴ на баланс. Одноразово: раз на аккаунт, устройство и IP.<br><b>Рефералка:</b> ссылка в <b>Профиле</b>. С каждой покупки приглашённого вам начисляется <b>5%</b> (до 10 друзей), <b>7%</b> (10–49), <b>10%</b> (50+). Тот же процент капает и с <b>Magic Casino</b>: раз в месяц вы получаете свою долю от прибыли казино с игр приглашённых.' },
   { q: '🔐 Пин-код, перенос и удаление аккаунта',
     a: 'Пин-код создаётся при первом входе и запрашивается при каждом открытии, сменить — в настройках (⚙️ вверху). Там же <b>перенос аккаунта</b>: код на старом → ввод на новом за 15 минут (баланс, заказы, доли и рефералы переедут). И <b>удаление аккаунта</b> — безвозвратно стирает все данные.' },
   { q: '⚠️ Оплата не зачислилась — что делать?',
@@ -2301,7 +2338,7 @@ function renderAdmin(tab) {
     ['orders', 'Заказы' + (ordersTodo ? ` · ${ordersTodo}${dot}` : '')],
     ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}${dot}` : '')],
     ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}${dot}` : '')],
-    ['promo', 'Промокоды'], ['pay', 'Оплата'],
+    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
     `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
@@ -2422,22 +2459,31 @@ function renderAdmin(tab) {
     };
     const hist = (AD.topup_history || []).map(h => {
       const [stTxt, stCol] = TH_ST[h.status] || ['?', 'var(--muted)'];
-      // зависший карточный/крипто-платёж админ может решить сам по квитанции
-      const acts = h.status === 0 && h.kind !== 'receipt' ? `
+      // карточный/крипто-платёж админ может перевести в любой статус вручную:
+      // зачислить (+баланс) или отменить (списать, если раньше зачисляли)
+      const canManage = h.kind !== 'receipt';
+      const canCredit = canManage && h.status !== 1;   // ещё не зачислен
+      const canCancel = canManage && h.status !== 2;   // ещё не отменён
+      const acts = (canCredit || canCancel) ? `
         <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn btn-gold" style="padding:8px 14px;font-size:12px"
-            onclick="resolvePayment('${h.kind}', ${h.id}, true)">Зачислить</button>
-          <button class="btn btn-ghost" style="padding:8px 14px;font-size:12px"
-            onclick="resolvePayment('${h.kind}', ${h.id}, false)">Отменить</button>
+          ${canCredit ? `<button class="btn btn-gold" style="padding:8px 14px;font-size:12px"
+            onclick="resolvePayment('${h.kind}', ${h.id}, true, ${h.status})">${h.status === 2 ? 'Зачислить (вернуть)' : 'Зачислить'}</button>` : ''}
+          ${canCancel ? `<button class="btn btn-ghost" style="padding:8px 14px;font-size:12px"
+            onclick="resolvePayment('${h.kind}', ${h.id}, false, ${h.status})">${h.status === 1 ? 'Отменить и списать' : 'Отменить'}</button>` : ''}
         </div>` : '';
       // для крипты — ссылка на транзакцию в обозревателе (tronscan для TRC/TRX)
       const tx = h.kind === 'crypto' && h.txid && h.txid !== 'manual'
         ? ` <a href="https://tronscan.org/#/transaction/${esc(h.txid)}" target="_blank"
              rel="noopener" style="color:var(--gold-soft);text-decoration:none">tx↗</a>` : '';
+      // для карты — номер заявки PayDome: по нему платёж ищется в кабинете провайдера
+      const ref = h.kind === 'card' && h.ref
+        ? `<p style="margin-top:3px">заявка PayDome:
+             <b style="color:var(--gold-soft);cursor:pointer;font-family:ui-monospace,monospace"
+                title="скопировать" onclick="copyText('${esc(h.ref)}')">${esc(h.ref)}</b></p>` : '';
       return `
       <div class="set-row" style="cursor:default;flex-wrap:wrap">
         <div><h3 style="font-size:13px">${fmt(h.amount)} ₴ · ${TH_KIND[h.kind] || esc(h.kind)}${h.detail ? ' ' + esc(h.detail) : ''}${tx}</h3>
-        <p>${esc(h.user)}${h.username ? ' · @' + esc(h.username) : ''} · ID ${h.user_id} · ${dt(h.created)}</p>${acts}</div>
+        <p>${esc(h.user)}${h.username ? ' · @' + esc(h.username) : ''} · ID ${h.user_id} · ${dt(h.created)}</p>${ref}${acts}</div>
         <b style="margin-left:auto;font-size:11px;white-space:nowrap;color:${stCol}">${stTxt}</b>
       </div>`;
     }).join('');
@@ -2456,6 +2502,26 @@ function renderAdmin(tab) {
       <div id="promoGenerated"></div>
       ${pr.stats.length ? `<div class="section-head"><h2>Выпущено</h2></div>` + pr.stats.map(s =>
         `<p class="note" style="margin:2px 0">${fmt(s.amount)} ₴ — использовано <b style="color:var(--txt)">${s.used}/${s.total}</b></p>`).join('') : ''}`;
+  } else if (tab === 'refs') {
+    b.innerHTML = '<p class="note">Загрузка…</p>';
+    API.call('/api/admin/referrals').then(d => {
+      if (adminTab !== 'refs') return;
+      const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]));
+      b.innerHTML = `
+        <div class="admin-stats" style="margin-bottom:12px">
+          <div><b>${fmt(d.total_invited)}</b><span>пришло по рефералкам</span></div>
+          <div><b>${fmt(d.total_earned)} ₴</b><span>выплачено бонусов (магазин + казино)</span></div>
+          <div><b>${fmt(d.buys_total)} ₴</b><span>покупки приглашённых · ${fmt(d.buys_n)} зак.</span></div>
+          <div><b>${fmt(d.buys_total30)} ₴</b><span>за 30 дней · ${fmt(d.buys_n30)} зак.</span></div>
+        </div>
+        <div class="section-head"><h2>Топ рефереров</h2></div>
+        ${d.top.length ? d.top.map(t => `
+          <div class="set-row" style="cursor:default">
+            <div><h3>${esc(t.name || 'Без имени')}${t.username ? ` · @${esc(t.username)}` : ''} · ${t.pct}%</h3>
+            <p>приглашено ${t.invited} · покупок ${fmt(t.orders)} на ${fmt(t.total)} ₴
+            (30 дн: ${fmt(t.orders30)} на ${fmt(t.total30)} ₴) · заработал ${fmt(t.ref_earned)} ₴</p></div>
+          </div>`).join('') : '<p class="note">рефереров пока нет</p>'}`;
+    }).catch(() => { if (adminTab === 'refs') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
   } else {
     const s = AD.settings;
     b.innerHTML = `
@@ -2857,13 +2923,16 @@ async function decideTopup(id, approve) {
   haptic('medium'); toast(approve ? 'Зачислено ✓' : 'Отклонено');
   renderAdmin('topups');
 }
-function resolvePayment(kind, id, approve) {
-  const msg = approve ? 'Зачислить платёж вручную?' : 'Отменить платёж?';
+function resolvePayment(kind, id, approve, status) {
+  // сообщение зависит от того, двигаем ли мы деньги: было ли уже зачислено
+  const msg = approve
+    ? (status === 2 ? 'Зачислить платёж и вернуть сумму на баланс?' : 'Зачислить платёж вручную — сумма уйдёт на баланс?')
+    : (status === 1 ? 'Отменить платёж и списать сумму с баланса пользователя?' : 'Отклонить платёж?');
   const go = async () => {
     try {
       AD.topup_history = (await API.call('/api/admin/payment/resolve', { kind, id, approve })).topup_history;
     } catch (e) { return toast(e.message); }
-    haptic('medium'); toast(approve ? 'Зачислено ✓' : 'Отменено');
+    haptic('medium'); toast(approve ? 'Зачислено ✓' : (status === 1 ? 'Отменено, списано' : 'Отклонено'));
     renderAdmin('topups');
   };
   if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
