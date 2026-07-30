@@ -74,6 +74,8 @@ async def init():
                 ref_earned BIGINT NOT NULL DEFAULT 0,
                 created    TIMESTAMPTZ NOT NULL DEFAULT now());
             ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_claimed BOOLEAN NOT NULL DEFAULT false;
+            -- заплатили ли пригласившему бонус за активацию этого друга (раз на друга)
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_activated BOOLEAN NOT NULL DEFAULT false;
             -- отметка «принял правила чата» (ставит guard-бот) — гейт для бонуса:
             -- иначе бонус успевали забрать до автокика за непринятие правил
             ALTER TABLE users ADD COLUMN IF NOT EXISTS rules_accepted TIMESTAMPTZ;
@@ -542,6 +544,18 @@ _REF_NOTIFY: list = []
 def pop_ref_notify() -> list:
     q = _REF_NOTIFY[:]
     _REF_NOTIFY.clear()
+    return q
+
+
+# мгновенный бонус пригласившему за активацию друга (друг забрал welcome-бонус).
+# 0 — фича выключена. Начисляется в locked (только на покупки в магазине).
+REF_ACTIVATION_BONUS = int(os.getenv("REF_ACTIVATION_BONUS", "50") or 50)
+_ACTIVATION_NOTIFY: list = []
+
+
+def pop_activation_notify() -> list:
+    q = _ACTIVATION_NOTIFY[:]
+    _ACTIVATION_NOTIFY.clear()
     return q
 
 
@@ -1201,6 +1215,24 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
             INSERT INTO bonus_claims(user_id, device_hash, ip) VALUES($1,$2,$3)
             ON CONFLICT (user_id) DO NOTHING
         """, tg_id, device or None, ip or None)
+        # мгновенный бонус пригласившему за активацию друга (раз на друга).
+        # Триггер — приветственный бонус: он уже под защитой (подписка на канал+чат,
+        # правила, дедуп по устройству), так что накрутка бессмысленна.
+        if REF_ACTIVATION_BONUS > 0:
+            inv = await c.fetchrow(
+                "SELECT ref_by, ref_activated FROM users WHERE tg_id=$1", tg_id)
+            ref_by = inv["ref_by"]
+            if ref_by and ref_by != tg_id and not inv["ref_activated"]:
+                paid = await c.fetchval("""
+                    UPDATE users SET balance=balance+$1, locked=locked+$1,
+                                     ref_earned=ref_earned+$1
+                    WHERE tg_id=$2 RETURNING tg_id
+                """, REF_ACTIVATION_BONUS, ref_by)   # NULL, если реферер удалён
+                if paid:
+                    await c.execute(
+                        "UPDATE users SET ref_activated=true WHERE tg_id=$1", tg_id)
+                    _ACTIVATION_NOTIFY.append(
+                        {"ref_by": ref_by, "bonus": REF_ACTIVATION_BONUS})
 
 
 # ── промокоды (одноразовые бонус-коды, деньги в locked) ──────────────────────
