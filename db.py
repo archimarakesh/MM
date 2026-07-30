@@ -304,6 +304,21 @@ async def init():
                 at      TIMESTAMPTZ NOT NULL DEFAULT now(),
                 total   INT NOT NULL,
                 PRIMARY KEY(chat_id, at));
+            -- ежедневная тематическая викторина в чате: одна запись на день
+            CREATE TABLE IF NOT EXISTS quiz_days(
+                day          DATE PRIMARY KEY,
+                theme        TEXT,
+                winner_id    BIGINT,
+                winner_name  TEXT,
+                winner_score INT,
+                started      TIMESTAMPTZ NOT NULL DEFAULT now());
+            -- недельная реферальная гонка: один победитель за неделю
+            CREATE TABLE IF NOT EXISTS ref_race_awards(
+                week_start DATE   PRIMARY KEY,
+                user_id    BIGINT NOT NULL,
+                cnt        INT    NOT NULL,
+                amount     BIGINT NOT NULL,
+                created    TIMESTAMPTZ NOT NULL DEFAULT now());
         """)
         if await c.fetchval("SELECT COUNT(*) FROM products") == 0:
             for i, (name, sub, emoji, tag, base) in enumerate(SEED_PRODUCTS):
@@ -2036,6 +2051,91 @@ async def member_tracking_since(chat_id: int):
               SELECT min(at) AS t FROM member_snapshots WHERE chat_id=$1
             ) q
         """, chat_id)
+
+
+# ── награды чата (викторина, реф-гонка) ──────────────────────────────────────
+async def chat_reward(user_id: int, name: str, amount: int) -> None:
+    """Начислить бонус участнику чата в баланс (в locked — как приз, без вывода).
+    Заводим счёт, если человек ещё не открывал приложение."""
+    if amount <= 0:
+        return
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("INSERT INTO users(tg_id, name) VALUES($1,$2) "
+                        "ON CONFLICT (tg_id) DO NOTHING", user_id, (name or "")[:64])
+        await c.execute("UPDATE users SET balance=balance+$1, locked=locked+$1 "
+                        "WHERE tg_id=$2", amount, user_id)
+
+
+async def quiz_claim_day(day) -> bool:
+    """Резервируем сегодняшний прогон викторины. True — прогон наш (можно вести),
+    False — на этот день уже кто-то запустил (защита от дублей при рестарте)."""
+    async with _pool.acquire() as c:
+        got = await c.fetchval("""
+            INSERT INTO quiz_days(day) VALUES($1)
+            ON CONFLICT (day) DO NOTHING RETURNING day
+        """, day)
+    return got is not None
+
+
+async def quiz_finish_day(day, theme, winner_id, winner_name, winner_score) -> None:
+    async with _pool.acquire() as c:
+        await c.execute("""
+            UPDATE quiz_days SET theme=$2, winner_id=$3, winner_name=$4, winner_score=$5
+            WHERE day=$1
+        """, day, theme, winner_id, (winner_name or None), winner_score)
+
+
+async def ref_race_standings(week_start, week_end, limit: int = 10) -> list:
+    """Топ рефереров недели: сколько приглашённых АКТИВИРОВАЛОСЬ (забрали
+    приветственный бонус) за окно [week_start, week_end). Активация = запись в
+    bonus_claims (она под защитой: подписка на канал+чат, дедуп по устройству)."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT u.ref_by AS uid, COUNT(*) AS cnt,
+                   max(ref.name) AS name, max(ref.username) AS username
+            FROM users u
+            JOIN bonus_claims bc ON bc.user_id = u.tg_id
+            LEFT JOIN users ref  ON ref.tg_id = u.ref_by
+            WHERE u.ref_by IS NOT NULL
+              AND bc.created >= $1 AND bc.created < $2
+            GROUP BY u.ref_by
+            ORDER BY cnt DESC, uid ASC
+            LIMIT $3
+        """, week_start, week_end, limit)
+    return [{"user_id": r["uid"], "cnt": int(r["cnt"]),
+             "name": r["name"] or "участник", "username": r["username"]} for r in rows]
+
+
+async def ref_race_award(week_start, week_end, min_ref: int, prize: int) -> dict | None:
+    """Идемпотентно раз в неделю: топ-1 реферер получает приз, если привёл
+    не меньше min_ref активированных друзей. Иначе — победителя нет."""
+    async with _pool.acquire() as c, c.transaction():
+        if await c.fetchval("SELECT 1 FROM ref_race_awards WHERE week_start=$1", week_start):
+            return None
+        top = await c.fetch("""
+            SELECT u.ref_by AS uid, COUNT(*) AS cnt, max(ref.name) AS name
+            FROM users u
+            JOIN bonus_claims bc ON bc.user_id = u.tg_id
+            LEFT JOIN users ref  ON ref.tg_id = u.ref_by
+            WHERE u.ref_by IS NOT NULL
+              AND bc.created >= $1 AND bc.created < $2
+            GROUP BY u.ref_by
+            ORDER BY cnt DESC, uid ASC
+            LIMIT 1
+        """, week_start, week_end)
+        if not top or int(top[0]["cnt"]) < min_ref:
+            return None
+        w = top[0]
+        uid, cnt, name = w["uid"], int(w["cnt"]), w["name"] or "участник"
+        await c.execute("INSERT INTO users(tg_id, name) VALUES($1,$2) "
+                        "ON CONFLICT (tg_id) DO NOTHING", uid, name[:64])
+        await c.execute("UPDATE users SET balance=balance+$1, locked=locked+$1 "
+                        "WHERE tg_id=$2", prize, uid)
+        await c.execute("""
+            INSERT INTO ref_race_awards(week_start, user_id, cnt, amount)
+            VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING
+        """, week_start, uid, cnt, prize)
+    return {"user_id": uid, "cnt": cnt, "name": name, "amount": prize}
 
 
 # ── общий кошелёк для внешних сервисов ───────────────────────────────────────
