@@ -939,33 +939,41 @@ async def run(notify=None):
                 await asyncio.sleep(300)
 
     # ── тематическая викторина: опрос темы → вопросы → призы ────────────────
-    quiz_state = {"answers": None, "future": None}    # активный вопрос
+    # chat — где идёт викторина; allow_admin/dry — для приватного теста в ЛС
+    quiz_state = {"answers": None, "future": None, "chat": None, "allow_admin": False}
     quiz_busy = {"on": False}
 
     async def quiz_send(text, **kw):
         return await bot.send_message(int(RULES_CHAT_ID), text, parse_mode="HTML", **kw)
 
-    async def run_quiz(force=False, poll_sec=None):
-        if not RULES_CHAT_ID or quiz_busy["on"]:
+    async def run_quiz(force=False, poll_sec=None, chat=None, dry=False, allow_admin=False):
+        if quiz_busy["on"]:
+            return
+        target = chat if chat is not None else (int(RULES_CHAT_ID) if RULES_CHAT_ID else None)
+        if target is None:
             return
         today = datetime.now(KYIV).date()
         if not force and not await db.quiz_claim_day(today):
             return                                    # сегодня уже запускали
         quiz_busy["on"] = True
+        quiz_state["chat"], quiz_state["allow_admin"] = target, allow_admin
+
+        async def send(text):
+            return await bot.send_message(target, text, parse_mode="HTML")
+
         try:
             keys = qb.theme_keys()
             labels = [f"{qb.theme_meta(k)[1]} {qb.theme_meta(k)[0]}" for k in keys]
             try:
                 poll = await bot.send_poll(
-                    int(RULES_CHAT_ID),
-                    "🧠 Тема викторины сегодня? Голосуйте — запускаю по итогам!",
+                    target, "🧠 Тема викторины? Голосуйте — запускаю по итогам!",
                     labels, is_anonymous=True)
             except Exception:
                 log.warning("Викторина: опрос не отправлен (бот админ в чате?)")
                 return
-            await asyncio.sleep(max(20, poll_sec if poll_sec is not None else QUIZ_POLL_SEC))
+            await asyncio.sleep(max(15, poll_sec if poll_sec is not None else QUIZ_POLL_SEC))
             try:
-                stopped = await bot.stop_poll(int(RULES_CHAT_ID), poll.message_id)
+                stopped = await bot.stop_poll(target, poll.message_id)
                 counts = [o.voter_count for o in stopped.options]
             except Exception:
                 counts = []
@@ -977,20 +985,20 @@ async def run(notify=None):
             key = keys[idx]
             title, emoji = qb.theme_meta(key)
             questions = qb.pick_questions(key, QUIZ_QUESTIONS, random)
-            await quiz_send(
-                f"🏆 Тема дня: <b>{emoji} {_esc(title)}</b>\n"
-                f"{len(questions)} вопросов · за каждый правильный <b>+{QUIZ_Q_PRIZE} ₴</b>, "
-                f"лучшему по итогу <b>+{QUIZ_WIN_PRIZE} ₴</b>.\n"
-                "Пишите ответ прямо в чат — засчитывается первый верный!")
-            await asyncio.sleep(3)
+            await send(
+                f"🏆 Тема: <b>{emoji} {_esc(title)}</b>\n"
+                f"{len(questions)} вопросов · правильный <b>+{QUIZ_Q_PRIZE} ₴</b>, "
+                f"лучшему <b>+{QUIZ_WIN_PRIZE} ₴</b>."
+                + ("\n🧪 Тестовый режим — призы не начисляются."
+                   if dry else "\nПишите ответ прямо в чат — засчитывается первый верный!"))
+            await asyncio.sleep(2)
             scores, names = {}, {}
             loop = asyncio.get_running_loop()
             for i, (q, answers) in enumerate(questions):
                 fut = loop.create_future()
                 quiz_state["answers"], quiz_state["future"] = answers, fut
-                await quiz_send(
-                    f"❓ <b>Вопрос {i+1}/{len(questions)}</b> · {emoji} {_esc(title)}\n\n"
-                    f"{_esc(q)}\n\n⏱ {QUIZ_Q_SEC} сек")
+                await send(f"❓ <b>Вопрос {i+1}/{len(questions)}</b> · {emoji} {_esc(title)}\n\n"
+                           f"{_esc(q)}\n\n⏱ {QUIZ_Q_SEC} сек")
                 try:
                     uid, uname = await asyncio.wait_for(fut, timeout=QUIZ_Q_SEC)
                     won = True
@@ -1001,44 +1009,46 @@ async def run(notify=None):
                 if won:
                     scores[uid] = scores.get(uid, 0) + 1
                     names[uid] = uname
-                    try:
-                        await db.chat_reward(uid, uname, QUIZ_Q_PRIZE)
-                    except Exception:
-                        log.exception("Викторина: приз за вопрос не начислен")
-                    await quiz_send(f"✅ Верно, <b>{_esc(uname)}</b>! <b>+{QUIZ_Q_PRIZE} ₴</b>\n"
-                                    f"Ответ: {_esc(answers[0])}")
+                    if not dry:
+                        try:
+                            await db.chat_reward(uid, uname, QUIZ_Q_PRIZE)
+                        except Exception:
+                            log.exception("Викторина: приз за вопрос не начислен")
+                    bonus = "" if dry else f" <b>+{QUIZ_Q_PRIZE} ₴</b>"
+                    await send(f"✅ Верно, <b>{_esc(uname)}</b>!{bonus}\nОтвет: {_esc(answers[0])}")
                 else:
-                    await quiz_send(f"⏰ Время вышло. Правильный ответ: <b>{_esc(answers[0])}</b>")
-                await asyncio.sleep(4)
+                    await send(f"⏰ Время вышло. Правильный ответ: <b>{_esc(answers[0])}</b>")
+                await asyncio.sleep(3)
             if scores:
                 order = sorted(scores.items(), key=lambda kv: -kv[1])
                 win_id, win_score = order[0]
-                try:
-                    await db.chat_reward(win_id, names[win_id], QUIZ_WIN_PRIZE)
-                except Exception:
-                    log.exception("Викторина: приз победителю не начислен")
+                if not dry:
+                    try:
+                        await db.chat_reward(win_id, names[win_id], QUIZ_WIN_PRIZE)
+                    except Exception:
+                        log.exception("Викторина: приз победителю не начислен")
                 medals = ["🥇", "🥈", "🥉"]
                 board = "\n".join(
                     f"{medals[i] if i < 3 else f'{i+1}.'} {_esc(names[u])} — {sc} прав."
                     for i, (u, sc) in enumerate(order))
-                await quiz_send(
-                    f"🎉 <b>Викторина окончена!</b>\n\n{board}\n\n"
-                    f"👑 Победитель дня: <b>{_esc(names[win_id])}</b> "
-                    f"(+{QUIZ_WIN_PRIZE} ₴ бонусом). Приз — на баланс магазина!")
-                if notify:
+                tail = ("🧪 Тест окончен — призы не начислялись."
+                        if dry else f"👑 Победитель дня: <b>{_esc(names[win_id])}</b> "
+                                    f"(+{QUIZ_WIN_PRIZE} ₴ бонусом). Приз — на баланс магазина!")
+                await send(f"🎉 <b>Викторина окончена!</b>\n\n{board}\n\n{tail}")
+                if not dry and notify:
                     try:
                         await notify(win_id, f"👑 Вы победили в викторине дня! "
                                              f"Начислено {QUIZ_WIN_PRIZE} ₴ бонусом на баланс.")
                     except Exception:
                         pass
-                if not force:
+                if not force and not dry:
                     await db.quiz_finish_day(today, key, win_id, names[win_id], win_score)
             else:
-                await quiz_send("Сегодня никто не ответил 🤷 Ждём вас завтра!")
-                if not force:
+                await send("Никто не ответил 🤷" + ("" if dry else " Ждём вас завтра!"))
+                if not force and not dry:
                     await db.quiz_finish_day(today, key, None, None, 0)
         finally:
-            quiz_state["answers"], quiz_state["future"] = None, None
+            quiz_state["answers"], quiz_state["future"], quiz_state["chat"] = None, None, None
             quiz_busy["on"] = False
 
     async def quiz_scheduler():
@@ -1098,14 +1108,21 @@ async def run(notify=None):
 
     @dp.message(Command("quiz", "викторина"))
     async def cmd_quiz(message: Message):
-        """Ручной запуск викторины (тест) — только админ."""
+        """Ручной запуск викторины — только админ.
+        В ЛС боту — приватный тест (в этом чате, без начисления призов)."""
         if message.from_user.id != GUARD_ADMIN_ID:
             return
         if quiz_busy["on"]:
             await message.answer("Викторина уже идёт 🙂")
             return
-        await message.answer("Запускаю тестовую викторину (опрос темы — 30 сек).")
-        asyncio.create_task(run_quiz(force=True, poll_sec=30))
+        if message.chat.type == "private":
+            await message.answer("🧪 Запускаю тест викторины здесь, в ЛС — призы не "
+                                 "начисляются. Проголосуй в опросе (20 сек) и отвечай на вопросы.")
+            asyncio.create_task(run_quiz(force=True, poll_sec=20,
+                                         chat=message.chat.id, dry=True, allow_admin=True))
+        else:
+            await message.answer("Запускаю тестовую викторину в чате (опрос темы — 30 сек).")
+            asyncio.create_task(run_quiz(force=True, poll_sec=30))
 
     @dp.message(Command("gonka", "гонка", "race", "рефгонка"))
     async def cmd_gonka(message: Message):
@@ -1138,6 +1155,18 @@ async def run(notify=None):
 
     @dp.message()
     async def moderate(message: Message):
+        # ответ на активный вопрос викторины — ДО всей модерации и до отсечки ЛС,
+        # чтобы работал и приватный тест, и (при allow_admin) ответы владельца
+        qs = quiz_state
+        if qs["answers"] and message.text and message.from_user \
+                and message.chat.id == qs["chat"]:
+            uid0 = message.from_user.id
+            if qs["allow_admin"] or uid0 != GUARD_ADMIN_ID:
+                fut = qs["future"]
+                if fut and not fut.done() and qb.is_correct(message.text, qs["answers"]):
+                    qs["answers"] = None               # закрываем сразу — гонок нет
+                    fut.set_result((uid0, message.from_user.full_name))
+                    return
         if message.chat.type == "private":
             return
         if RULES_CHAT_ID and str(message.chat.id) != str(RULES_CHAT_ID):
@@ -1153,15 +1182,6 @@ async def run(notify=None):
             return
         key = (message.chat.id, uid)
         name = message.from_user.full_name
-
-        # ответ на активный вопрос викторины — засчитываем первый верный
-        qa = quiz_state["answers"]
-        if qa and message.text:
-            fut = quiz_state["future"]
-            if fut and not fut.done() and qb.is_correct(message.text, qa):
-                quiz_state["answers"] = None       # закрываем сразу — гонок нет
-                fut.set_result((uid, name))
-                return
 
         # спам стикерами: до 3 подряд, 4-й — нарушение
         if message.sticker:
