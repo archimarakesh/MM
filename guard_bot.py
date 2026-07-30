@@ -16,6 +16,7 @@ import asyncio
 import html
 import logging
 import os
+import random
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 import award_image
 import db
+import quiz_bank as qb
 
 KYIV = ZoneInfo("Europe/Kyiv")
 ACTIVITY_PRIZES = [400, 300, 200]   # призы за 1-3 место, ₴ на баланс (бонусные, как приветственные)
@@ -60,6 +62,25 @@ def _stats_chat_ids() -> dict:
         except ValueError:
             pass
     return out
+
+
+# ── тематическая викторина ──────────────────────────────────────────────────
+QUIZ_ENABLED = os.getenv("QUIZ_ENABLED", "1") not in ("0", "false", "")
+QUIZ_TIME = os.getenv("QUIZ_TIME", "18:00")               # старт по Киеву
+QUIZ_QUESTIONS = int(os.getenv("QUIZ_QUESTIONS", "5") or 5)
+QUIZ_Q_PRIZE = int(os.getenv("QUIZ_Q_PRIZE", "20") or 20)    # за каждый правильный
+QUIZ_WIN_PRIZE = int(os.getenv("QUIZ_WIN_PRIZE", "50") or 50)  # лучшему по итогу
+QUIZ_POLL_SEC = int(os.getenv("QUIZ_POLL_SEC", str(20 * 60)) or 20 * 60)  # голосование за тему
+QUIZ_Q_SEC = int(os.getenv("QUIZ_Q_SEC", "150") or 150)     # время на вопрос
+# ── недельная реферальная гонка ─────────────────────────────────────────────
+REF_RACE_PRIZE = int(os.getenv("REF_RACE_PRIZE", "1000") or 1000)
+REF_RACE_MIN = int(os.getenv("REF_RACE_MIN", "5") or 5)     # порог рефералов для приза
+REF_RACE_HOUR = int(os.getenv("REF_RACE_HOUR", "13") or 13)  # понедельник, Киев
+
+
+def _week_start(d):
+    """Понедельник недели даты d (date)."""
+    return d - timedelta(days=d.weekday())
 
 RULES_TEXT = (
     "📜 <b>Правила Magic Market</b>\n\n"
@@ -917,6 +938,204 @@ async def run(notify=None):
                 log.exception("Ошибка наград за активность")
                 await asyncio.sleep(300)
 
+    # ── тематическая викторина: опрос темы → вопросы → призы ────────────────
+    quiz_state = {"answers": None, "future": None}    # активный вопрос
+    quiz_busy = {"on": False}
+
+    async def quiz_send(text, **kw):
+        return await bot.send_message(int(RULES_CHAT_ID), text, parse_mode="HTML", **kw)
+
+    async def run_quiz(force=False, poll_sec=None):
+        if not RULES_CHAT_ID or quiz_busy["on"]:
+            return
+        today = datetime.now(KYIV).date()
+        if not force and not await db.quiz_claim_day(today):
+            return                                    # сегодня уже запускали
+        quiz_busy["on"] = True
+        try:
+            keys = qb.theme_keys()
+            labels = [f"{qb.theme_meta(k)[1]} {qb.theme_meta(k)[0]}" for k in keys]
+            try:
+                poll = await bot.send_poll(
+                    int(RULES_CHAT_ID),
+                    "🧠 Тема викторины сегодня? Голосуйте — запускаю по итогам!",
+                    labels, is_anonymous=True)
+            except Exception:
+                log.warning("Викторина: опрос не отправлен (бот админ в чате?)")
+                return
+            await asyncio.sleep(max(20, poll_sec if poll_sec is not None else QUIZ_POLL_SEC))
+            try:
+                stopped = await bot.stop_poll(int(RULES_CHAT_ID), poll.message_id)
+                counts = [o.voter_count for o in stopped.options]
+            except Exception:
+                counts = []
+            if counts and max(counts) > 0:
+                best = max(counts)
+                idx = random.choice([i for i, c in enumerate(counts) if c == best])
+            else:
+                idx = random.randrange(len(keys))     # никто не голосовал — случайная тема
+            key = keys[idx]
+            title, emoji = qb.theme_meta(key)
+            questions = qb.pick_questions(key, QUIZ_QUESTIONS, random)
+            await quiz_send(
+                f"🏆 Тема дня: <b>{emoji} {_esc(title)}</b>\n"
+                f"{len(questions)} вопросов · за каждый правильный <b>+{QUIZ_Q_PRIZE} ₴</b>, "
+                f"лучшему по итогу <b>+{QUIZ_WIN_PRIZE} ₴</b>.\n"
+                "Пишите ответ прямо в чат — засчитывается первый верный!")
+            await asyncio.sleep(3)
+            scores, names = {}, {}
+            loop = asyncio.get_running_loop()
+            for i, (q, answers) in enumerate(questions):
+                fut = loop.create_future()
+                quiz_state["answers"], quiz_state["future"] = answers, fut
+                await quiz_send(
+                    f"❓ <b>Вопрос {i+1}/{len(questions)}</b> · {emoji} {_esc(title)}\n\n"
+                    f"{_esc(q)}\n\n⏱ {QUIZ_Q_SEC} сек")
+                try:
+                    uid, uname = await asyncio.wait_for(fut, timeout=QUIZ_Q_SEC)
+                    won = True
+                except asyncio.TimeoutError:
+                    won = False
+                finally:
+                    quiz_state["answers"], quiz_state["future"] = None, None
+                if won:
+                    scores[uid] = scores.get(uid, 0) + 1
+                    names[uid] = uname
+                    try:
+                        await db.chat_reward(uid, uname, QUIZ_Q_PRIZE)
+                    except Exception:
+                        log.exception("Викторина: приз за вопрос не начислен")
+                    await quiz_send(f"✅ Верно, <b>{_esc(uname)}</b>! <b>+{QUIZ_Q_PRIZE} ₴</b>\n"
+                                    f"Ответ: {_esc(answers[0])}")
+                else:
+                    await quiz_send(f"⏰ Время вышло. Правильный ответ: <b>{_esc(answers[0])}</b>")
+                await asyncio.sleep(4)
+            if scores:
+                order = sorted(scores.items(), key=lambda kv: -kv[1])
+                win_id, win_score = order[0]
+                try:
+                    await db.chat_reward(win_id, names[win_id], QUIZ_WIN_PRIZE)
+                except Exception:
+                    log.exception("Викторина: приз победителю не начислен")
+                medals = ["🥇", "🥈", "🥉"]
+                board = "\n".join(
+                    f"{medals[i] if i < 3 else f'{i+1}.'} {_esc(names[u])} — {sc} прав."
+                    for i, (u, sc) in enumerate(order))
+                await quiz_send(
+                    f"🎉 <b>Викторина окончена!</b>\n\n{board}\n\n"
+                    f"👑 Победитель дня: <b>{_esc(names[win_id])}</b> "
+                    f"(+{QUIZ_WIN_PRIZE} ₴ бонусом). Приз — на баланс магазина!")
+                if notify:
+                    try:
+                        await notify(win_id, f"👑 Вы победили в викторине дня! "
+                                             f"Начислено {QUIZ_WIN_PRIZE} ₴ бонусом на баланс.")
+                    except Exception:
+                        pass
+                if not force:
+                    await db.quiz_finish_day(today, key, win_id, names[win_id], win_score)
+            else:
+                await quiz_send("Сегодня никто не ответил 🤷 Ждём вас завтра!")
+                if not force:
+                    await db.quiz_finish_day(today, key, None, None, 0)
+        finally:
+            quiz_state["answers"], quiz_state["future"] = None, None
+            quiz_busy["on"] = False
+
+    async def quiz_scheduler():
+        if not (RULES_CHAT_ID and QUIZ_ENABLED):
+            log.info("Викторина выключена (нет чата или QUIZ_ENABLED=0)")
+            return
+        try:
+            hh, mm = map(int, QUIZ_TIME.split(":"))
+        except ValueError:
+            hh, mm = 18, 0
+        while True:
+            try:
+                now = datetime.now(KYIV)
+                nxt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+                if nxt <= now:
+                    nxt += timedelta(days=1)
+                await asyncio.sleep(max(30, (nxt - now).total_seconds()))
+                await run_quiz()
+            except Exception:
+                log.exception("Ошибка викторины")
+                await asyncio.sleep(300)
+
+    async def ref_race_weekly():
+        if not RULES_CHAT_ID:
+            return
+        while True:
+            try:
+                now = datetime.now(KYIV)
+                nxt = now.replace(hour=REF_RACE_HOUR, minute=0, second=0, microsecond=0)
+                days = (7 - now.weekday()) % 7
+                if days == 0 and nxt <= now:
+                    days = 7
+                nxt += timedelta(days=days)
+                await asyncio.sleep(max(30, (nxt - now).total_seconds()))
+                this_mon = nxt.date()
+                prev_mon = this_mon - timedelta(days=7)
+                winner = await db.ref_race_award(prev_mon, this_mon, REF_RACE_MIN, REF_RACE_PRIZE)
+                if winner:
+                    await quiz_send(
+                        "🏁 <b>Реферальная гонка недели</b>\n\n"
+                        f"👑 Победитель: <b>{_esc(winner['name'])}</b> — привёл "
+                        f"<b>{winner['cnt']}</b> друзей!\nПриз <b>{REF_RACE_PRIZE} ₴</b> "
+                        "уже на балансе. Спасибо, что растишь комьюнити 🔥")
+                    if notify:
+                        try:
+                            await notify(winner["user_id"],
+                                         "🏁 Вы выиграли реферальную гонку недели! "
+                                         f"Начислено {REF_RACE_PRIZE} ₴ бонусом.")
+                        except Exception:
+                            pass
+                    log.info("Реф-гонка: победитель %s (%s реф.)", winner["user_id"], winner["cnt"])
+                else:
+                    log.info("Реф-гонка: порог %s не взят", REF_RACE_MIN)
+            except Exception:
+                log.exception("Ошибка реф-гонки")
+                await asyncio.sleep(300)
+
+    @dp.message(Command("quiz", "викторина"))
+    async def cmd_quiz(message: Message):
+        """Ручной запуск викторины (тест) — только админ."""
+        if message.from_user.id != GUARD_ADMIN_ID:
+            return
+        if quiz_busy["on"]:
+            await message.answer("Викторина уже идёт 🙂")
+            return
+        await message.answer("Запускаю тестовую викторину (опрос темы — 30 сек).")
+        asyncio.create_task(run_quiz(force=True, poll_sec=30))
+
+    @dp.message(Command("gonka", "гонка", "race", "рефгонка"))
+    async def cmd_gonka(message: Message):
+        """Текущий зачёт реферальной гонки недели."""
+        if RULES_CHAT_ID and message.chat.type != "private" \
+                and str(message.chat.id) != str(RULES_CHAT_ID):
+            return
+        today = datetime.now(KYIV).date()
+        ws = _week_start(today)
+        try:
+            rows = await db.ref_race_standings(ws, ws + timedelta(days=7), 10)
+        except Exception:
+            return
+        head = ("🏁 <b>Реферальная гонка недели</b>\n"
+                f"Больше всех активированных друзей — забирает <b>{REF_RACE_PRIZE} ₴</b> "
+                f"(нужно ≥{REF_RACE_MIN}). Итоги — в понедельник.\n\n")
+        if not rows:
+            await message.answer(
+                head + "Пока никто никого не привёл. Дерзай — ссылка в приложении, «Профиль»!",
+                parse_mode="HTML")
+            return
+        medals = ["🥇", "🥈", "🥉"]
+        lines = []
+        for i, r in enumerate(rows):
+            mark = medals[i] if i < 3 else f"{i+1}."
+            nm = _esc(r["name"]) + (f" · @{_esc(r['username'])}" if r["username"] else "")
+            ok = " ✅" if r["cnt"] >= REF_RACE_MIN else ""
+            lines.append(f"{mark} {nm} — <b>{r['cnt']}</b>{ok}")
+        await message.answer(head + "\n".join(lines), parse_mode="HTML")
+
     @dp.message()
     async def moderate(message: Message):
         if message.chat.type == "private":
@@ -934,6 +1153,15 @@ async def run(notify=None):
             return
         key = (message.chat.id, uid)
         name = message.from_user.full_name
+
+        # ответ на активный вопрос викторины — засчитываем первый верный
+        qa = quiz_state["answers"]
+        if qa and message.text:
+            fut = quiz_state["future"]
+            if fut and not fut.done() and qb.is_correct(message.text, qa):
+                quiz_state["answers"] = None       # закрываем сразу — гонок нет
+                fut.set_result((uid, name))
+                return
 
         # спам стикерами: до 3 подряд, 4-й — нарушение
         if message.sticker:
@@ -1045,6 +1273,8 @@ async def run(notify=None):
     awards = asyncio.create_task(weekly_awards())
     contest = asyncio.create_task(contest_poster())
     snaps = asyncio.create_task(snapshot_loop())
+    quiz = asyncio.create_task(quiz_scheduler())
+    race = asyncio.create_task(ref_race_weekly())
     await initial_snapshot()
     # chat_member нужно запросить явно: aiogram включит его в allowed_updates,
     # только если тип обновления зарегистрирован (у нас есть @dp.chat_member)
@@ -1057,6 +1287,8 @@ async def run(notify=None):
         awards.cancel()
         contest.cancel()
         snaps.cancel()
+        quiz.cancel()
+        race.cancel()
 
 
 if __name__ == "__main__":
