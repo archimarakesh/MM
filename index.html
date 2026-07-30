@@ -323,6 +323,9 @@ h1.page-title em{font-style:normal;color:inherit}
 .ref-stat{border:1px solid var(--line);border-radius:var(--r-lg);padding:13px 15px;background:rgba(255,255,255,.025)}
 .ref-stat b{font-size:19px;font-weight:800;color:var(--txt);display:block}
 .ref-stat span{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2)}
+.ref-tap{cursor:pointer;border-color:rgba(212,175,55,.35)}
+.ref-tap:active{transform:scale(.98)}
+.ref-tap span{color:var(--gold-soft)}
 /* подробности рефералки: сплит доходов + список приглашённых (клиент и админ) */
 .ref-split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:2px 0 10px}
 .ref-split-c{border:1px solid var(--line);border-radius:14px;padding:11px 13px;background:rgba(255,255,255,.03);text-align:center}
@@ -575,7 +578,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
         <p style="font-size:12.5px;color:var(--muted);line-height:1.6">Приглашайте друзей — с каждой их покупки на ваш баланс капает <b style="color:var(--gold-soft)">бонус</b>. А если друг играет в <b style="color:var(--gold-soft)">Magic Casino</b> — вам ежемесячно начисляется тот же процент от прибыли казино с его игр. Чем больше приглашённых — тем выше процент.</p>
         <div id="refLevels" style="margin-top:4px"></div>
         <div class="ref-stats">
-          <div class="ref-stat"><b id="refCount">0</b><span>Приглашено</span></div>
+          <div class="ref-stat ref-tap" onclick="go('referrals')"><b id="refCount">0</b><span>Приглашено ›</span></div>
           <div class="ref-stat"><b id="refEarned">0 ₴</b><span>Бонус</span></div>
         </div>
         <div class="ref-link" onclick="copyRef()">
@@ -584,10 +587,6 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
         </div>
         <button class="btn btn-gold" style="margin-top:12px" onclick="shareRef()">Пригласить друга
           <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
-        </button>
-        <button class="btn btn-ghost" style="margin-top:8px" onclick="go('referrals')"
-          id="refDetailBtn">Мои рефералы и доход
-          <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span>
         </button>
       </div>
     </div>
