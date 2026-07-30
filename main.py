@@ -944,10 +944,26 @@ async def api_order(request: Request):
 async def api_rate(request: Request):
     u = tg_user(request)
     b = await request.json()
+    # текст отзыва — необязателен; если ключа нет вовсе, не трогаем существующий
+    text = b.get("text", None)
+    if text is not None:
+        text = str(text)
+    anon = 1 if b.get("anon") else 0
+    name = " ".join(filter(None, [u.get("first_name"), u.get("last_name")])) \
+        or (("@" + u["username"]) if u.get("username") else "Покупатель")
     try:
-        return await db.rate_order(u["id"], str(b.get("order", "")), int(b.get("stars", 0)))
+        return await db.rate_order(u["id"], str(b.get("order", "")), int(b.get("stars", 0)),
+                                   text=text, anon=anon, name=name)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@app.post("/api/reviews")
+async def api_reviews(request: Request):
+    tg_user(request)   # только из мини-аппа (валидная подпись Telegram)
+    b = await request.json()
+    pid = pint(b.get("product"))
+    return {"reviews": await db.product_reviews(pid)}
 
 
 @app.post("/api/topup/receipt")

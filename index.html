@@ -169,6 +169,34 @@ h1.page-title em{font-style:normal;color:inherit}
 .good .good-sub{font-size:12px;color:var(--muted);margin-top:3px;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .good .good-meta{font-size:11.5px;color:var(--muted-2);margin-top:4px}
+.good-rev{color:var(--gold-soft);text-decoration:underline;text-underline-offset:2px}
+/* ── отзывы ── */
+.rev-open{display:inline-flex;align-items:center;gap:7px;margin-top:9px;cursor:pointer;
+  padding:7px 12px;border-radius:999px;border:1px solid var(--line);
+  background:rgba(255,255,255,.03);font-size:12.5px;font-weight:600;color:var(--gold-soft)}
+.rev-open svg{width:15px;height:15px;flex:none}
+.rev-open-arr{color:var(--muted-2);font-weight:700}
+.rev-list{display:flex;flex-direction:column;gap:12px}
+.rev-item{border:1px solid var(--line);border-radius:16px;padding:13px 14px;background:rgba(255,255,255,.02)}
+.rev-head{display:flex;align-items:center;gap:10px}
+.rev-ava{width:38px;height:38px;border-radius:50%;flex:none;display:grid;place-items:center;
+  font-weight:800;font-size:15px;color:#140f03}
+.rev-ava.inc{background:rgba(255,255,255,.06);color:var(--muted)}
+.rev-who{flex:1;min-width:0}
+.rev-name{font-size:13.5px;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rev-date{font-size:10.5px;color:var(--muted-2);margin-top:1px}
+.rev-stars{font-size:12.5px;letter-spacing:1px;color:var(--gold);white-space:nowrap}
+.rev-text{font-size:13px;color:var(--txt-2,var(--muted));line-height:1.5;margin-top:9px;white-space:pre-wrap;word-break:break-word}
+.rev-empty{text-align:center;color:var(--muted-2);font-size:13px;padding:26px 10px}
+/* композер отзыва в заказе */
+.rev-form{margin-top:14px;text-align:left}
+.rev-form textarea{width:100%;min-height:72px;resize:vertical;border-radius:14px;padding:11px 13px;
+  border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--txt);font:inherit;font-size:13px}
+.rev-anon{display:flex;gap:8px;margin:10px 0}
+.rev-anon .seg{flex:1;text-align:center;padding:9px 8px;border-radius:12px;cursor:pointer;font-size:12px;
+  font-weight:700;border:1px solid var(--line);color:var(--muted);background:rgba(255,255,255,.02);line-height:1.3}
+.rev-anon .seg small{display:block;font-size:9.5px;font-weight:600;color:var(--muted-2);margin-top:2px}
+.rev-anon .seg.sel{border-color:var(--gold);color:var(--gold-soft);background:rgba(212,175,55,.08)}
 .good-price{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
 .good-price b{font-size:17px;color:var(--txt)}
 .good-price span{font-size:10.5px;color:var(--muted-2)}
@@ -742,6 +770,11 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div id="orderBody"></div>
 </div>
 
+<div class="sheet" id="sheet-reviews">
+  <div class="sheet-grip"></div>
+  <div id="reviewsBody"></div>
+</div>
+
 
 
 <div class="sheet" id="sheet-settings">
@@ -1275,7 +1308,7 @@ function renderGoods() {
           <h3>${p.name}</h3>
           ${p.genetics ? `<div class="good-gen">🧬 ${p.genetics}</div>` : ''}
           <div class="good-sub">${p.sub}</div>
-          <div class="good-meta">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> · ` : ''}${stockLabel(p)}</div>
+          <div class="good-meta">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> · ` : ''}${stockLabel(p)}${p.rating?.reviews ? ` · <span class="good-rev" onclick="event.stopPropagation();openReviews('${p.id}')">${p.rating.reviews} ${plReviews(p.rating.reviews)}</span>` : ''}</div>
         </div>
         <div class="good-price"><b>от ${fmt(Math.round(p.base * Math.min(...tiersOf(p).map(t => t.k))))} ₴</b><span>за грамм</span></div>
       </div>
@@ -1307,6 +1340,11 @@ function renderProductSheet() {
         ${p.genetics ? `<div style="font-size:12.5px;font-weight:600;color:var(--gold-soft);margin-top:3px">🧬 ${p.genetics}</div>` : ''}
         <p class="sheet-sub" style="margin:5px 0 0">${p.sub}</p>
         <p class="sheet-sub" style="margin:5px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}базово ${fmt(p.base)} ₴/г · ${stockLabel(p)}</p>
+        <div class="rev-open" onclick="openReviews('${p.id}')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>${p.rating?.reviews ? `Отзывы (${p.rating.reviews})` : 'Отзывов пока нет — оставьте первый'}</span>
+          <span class="rev-open-arr">›</span>
+        </div>
       </div>
     </div>
     <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес · от 1 до ${MAX_GRAMS} г</label>
@@ -1555,11 +1593,35 @@ function renderOrderBody(i) {
         <div style="font-size:34px;letter-spacing:10px;cursor:pointer;user-select:none">
           ${[1, 2, 3, 4, 5].map(n => `<span onclick="rateOrder(${n})" style="color:${(o.stars || 0) >= n ? 'var(--gold)' : 'rgba(255,255,255,.18)'}">★</span>`).join('')}
         </div>
+        <div class="rev-form">
+          <div style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:14px 0 8px">
+            ${o.review ? 'Ваш отзыв' : 'Написать отзыв'}</div>
+          <textarea id="revText" maxlength="600" placeholder="Поделитесь впечатлением о товаре…">${esc(o.review || '')}</textarea>
+          <div class="rev-anon">
+            <div class="seg ${revAnon ? '' : 'sel'}" onclick="setRevAnon(0)">🙂 Ник и аватар<small>виден ваш профиль</small></div>
+            <div class="seg ${revAnon ? 'sel' : ''}" onclick="setRevAnon(1)">🕶 Инкогнито<small>анонимно</small></div>
+          </div>
+          <button class="btn btn-gold" onclick="submitReview()">${o.review ? 'Обновить отзыв' : 'Опубликовать отзыв'}
+            <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg></span>
+          </button>
+        </div>
       </div>` : ''}`;
 }
-function openOrder(i) { renderOrderBody(i); openSheet('order'); }
+let revAnon = 0;
+function openOrder(i) {
+  revAnon = S.orders[i] && S.orders[i].review_anon ? 1 : 0;
+  renderOrderBody(i);
+  openSheet('order');
+}
+function setRevAnon(v) {
+  revAnon = v ? 1 : 0;
+  haptic('light');
+  document.querySelectorAll('#sheet-order .rev-anon .seg').forEach((el, i) =>
+    el.classList.toggle('sel', i === revAnon));
+}
 async function rateOrder(n) {
   const o = S.orders[curOrderIdx];
+  const draft = document.getElementById('revText')?.value;   // не терять набранный текст
   haptic('medium');
   if (API.ok) {
     try { applySnapshot(await API.call('/api/rate', { order: o.id, stars: n })); }
@@ -1568,8 +1630,90 @@ async function rateOrder(n) {
   } else {
     o.stars = n; save();
   }
-  openOrder(curOrderIdx);
+  renderOrderBody(curOrderIdx);   // не пересоздаём шторку — не теряем текст в поле
+  const ta = document.getElementById('revText');
+  if (ta && draft != null) ta.value = draft;
   toast('Спасибо за оценку ★');
+}
+async function submitReview() {
+  const o = S.orders[curOrderIdx];
+  const stars = o.stars || 5;    // отзыв без явной оценки считаем за 5★
+  const text = (document.getElementById('revText')?.value || '').trim();
+  if (!text) return toast('Напишите пару слов для отзыва');
+  haptic('medium');
+  if (API.ok) {
+    try { applySnapshot(await API.call('/api/rate', { order: o.id, stars, text, anon: revAnon })); }
+    catch (e) { return toast(e.message); }
+    curOrderIdx = Math.max(0, S.orders.findIndex(x => x.id === o.id));
+  } else {
+    o.stars = stars; o.review = text; o.review_anon = revAnon; save();
+  }
+  renderOrderBody(curOrderIdx);
+  toast('Спасибо за отзыв! ★');
+}
+
+/* ═══════════ Отзывы на товар ═══════════ */
+function plReviews(n) {
+  const a = n % 10, b = n % 100;
+  if (a === 1 && b !== 11) return 'отзыв';
+  if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return 'отзыва';
+  return 'отзывов';
+}
+const AVA_GRADS = [['#f0d47a', '#c9971d'], ['#8ec5ff', '#3a6ea5'], ['#a0e8af', '#3f8f5a'],
+  ['#f6a5c0', '#b85477'], ['#c9b3f5', '#6a4fb3'], ['#ffcf9e', '#c9741d']];
+function avaFor(name) {
+  const s = name || '?';
+  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  const g = AVA_GRADS[h % AVA_GRADS.length];
+  const letter = (s.trim().replace(/^@/, '')[0] || '?').toUpperCase();
+  return { bg: `linear-gradient(135deg,${g[0]},${g[1]})`, letter };
+}
+function reviewDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+async function openReviews(id) {
+  const p = goodsList().find(x => String(x.id) === String(id));
+  const title = p ? p.name : 'Отзывы';
+  document.getElementById('reviewsBody').innerHTML =
+    `<h2 style="margin:0 2px 4px">Отзывы</h2>
+     <p class="sheet-sub" style="margin:0 2px 16px">${esc(title)}</p>
+     <div class="rev-empty">Загружаем…</div>`;
+  openSheet('reviews');
+  let list = [];
+  if (API.ok) {
+    try { list = (await API.call('/api/reviews', { product: id })).reviews || []; }
+    catch (e) { /* покажем «нет отзывов» */ }
+  }
+  renderReviews(title, list);
+}
+function renderReviews(title, list) {
+  const body = document.getElementById('reviewsBody');
+  if (!body) return;
+  const head = `<h2 style="margin:0 2px 4px">Отзывы</h2>
+    <p class="sheet-sub" style="margin:0 2px 16px">${esc(title)} · ${list.length} ${plReviews(list.length)}</p>`;
+  if (!list.length) {
+    body.innerHTML = head + `<div class="rev-empty">Пока нет отзывов.<br>Купите товар и оставьте первый ★</div>`;
+    return;
+  }
+  body.innerHTML = head + `<div class="rev-list">` + list.map(r => {
+    const inc = !!r.anon;
+    const name = inc ? 'Инкогнито' : (r.name || 'Покупатель');
+    const av = avaFor(name);
+    const stars = '★★★★★'.slice(0, r.stars || 0) + '☆☆☆☆☆'.slice(0, 5 - (r.stars || 0));
+    return `<div class="rev-item">
+      <div class="rev-head">
+        <div class="rev-ava ${inc ? 'inc' : ''}" ${inc ? '' : `style="background:${av.bg}"`}>${inc ? '🕶' : av.letter}</div>
+        <div class="rev-who">
+          <div class="rev-name">${esc(name)}</div>
+          <div class="rev-date">${reviewDate(r.created)}</div>
+        </div>
+        <div class="rev-stars">${stars}</div>
+      </div>
+      <div class="rev-text">${esc(r.text)}</div>
+    </div>`;
+  }).join('') + `</div>`;
 }
 
 /* ═══════════ Баланс / пополнение ═══════════ */
