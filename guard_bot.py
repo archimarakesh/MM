@@ -995,28 +995,47 @@ async def run(notify=None):
             return await bot.send_message(target, text, parse_mode="HTML")
 
         try:
-            keys = qb.theme_keys()
-            labels = [f"{qb.theme_meta(k)[1]} {qb.theme_meta(k)[0]}" for k in keys]
-            try:
-                poll = await bot.send_poll(
-                    target, "🧠 Тема викторины? Голосуйте — запускаю по итогам!",
-                    labels, is_anonymous=True)
-            except Exception:
-                log.warning("Викторина: опрос не отправлен (бот админ в чате?)")
-                return
-            await asyncio.sleep(max(15, poll_sec if poll_sec is not None else QUIZ_POLL_SEC))
-            try:
-                stopped = await bot.stop_poll(target, poll.message_id)
-                counts = [o.voter_count for o in stopped.options]
-            except Exception:
-                counts = []
-            if counts and max(counts) > 0:
-                best = max(counts)
-                idx = random.choice([i for i, c in enumerate(counts) if c == best])
+            # темы идут по кругу: показываем только ещё не выпадавшие в этом круге,
+            # круг пройден — начинаем заново (в тесте круг не расходуем)
+            all_keys = qb.theme_keys()
+            if dry:
+                avail = list(all_keys)
             else:
-                idx = random.randrange(len(keys))     # никто не голосовал — случайная тема
-            key = keys[idx]
+                used = await db.quiz_used_themes()
+                avail = [k for k in all_keys if k not in used]
+                if not avail:
+                    await db.quiz_reset_theme_cycle()
+                    avail = list(all_keys)
+                    try:
+                        await send("🔄 Все темы прошли круг — начинаем новый!")
+                    except Exception:
+                        pass
+            if len(avail) == 1:
+                key = avail[0]                        # тема одна — без опроса
+            else:
+                labels = [f"{qb.theme_meta(k)[1]} {qb.theme_meta(k)[0]}" for k in avail]
+                try:
+                    poll = await bot.send_poll(
+                        target, "🧠 Тема викторины? Голосуйте — запускаю по итогам!",
+                        labels, is_anonymous=True)
+                except Exception:
+                    log.warning("Викторина: опрос не отправлен (бот админ в чате?)")
+                    return
+                await asyncio.sleep(max(15, poll_sec if poll_sec is not None else QUIZ_POLL_SEC))
+                try:
+                    stopped = await bot.stop_poll(target, poll.message_id)
+                    counts = [o.voter_count for o in stopped.options]
+                except Exception:
+                    counts = []
+                if counts and max(counts) > 0:
+                    best = max(counts)
+                    idx = random.choice([i for i, c in enumerate(counts) if c == best])
+                else:
+                    idx = random.randrange(len(avail))  # никто не голосовал — случайная
+                key = avail[idx]
             title, emoji = qb.theme_meta(key)
+            if not dry:
+                await db.quiz_mark_theme_used(key)      # эта тема выпала в круге
             questions = await pick_fresh_questions(key, title, persist=not dry)
             await send(
                 f"🏆 Тема: <b>{emoji} {_esc(title)}</b>\n"
