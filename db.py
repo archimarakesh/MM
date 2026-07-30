@@ -280,6 +280,22 @@ async def init():
                 code    TEXT PRIMARY KEY,
                 user_id BIGINT NOT NULL,
                 expires DOUBLE PRECISION NOT NULL);
+            -- подписки/отписки в чате и канале (для /stats guard-бота).
+            -- Telegram истории не отдаёт — считаем с момента запуска трекинга.
+            CREATE TABLE IF NOT EXISTS member_events(
+                id      BIGSERIAL PRIMARY KEY,
+                chat_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                dir     TEXT   NOT NULL,          -- 'join' | 'leave'
+                name    TEXT,
+                at      TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE INDEX IF NOT EXISTS member_events_chat_at ON member_events(chat_id, at);
+            -- периодический снимок общего числа участников (базовая линия + график)
+            CREATE TABLE IF NOT EXISTS member_snapshots(
+                chat_id BIGINT NOT NULL,
+                at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+                total   INT NOT NULL,
+                PRIMARY KEY(chat_id, at));
         """)
         if await c.fetchval("SELECT COUNT(*) FROM products") == 0:
             for i, (name, sub, emoji, tag, base) in enumerate(SEED_PRODUCTS):
@@ -1853,6 +1869,60 @@ async def award_activity_week(week_start, week_end, prizes: list) -> list:
                         "amount": amount, "score": int(r["score"]),
                         "points": r["pts"], "days": r["days"]})
         return out
+
+
+# ── статистика подписок чата/канала (guard-бот /stats) ───────────────────────
+async def record_member_event(chat_id: int, user_id: int, direction: str,
+                              name: str | None = None) -> bool:
+    """Фиксирует вход/выход участника. direction: 'join' | 'leave'.
+    Дедуп: тот же (chat, user, направление) в пределах 30 c не пишем дважды —
+    Telegram изредка дублирует chat_member при смене статуса."""
+    if direction not in ("join", "leave"):
+        return False
+    async with _pool.acquire() as c:
+        dup = await c.fetchval(
+            "SELECT 1 FROM member_events "
+            "WHERE chat_id=$1 AND user_id=$2 AND dir=$3 AND at > now()-interval '30 seconds' "
+            "LIMIT 1", chat_id, user_id, direction)
+        if dup:
+            return False
+        await c.execute(
+            "INSERT INTO member_events(chat_id, user_id, dir, name) VALUES($1,$2,$3,$4)",
+            chat_id, user_id, direction, (name or "")[:128] or None)
+        return True
+
+
+async def member_flow(chat_id: int, since) -> dict:
+    """Сколько подписалось/отписалось в чате с момента `since` (datetime, UTC)."""
+    async with _pool.acquire() as c:
+        row = await c.fetchrow("""
+            SELECT
+              COUNT(*) FILTER (WHERE dir='join')  AS joined,
+              COUNT(*) FILTER (WHERE dir='leave') AS left
+            FROM member_events WHERE chat_id=$1 AND at >= $2
+        """, chat_id, since)
+    joined = int(row["joined"] or 0)
+    left = int(row["left"] or 0)
+    return {"joined": joined, "left": left, "net": joined - left}
+
+
+async def save_member_snapshot(chat_id: int, total: int) -> None:
+    async with _pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO member_snapshots(chat_id, total) VALUES($1,$2) "
+            "ON CONFLICT DO NOTHING", chat_id, int(total))
+
+
+async def member_tracking_since(chat_id: int):
+    """Момент, с которого по чату есть хоть какие-то данные (событие/снимок)."""
+    async with _pool.acquire() as c:
+        return await c.fetchval("""
+            SELECT min(t) FROM (
+              SELECT min(at) AS t FROM member_events    WHERE chat_id=$1
+              UNION ALL
+              SELECT min(at) AS t FROM member_snapshots WHERE chat_id=$1
+            ) q
+        """, chat_id)
 
 
 # ── общий кошелёк для внешних сервисов ───────────────────────────────────────
