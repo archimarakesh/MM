@@ -531,6 +531,19 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
     <div id="ordersList"></div>
   </section>
 
+  <!-- ══ МОИ РЕФЕРАЛЫ ══ -->
+  <section class="view" id="view-referrals">
+    <div style="display:flex;align-items:center;gap:12px;margin:8px 0 6px">
+      <div class="icon-btn" onclick="go('profile')" aria-label="Назад">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </div>
+      <div class="eyebrow" style="margin:0">Реферальная программа</div>
+    </div>
+    <h1 class="page-title">Мои <em>рефералы</em></h1>
+    <p class="page-sub">Доход с приглашённых и подробная статистика по каждому.</p>
+    <div id="referralsBody"></div>
+  </section>
+
   <!-- ══ ПРОФИЛЬ ══ -->
   <section class="view" id="view-profile">
     <div class="profile-head">
@@ -572,7 +585,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
         <button class="btn btn-gold" style="margin-top:12px" onclick="shareRef()">Пригласить друга
           <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
         </button>
-        <button class="btn btn-ghost" style="margin-top:8px" onclick="openSheet('referrals')"
+        <button class="btn btn-ghost" style="margin-top:8px" onclick="go('referrals')"
           id="refDetailBtn">Мои рефералы и доход
           <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span>
         </button>
@@ -730,12 +743,6 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div id="orderBody"></div>
 </div>
 
-<div class="sheet sheet-page" id="sheet-referrals">
-  <div class="sheet-grip"></div>
-  <h2>Мои рефералы</h2>
-  <p class="sheet-sub">Доход с приглашённых и подробная статистика по каждому.</p>
-  <div id="referralsBody"><p class="note">Загрузка…</p></div>
-</div>
 
 
 <div class="sheet" id="sheet-settings">
@@ -1108,6 +1115,7 @@ function go(v) {
   if (v === 'history') { renderOrders(); softSync(); }   // подтянуть свежие статусы заказов
   if (v === 'topup') renderTopup();
   if (v === 'egrow') renderEgrow();
+  if (v === 'referrals') renderReferrals();
   window.scrollTo({ top: 0 });
   revealNow(el);   // синхронно — иначе кадр с opacity:0 успевает отрисоваться и раздел мигает
 }
@@ -1120,7 +1128,6 @@ function openSheet(name) {
   document.getElementById('sheet-' + name).classList.add('open');
   if (name === 'settings') syncSettings();
   if (name === 'withdraw') renderWithdraw();
-  if (name === 'referrals') renderReferrals();
   if (name === 'delacc') {
     delAccArmed = false;
     document.getElementById('delAccBtn').textContent = 'Удалить аккаунт';
