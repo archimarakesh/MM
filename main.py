@@ -49,13 +49,17 @@ PROMO_CHANNEL_ID = os.getenv("PROMO_CHANNEL_ID", "") or BONUS_CHANNEL_ID
 # кнопка под постом: после /newapp в BotFather поставь https://t.me/Magic_Marketplace_bot/shop —
 # будет открывать мини-апп сразу (web_app-кнопки в каналах Telegram не разрешает)
 PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace_bot/shop")
-# кнопка на казино-мини-апп под постами. Чтобы кнопка ЗАПУСКАЛА приложение
-# (а не открывала чат бота), ссылка должна вести на мини-апп: либо app-ссылка
-# t.me/<bot>/<app>, либо с ?startapp=. Берём CASINO_TG_LINK и, если query нет,
-# дописываем ?startapp=promo. Можно переопределить через PROMO_CASINO_URL.
-_promo_cas = os.getenv("CASINO_TG_LINK", "").strip()
-if _promo_cas and "startapp=" not in _promo_cas and "?" not in _promo_cas:
-    _promo_cas = _promo_cas.rstrip("/") + "?startapp=promo"
+# кнопка на казино-мини-апп под постами. Чтобы кнопка СРАЗУ ЗАПУСКАЛА приложение
+# (а не открывала чат), нужна app-ссылка t.me/<bot>/<app>. Короткое имя аппа
+# казино — «play» (PROMO_CASINO_APP). Бота берём из CASINO_TG_LINK, добавляем /play.
+_cas_base = os.getenv("CASINO_TG_LINK", "").split("?")[0].strip().rstrip("/")
+_cas_app = os.getenv("PROMO_CASINO_APP", "play").strip("/")
+if _cas_base:
+    _parts = _cas_base.split("/")
+    _cas_bot = "/".join(_parts[:4]) if len(_parts) >= 4 else _cas_base  # https://t.me/<bot>
+    _promo_cas = f"{_cas_bot}/{_cas_app}" if _cas_app else _cas_bot
+else:
+    _promo_cas = ""
 PROMO_CASINO_URL = os.getenv("PROMO_CASINO_URL", "") or _promo_cas
 # кнопки «Чат» и «Канал» под промо-постами (инвайт-ссылки как в бонус-шторке)
 PROMO_CHAT_URL = os.getenv("PROMO_CHAT_URL", "https://t.me/+0_b77ETKGVpiZGY6")
