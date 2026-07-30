@@ -183,6 +183,9 @@ h1.page-title em{font-style:normal;color:inherit}
   max-height:88dvh;overflow-y:auto;overscroll-behavior:contain;
   transform:translateY(105%);transition:transform .6s var(--ease)}
 .sheet.open{transform:none}
+/* полноэкранная страница (не низкая шторка) — для «Мои рефералы» */
+.sheet.sheet-page{top:0;height:100dvh;max-height:100dvh;border-radius:0;
+  padding-top:calc(12px + env(safe-area-inset-top))}
 .sheet-grip{width:88px;height:28px;padding:12px 24px;box-sizing:border-box;border-radius:99px;
   background:rgba(255,255,255,.14);background-clip:content-box;margin:-4px auto 6px;cursor:grab;touch-action:none}
 .sheet h2{font-weight:800;font-size:19px;letter-spacing:-.01em;margin-bottom:4px}
@@ -727,7 +730,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
   <div id="orderBody"></div>
 </div>
 
-<div class="sheet" id="sheet-referrals">
+<div class="sheet sheet-page" id="sheet-referrals">
   <div class="sheet-grip"></div>
   <h2>Мои рефералы</h2>
   <p class="sheet-sub">Доход с приглашённых и подробная статистика по каждому.</p>
