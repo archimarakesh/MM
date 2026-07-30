@@ -184,6 +184,7 @@ async def init():
             ALTER TABLE ratings ADD COLUMN IF NOT EXISTS anon    INT NOT NULL DEFAULT 0;
             ALTER TABLE ratings ADD COLUMN IF NOT EXISTS name    TEXT;
             ALTER TABLE ratings ADD COLUMN IF NOT EXISTS avatar  TEXT;   -- data-URI мини-аватар (не для инкогнито)
+            ALTER TABLE ratings ADD COLUMN IF NOT EXISTS hidden  INT NOT NULL DEFAULT 0;  -- модерация: 1 = скрыт
             ALTER TABLE ratings ADD COLUMN IF NOT EXISTS created TIMESTAMPTZ NOT NULL DEFAULT now();
             CREATE INDEX IF NOT EXISTS ratings_product_idx ON ratings(product_id);
             CREATE TABLE IF NOT EXISTS grow_plans(
@@ -382,7 +383,7 @@ async def get_products(include_inactive: bool = False, conn=None) -> list:
     rows = await c.fetch(q)
     rrows = await c.fetch(
         "SELECT product_id, AVG(stars) AS avg, COUNT(*) AS cnt, "
-        "COUNT(*) FILTER (WHERE text IS NOT NULL AND text <> '') AS reviews "
+        "COUNT(*) FILTER (WHERE text IS NOT NULL AND text <> '' AND hidden=0) AS reviews "
         "FROM ratings GROUP BY product_id")
     rating = {r["product_id"]: {"avg": round(float(r["avg"]), 1),
                                 "count": r["cnt"], "reviews": r["reviews"]} for r in rrows}
@@ -784,7 +785,7 @@ async def product_reviews(product_id: int, limit: int = 60) -> list:
         rows = await c.fetch("""
             SELECT stars, text, anon, name, avatar, created
             FROM ratings
-            WHERE product_id=$1 AND text IS NOT NULL AND text <> ''
+            WHERE product_id=$1 AND text IS NOT NULL AND text <> '' AND hidden=0
             ORDER BY created DESC NULLS LAST, order_id DESC
             LIMIT $2
         """, product_id, limit)
@@ -800,6 +801,59 @@ async def product_reviews(product_id: int, limit: int = 60) -> list:
             "created": r["created"].isoformat() if r["created"] else None,
         })
     return out
+
+
+async def admin_reviews(limit: int = 200) -> list:
+    """Все текстовые отзывы для модерации — включая скрытые и настоящее имя
+    инкогнито (модератору важно знать автора)."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT r.order_id, r.product_id, r.stars, r.text, r.anon, r.hidden,
+                   r.name AS snap_name, r.avatar, r.created,
+                   p.name AS product, u.name AS user_name, u.username
+            FROM ratings r
+            LEFT JOIN products p ON p.id = r.product_id
+            LEFT JOIN users u    ON u.tg_id = r.user_id
+            WHERE r.text IS NOT NULL AND r.text <> ''
+            ORDER BY r.created DESC NULLS LAST, r.order_id DESC
+            LIMIT $1
+        """, limit)
+    out = []
+    for r in rows:
+        out.append({
+            "order": f"MM-{r['order_id'] + ORDER_CODE_BASE}",
+            "product": r["product"] or "—",
+            "stars": r["stars"],
+            "text": r["text"],
+            "anon": 1 if r["anon"] else 0,
+            "hidden": 1 if r["hidden"] else 0,
+            "avatar": r["avatar"],
+            # автор: snapshot-имя или актуальное из профиля; username — в помощь модератору
+            "author": r["snap_name"] or r["user_name"] or "Покупатель",
+            "username": r["username"],
+            "created": r["created"].isoformat() if r["created"] else None,
+        })
+    return out
+
+
+async def admin_moderate_review(order_code: str, action: str) -> None:
+    """Модерация отзыва: hide / show / delete. delete очищает текст, аватар и
+    имя (звёзды-оценку оставляем — она честная)."""
+    try:
+        oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
+    except (IndexError, ValueError):
+        raise ValueError("Неверный номер заказа")
+    async with _pool.acquire() as c:
+        if action == "hide":
+            await c.execute("UPDATE ratings SET hidden=1 WHERE order_id=$1", oid)
+        elif action == "show":
+            await c.execute("UPDATE ratings SET hidden=0 WHERE order_id=$1", oid)
+        elif action == "delete":
+            await c.execute(
+                "UPDATE ratings SET text=NULL, avatar=NULL, name=NULL, hidden=0 "
+                "WHERE order_id=$1", oid)
+        else:
+            raise ValueError("Неизвестное действие")
 
 
 # ── пополнения (ручная проверка) ─────────────────────────────────────────────

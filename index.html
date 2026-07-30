@@ -198,6 +198,9 @@ img.rev-ava{background:rgba(255,255,255,.06)}
   font-weight:700;border:1px solid var(--line);color:var(--muted);background:rgba(255,255,255,.02);line-height:1.3}
 .rev-anon .seg small{display:block;font-size:9.5px;font-weight:600;color:var(--muted-2);margin-top:2px}
 .rev-anon .seg.sel{border-color:var(--gold);color:var(--gold-soft);background:rgba(212,175,55,.08)}
+.mod-btn{flex:1;padding:9px 8px;border-radius:11px;cursor:pointer;font-size:12px;font-weight:700;
+  border:1px solid var(--line);color:var(--txt);background:rgba(255,255,255,.03)}
+.mod-btn.danger{color:var(--danger);border-color:rgba(224,122,95,.35);background:rgba(224,122,95,.06)}
 .good-price{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
 .good-price b{font-size:17px;color:var(--txt)}
 .good-price span{font-size:10.5px;color:var(--muted-2)}
@@ -2570,7 +2573,7 @@ function renderAdmin(tab) {
     ['orders', 'Заказы' + (ordersTodo ? ` · ${ordersTodo}${dot}` : '')],
     ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}${dot}` : '')],
     ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}${dot}` : '')],
-    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['pay', 'Оплата'],
+    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['reviews', 'Отзывы'], ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
     `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
@@ -2734,6 +2737,12 @@ function renderAdmin(tab) {
       <div id="promoGenerated"></div>
       ${pr.stats.length ? `<div class="section-head"><h2>Выпущено</h2></div>` + pr.stats.map(s =>
         `<p class="note" style="margin:2px 0">${fmt(s.amount)} ₴ — использовано <b style="color:var(--txt)">${s.used}/${s.total}</b></p>`).join('') : ''}`;
+  } else if (tab === 'reviews') {
+    b.innerHTML = '<p class="note">Загрузка…</p>';
+    API.call('/api/admin/reviews').then(d => {
+      if (adminTab !== 'reviews') return;
+      renderAdminReviews(d.reviews || []);
+    }).catch(() => { if (adminTab === 'reviews') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
   } else if (tab === 'refs') {
     b.innerHTML = '<p class="note">Загрузка…</p>';
     API.call('/api/admin/referrals').then(d => {
@@ -2774,6 +2783,54 @@ function renderAdmin(tab) {
       <button class="btn btn-gold" onclick="savePay()">Сохранить реквизиты</button>
       <p class="note" style="margin-top:8px">ETH и BNB зачисляются автоматически только при заданном ключе Etherscan (env ETHERSCAN_API_KEY). Без него — оставьте эти поля пустыми.</p>`;
   }
+}
+function renderAdminReviews(list) {
+  const b = document.getElementById('adminBody');
+  const visible = list.filter(r => !r.hidden).length;
+  const head = `<div class="admin-stats" style="margin-bottom:12px">
+      <div><b>${fmt(list.length)}</b><span>всего отзывов</span></div>
+      <div><b>${fmt(list.length - visible)}</b><span>скрыто модерацией</span></div>
+    </div>
+    <p class="note" style="margin:-2px 0 10px">Скрытый отзыв не виден покупателям. «Удалить» стирает текст навсегда (оценка-звёзды остаётся).</p>`;
+  if (!list.length) { b.innerHTML = head + '<p class="note">Отзывов пока нет.</p>'; return; }
+  const dt = s => s ? new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  b.innerHTML = head + list.map(r => {
+    const av = avaFor(r.author);
+    const ava = r.avatar
+      ? `<img class="rev-ava" src="${r.avatar}" alt="">`
+      : `<div class="rev-ava" style="background:${av.bg}">${av.letter}</div>`;
+    const stars = '★★★★★'.slice(0, r.stars || 0) + '☆☆☆☆☆'.slice(0, 5 - (r.stars || 0));
+    const who = `${esc(r.author)}${r.username ? ` · @${esc(r.username)}` : ''}${r.anon ? ' · <span style="color:var(--gold-soft)">🕶 инкогнито</span>' : ''}`;
+    return `<div class="rev-item" style="margin-bottom:10px;${r.hidden ? 'opacity:.5' : ''}">
+      <div class="rev-head">
+        ${ava}
+        <div class="rev-who">
+          <div class="rev-name">${who}</div>
+          <div class="rev-date">${esc(r.product)} · ${r.order} · ${dt(r.created)}</div>
+        </div>
+        <div class="rev-stars">${stars}</div>
+      </div>
+      <div class="rev-text">${esc(r.text)}${r.hidden ? ' <b style="color:var(--danger)">· скрыт</b>' : ''}</div>
+      <div style="display:flex;gap:8px;margin-top:11px">
+        <button class="mod-btn" onclick="modReview('${r.order}','${r.hidden ? 'show' : 'hide'}')">${r.hidden ? '👁 Показать' : '🙈 Скрыть'}</button>
+        <button class="mod-btn danger" onclick="modReview('${r.order}','delete')">🗑 Удалить</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function modReview(order, action) {
+  if (action === 'delete') {
+    const msg = 'Удалить текст этого отзыва навсегда? Оценка-звёзды останется.';
+    const ok = await new Promise(res =>
+      tg?.showConfirm ? tg.showConfirm(msg, res) : res(confirm(msg)));
+    if (!ok) return;
+  }
+  haptic('medium');
+  try {
+    const d = await API.call('/api/admin/review/moderate', { order, action });
+    renderAdminReviews(d.reviews || []);
+    toast(action === 'delete' ? 'Отзыв удалён' : action === 'hide' ? 'Отзыв скрыт' : 'Отзыв виден');
+  } catch (e) { toast(e.message); }
 }
 function openPedit(id) {
   curPe = id ? AD.products.find(p => p.id === id) : null;
