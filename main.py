@@ -363,8 +363,8 @@ async def post_promo(path: str, caption: str):
     rows = [[InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL)]]
     if PROMO_CASINO_URL:
         rows.append([InlineKeyboardButton(text="🎰 Открыть Magic Casino", url=PROMO_CASINO_URL)])
-    rows.append([InlineKeyboardButton(text="💬 Чат", url=PROMO_CHAT_URL),
-                 InlineKeyboardButton(text="📣 Канал", url=PROMO_CHANNEL_URL)])
+    rows.append([InlineKeyboardButton(text="💬 Чат", url=PROMO_CHAT_URL)])
+    rows.append([InlineKeyboardButton(text="📣 Канал", url=PROMO_CHANNEL_URL)])
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     msg = await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
                                caption=caption or None, parse_mode="HTML", reply_markup=kb)
