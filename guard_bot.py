@@ -946,6 +946,39 @@ async def run(notify=None):
     async def quiz_send(text, **kw):
         return await bot.send_message(int(RULES_CHAT_ID), text, parse_mode="HTML", **kw)
 
+    async def pick_fresh_questions(key, title, persist=True):
+        """QUIZ_QUESTIONS вопросов темы, не повторяя уже заданные. Когда свежие
+        в теме заканчиваются — уведомляем админа и начинаем круг заново.
+        persist=False (тест в ЛС) — просто случайные, банк не расходуем."""
+        pool = qb.theme_questions(key)
+        if not persist:
+            random.shuffle(pool)
+            return pool[:QUIZ_QUESTIONS]
+        hmap = {qb.qhash(q): (q, a) for q, a in pool}
+        try:
+            asked = await db.quiz_asked_hashes(key)
+        except Exception:
+            asked = set()
+        fresh = [h for h in hmap if h not in asked]
+        if len(fresh) < QUIZ_QUESTIONS:
+            if asked:                                   # реально исчерпали банк темы
+                await journal(
+                    f"🔔 <b>Викторина: вопросы кончаются</b>\n"
+                    f"Тема «{_esc(title)}» — все {len(hmap)} вопросов уже задавались, "
+                    f"начинаю круг заново.\nСтоит добавить свежие вопросы в "
+                    f"<code>quiz_bank.py</code> (тема <code>{key}</code>).")
+            try:
+                await db.quiz_reset_theme(key)
+            except Exception:
+                pass
+            fresh = list(hmap.keys())
+        chosen = random.sample(fresh, min(QUIZ_QUESTIONS, len(fresh)))
+        try:
+            await db.quiz_mark_asked(key, chosen)
+        except Exception:
+            pass
+        return [hmap[h] for h in chosen]
+
     async def run_quiz(force=False, poll_sec=None, chat=None, dry=False, allow_admin=False):
         if quiz_busy["on"]:
             return
@@ -984,7 +1017,7 @@ async def run(notify=None):
                 idx = random.randrange(len(keys))     # никто не голосовал — случайная тема
             key = keys[idx]
             title, emoji = qb.theme_meta(key)
-            questions = qb.pick_questions(key, QUIZ_QUESTIONS, random)
+            questions = await pick_fresh_questions(key, title, persist=not dry)
             await send(
                 f"🏆 Тема: <b>{emoji} {_esc(title)}</b>\n"
                 f"{len(questions)} вопросов · правильный <b>+{QUIZ_Q_PRIZE} ₴</b>, "

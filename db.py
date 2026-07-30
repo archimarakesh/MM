@@ -312,6 +312,12 @@ async def init():
                 winner_name  TEXT,
                 winner_score INT,
                 started      TIMESTAMPTZ NOT NULL DEFAULT now());
+            -- какие вопросы уже задавались (чтобы не повторялись до конца круга)
+            CREATE TABLE IF NOT EXISTS quiz_asked(
+                theme    TEXT NOT NULL,
+                qhash    TEXT NOT NULL,
+                asked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY(theme, qhash));
             -- недельная реферальная гонка: один победитель за неделю
             CREATE TABLE IF NOT EXISTS ref_race_awards(
                 week_start DATE   PRIMARY KEY,
@@ -2083,6 +2089,28 @@ async def quiz_finish_day(day, theme, winner_id, winner_name, winner_score) -> N
             UPDATE quiz_days SET theme=$2, winner_id=$3, winner_name=$4, winner_score=$5
             WHERE day=$1
         """, day, theme, winner_id, (winner_name or None), winner_score)
+
+
+async def quiz_asked_hashes(theme: str) -> set:
+    """Какие вопросы темы уже задавались в текущем круге."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("SELECT qhash FROM quiz_asked WHERE theme=$1", theme)
+    return {r["qhash"] for r in rows}
+
+
+async def quiz_mark_asked(theme: str, hashes: list) -> None:
+    if not hashes:
+        return
+    async with _pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO quiz_asked(theme, qhash) VALUES($1,$2) ON CONFLICT DO NOTHING",
+            [(theme, h) for h in hashes])
+
+
+async def quiz_reset_theme(theme: str) -> None:
+    """Начать новый круг — забываем, что уже задавали (вопросы можно повторять)."""
+    async with _pool.acquire() as c:
+        await c.execute("DELETE FROM quiz_asked WHERE theme=$1", theme)
 
 
 async def ref_race_standings(week_start, week_end, limit: int = 10) -> list:
