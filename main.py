@@ -1820,6 +1820,23 @@ async def api_admin_work(request: Request):
     return {"orders": await db.admin_orders()}
 
 
+@app.post("/api/admin/reviews")
+async def api_admin_reviews(request: Request):
+    admin_user(request)
+    return {"reviews": await db.admin_reviews()}
+
+
+@app.post("/api/admin/review/moderate")
+async def api_admin_review_moderate(request: Request):
+    admin_user(request)
+    b = await request.json()
+    try:
+        await db.admin_moderate_review(str(b.get("order", "")), str(b.get("action", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"reviews": await db.admin_reviews()}
+
+
 @app.post("/api/admin/order/delete")
 async def api_admin_order_delete(request: Request):
     admin_user(request)
