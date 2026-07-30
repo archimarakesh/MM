@@ -331,6 +331,18 @@ h1.page-title em{font-style:normal;color:inherit}
 .ref-inv .sp{font-size:13px;font-weight:800;color:var(--gold-soft);font-variant-numeric:tabular-nums}
 .ref-inv small{flex-basis:100%;font-size:10px;color:var(--muted-2)}
 .ref-detail{padding:2px 6px 8px;background:rgba(255,255,255,.015);border-radius:0 0 12px 12px}
+/* страница «Мои рефералы»: подробная карточка на каждого приглашённого */
+.ref-sum{font-size:12px;color:var(--muted);margin:0 2px 12px}
+.ref-sum b{color:var(--gold-soft)}
+.ref-card{border:1px solid var(--line);border-radius:14px;padding:12px 13px;margin-bottom:9px;background:rgba(255,255,255,.025)}
+.ref-card-top{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.ref-card-top .nm{flex:1;min-width:0;font-size:14px;font-weight:700;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ref-card .badge{font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:999px;color:var(--muted-2);background:rgba(255,255,255,.06)}
+.ref-card .badge.on{color:#0d1a12;background:linear-gradient(135deg,#6ee7a8,#3fae6d)}
+.ref-card-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center}
+.ref-card-grid b{display:block;font-size:15px;font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums}
+.ref-card-grid span{font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2)}
+.ref-card-meta{font-size:10.5px;color:var(--muted-2);margin-top:9px;padding-top:8px;border-top:1px solid var(--line)}
 .ref-link{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:16px;cursor:pointer;
   background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.16);
   font-size:12px;color:var(--muted);word-break:break-all;
@@ -557,9 +569,10 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
         <button class="btn btn-gold" style="margin-top:12px" onclick="shareRef()">Пригласить друга
           <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
         </button>
-        <button class="btn btn-ghost" style="margin-top:8px" onclick="refDetailOpen()"
-          id="refDetailBtn">Мои рефералы и доход</button>
-        <div id="refDetail" class="hide" style="margin-top:10px"></div>
+        <button class="btn btn-ghost" style="margin-top:8px" onclick="openSheet('referrals')"
+          id="refDetailBtn">Мои рефералы и доход
+          <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span>
+        </button>
       </div>
     </div>
   </section>
@@ -712,6 +725,13 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
 <div class="sheet" id="sheet-order">
   <div class="sheet-grip"></div>
   <div id="orderBody"></div>
+</div>
+
+<div class="sheet" id="sheet-referrals">
+  <div class="sheet-grip"></div>
+  <h2>Мои рефералы</h2>
+  <p class="sheet-sub">Доход с приглашённых и подробная статистика по каждому.</p>
+  <div id="referralsBody"><p class="note">Загрузка…</p></div>
 </div>
 
 
@@ -1097,6 +1117,7 @@ function openSheet(name) {
   document.getElementById('sheet-' + name).classList.add('open');
   if (name === 'settings') syncSettings();
   if (name === 'withdraw') renderWithdraw();
+  if (name === 'referrals') renderReferrals();
   if (name === 'delacc') {
     delAccArmed = false;
     document.getElementById('delAccBtn').textContent = 'Удалить аккаунт';
@@ -2028,31 +2049,43 @@ function refDetailFmtDate(iso) {
   try { return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); }
   catch (e) { return ''; }
 }
-async function refDetailOpen() {
-  const box = document.getElementById('refDetail');
+async function renderReferrals() {
+  const box = document.getElementById('referralsBody');
   if (!box) return;
-  if (!box.classList.contains('hide')) { box.classList.add('hide'); return; }  // свернуть
-  box.classList.remove('hide');
-  box.innerHTML = '<p class="note" style="margin:6px 0">Загрузка…</p>';
-  haptic('light');
+  box.innerHTML = '<p class="note">Загрузка…</p>';
   try {
     const d = await API.call('/api/referrals', {});
     const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch]));
-    const list = (d.referrals || []).map(r => `
-      <div class="ref-inv">
-        <span class="nm">${esc(r.name || 'Друг')}</span>
-        <span class="sp">${fmt(r.spent)} ₴</span>
-        <small>${r.orders} зак.${r.joined ? ' · с ' + refDetailFmtDate(r.joined) : ''}</small>
-      </div>`).join('');
+    const list = (d.referrals || []).map(r => {
+      const active = r.orders > 0;
+      return `
+      <div class="ref-card">
+        <div class="ref-card-top">
+          <span class="nm">${esc(r.name || 'Друг')}</span>
+          <span class="badge ${active ? 'on' : ''}">${active ? 'покупает' : 'без покупок'}</span>
+        </div>
+        <div class="ref-card-grid">
+          <div><b>${fmt(r.spent)} ₴</b><span>купил всего</span></div>
+          <div><b>${fmt(r.orders)}</b><span>заказов</span></div>
+          <div><b>${r.avg ? fmt(r.avg) + ' ₴' : '—'}</b><span>средний чек</span></div>
+        </div>
+        <div class="ref-card-meta">
+          ${r.joined ? 'пришёл ' + refDetailFmtDate(r.joined) : ''}${r.last_order ? ' · последний заказ ' + refDetailFmtDate(r.last_order) : (active ? '' : ' · ещё не заказывал')}
+        </div>
+      </div>`;
+    }).join('');
     box.innerHTML = `
       <div class="ref-split">
         <div class="ref-split-c"><b>${fmt(d.earned_shop)} ₴</b><span>с покупок</span></div>
         <div class="ref-split-c"><b>${fmt(d.earned_casino)} ₴</b><span>с казино</span></div>
       </div>
-      <div class="ref-inv-head">Мои приглашённые · ${fmt(d.invited)}</div>
-      ${list || '<p class="note" style="margin:6px 0">Вы ещё никого не пригласили</p>'}`;
+      <div class="ref-sum">
+        Приглашено <b>${fmt(d.invited)}</b>${(d.active != null) ? ` · покупают <b>${fmt(d.active)}</b>` : ''} · ваш процент <b>${d.pct}%</b>
+      </div>
+      <div class="ref-inv-head">Каждый приглашённый</div>
+      ${list || '<p class="note">Вы ещё никого не пригласили. Поделитесь ссылкой из профиля.</p>'}`;
   } catch (e) {
-    box.innerHTML = '<p class="note" style="margin:6px 0">Не удалось загрузить</p>';
+    box.innerHTML = '<p class="note">Не удалось загрузить</p>';
   }
 }
 
