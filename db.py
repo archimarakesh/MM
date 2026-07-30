@@ -1999,19 +1999,26 @@ async def my_referrals(tg_id: int) -> dict:
         rows = await c.fetch("""
             SELECT u.name, u.created AS joined,
                    COUNT(o.id) FILTER (WHERE o.status >= 0)               AS orders,
-                   COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0) AS spent
+                   COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0) AS spent,
+                   MAX(o.created) FILTER (WHERE o.status >= 0)            AS last_order,
+                   MIN(o.created) FILTER (WHERE o.status >= 0)            AS first_order
             FROM users u
             LEFT JOIN orders o ON o.user_id = u.tg_id
             WHERE u.ref_by = $1
             GROUP BY u.tg_id, u.name, u.created
             ORDER BY spent DESC, joined DESC
         """, tg_id)
+    active = sum(1 for r in rows if int(r["orders"] or 0) > 0)
     return {
         "invited": invited, "pct": round(ref_percent(invited) * 100),
         "earned_total": earned_total, "earned_casino": casino, "earned_shop": shop,
+        "active": active,
         "referrals": [{
             "name": r["name"], "joined": r["joined"].isoformat() if r["joined"] else None,
             "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
+            "avg": (int(r["spent"]) // int(r["orders"])) if int(r["orders"] or 0) else 0,
+            "last_order": r["last_order"].isoformat() if r["last_order"] else None,
+            "first_order": r["first_order"].isoformat() if r["first_order"] else None,
         } for r in rows],
     }
 
