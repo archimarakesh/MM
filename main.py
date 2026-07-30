@@ -49,6 +49,8 @@ PROMO_CHANNEL_ID = os.getenv("PROMO_CHANNEL_ID", "") or BONUS_CHANNEL_ID
 # кнопка под постом: после /newapp в BotFather поставь https://t.me/Magic_Marketplace_bot/shop —
 # будет открывать мини-апп сразу (web_app-кнопки в каналах Telegram не разрешает)
 PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace_bot/shop")
+# кнопка на казино-мини-апп под постами (по умолчанию из CASINO_TG_LINK, без query)
+PROMO_CASINO_URL = os.getenv("PROMO_CASINO_URL", "") or os.getenv("CASINO_TG_LINK", "").split("?")[0]
 # кнопки «Чат» и «Канал» под промо-постами (инвайт-ссылки как в бонус-шторке)
 PROMO_CHAT_URL = os.getenv("PROMO_CHAT_URL", "https://t.me/+0_b77ETKGVpiZGY6")
 PROMO_CHANNEL_URL = os.getenv("PROMO_CHANNEL_URL", "https://t.me/+HJLPBVv65kQ0YjAy")
@@ -358,11 +360,12 @@ async def invoice_checker():
 async def post_promo(path: str, caption: str):
     """Публикация одного промо-поста в канал с кнопкой на мини-апп. Возвращает message_id."""
     from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL)],
-        [InlineKeyboardButton(text="💬 Чат", url=PROMO_CHAT_URL),
-         InlineKeyboardButton(text="📣 Канал", url=PROMO_CHANNEL_URL)],
-    ])
+    rows = [[InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL)]]
+    if PROMO_CASINO_URL:
+        rows.append([InlineKeyboardButton(text="🎰 Открыть Magic Casino", url=PROMO_CASINO_URL)])
+    rows.append([InlineKeyboardButton(text="💬 Чат", url=PROMO_CHAT_URL),
+                 InlineKeyboardButton(text="📣 Канал", url=PROMO_CHANNEL_URL)])
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
     msg = await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
                                caption=caption or None, parse_mode="HTML", reply_markup=kb)
     return msg.message_id
