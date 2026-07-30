@@ -1946,6 +1946,76 @@ async def admin_ref_stats() -> dict:
     }
 
 
+async def admin_ref_detail(referrer_id: int) -> dict:
+    """Детализация одного реферера для админки: сам реферер + список всех его
+    приглашённых с покупками каждого (кто когда пришёл, сколько заказов, на
+    сколько ₴)."""
+    async with _pool.acquire() as c:
+        ref = await c.fetchrow(
+            "SELECT tg_id, name, username, ref_earned FROM users WHERE tg_id=$1", referrer_id)
+        rows = await c.fetch("""
+            SELECT u.tg_id, u.name, u.username, u.created AS joined,
+                   COUNT(o.id) FILTER (WHERE o.status >= 0)                    AS orders,
+                   COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0)      AS spent,
+                   MAX(o.created) FILTER (WHERE o.status >= 0)                 AS last_order
+            FROM users u
+            LEFT JOIN orders o ON o.user_id = u.tg_id
+            WHERE u.ref_by = $1
+            GROUP BY u.tg_id, u.name, u.username, u.created
+            ORDER BY spent DESC, joined DESC
+        """, referrer_id)
+    return {
+        "referrer": {
+            "tg_id": referrer_id,
+            "name": (ref["name"] if ref else None),
+            "username": (ref["username"] if ref else None),
+            "ref_earned": int(ref["ref_earned"]) if ref else 0,
+        },
+        "invitees": [{
+            "tg_id": r["tg_id"], "name": r["name"], "username": r["username"],
+            "joined": r["joined"].isoformat() if r["joined"] else None,
+            "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
+            "last_order": r["last_order"].isoformat() if r["last_order"] else None,
+        } for r in rows],
+    }
+
+
+async def my_referrals(tg_id: int) -> dict:
+    """Подробности реф-программы для клиента: заработок с разбивкой (казино /
+    покупки) + список своих приглашённых с суммой их покупок.
+    Казино — начисления через кошелёк с kind/ref 'referral'; покупки — остаток
+    от общего ref_earned (в него входит и казино-часть)."""
+    async with _pool.acquire() as c:
+        earned_total = int(await c.fetchval(
+            "SELECT COALESCE(ref_earned, 0) FROM users WHERE tg_id=$1", tg_id) or 0)
+        casino = int(await c.fetchval("""
+            SELECT COALESCE(SUM(delta), 0) FROM wallet_ops
+            WHERE user_id=$1 AND delta > 0 AND (kind='referral' OR ref='referral')
+        """, tg_id) or 0)
+        casino = min(casino, earned_total)
+        shop = max(0, earned_total - casino)
+        invited = int(await c.fetchval(
+            "SELECT COUNT(*) FROM users WHERE ref_by=$1", tg_id) or 0)
+        rows = await c.fetch("""
+            SELECT u.name, u.created AS joined,
+                   COUNT(o.id) FILTER (WHERE o.status >= 0)               AS orders,
+                   COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0) AS spent
+            FROM users u
+            LEFT JOIN orders o ON o.user_id = u.tg_id
+            WHERE u.ref_by = $1
+            GROUP BY u.tg_id, u.name, u.created
+            ORDER BY spent DESC, joined DESC
+        """, tg_id)
+    return {
+        "invited": invited, "pct": round(ref_percent(invited) * 100),
+        "earned_total": earned_total, "earned_casino": casino, "earned_shop": shop,
+        "referrals": [{
+            "name": r["name"], "joined": r["joined"].isoformat() if r["joined"] else None,
+            "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
+        } for r in rows],
+    }
+
+
 # ── перенос аккаунта ─────────────────────────────────────────────────────────
 async def transfer_create(tg_id: int) -> str:
     code = secrets.token_hex(8).upper()  # 64 бита — не брутфорсится

@@ -1626,6 +1626,21 @@ async def api_admin_referrals(request: Request):
     return await db.admin_ref_stats()
 
 
+@app.post("/api/admin/referrals/detail")
+async def api_admin_referrals_detail(request: Request):
+    """Детализация одного реферера: кто им приглашён и сколько купил."""
+    admin_user(request)
+    b = await request.json()
+    return await db.admin_ref_detail(pint(b.get("id")))
+
+
+@app.post("/api/referrals")
+async def api_referrals(request: Request):
+    """Подробности реф-программы клиента: сплит казино/покупки + свои рефералы."""
+    u = tg_user(request)
+    return await db.my_referrals(u["id"])
+
+
 @app.post("/api/admin/data")
 async def api_admin_data(request: Request):
     admin_user(request)
