@@ -179,6 +179,12 @@ async def init():
                 user_id    BIGINT NOT NULL,
                 product_id BIGINT NOT NULL,
                 stars      INT NOT NULL);
+            -- текстовый отзыв + режим подписи: 0 = ник и аватар, 1 = инкогнито
+            ALTER TABLE ratings ADD COLUMN IF NOT EXISTS text    TEXT;
+            ALTER TABLE ratings ADD COLUMN IF NOT EXISTS anon    INT NOT NULL DEFAULT 0;
+            ALTER TABLE ratings ADD COLUMN IF NOT EXISTS name    TEXT;
+            ALTER TABLE ratings ADD COLUMN IF NOT EXISTS created TIMESTAMPTZ NOT NULL DEFAULT now();
+            CREATE INDEX IF NOT EXISTS ratings_product_idx ON ratings(product_id);
             CREATE TABLE IF NOT EXISTS grow_plans(
                 id         BIGSERIAL PRIMARY KEY,
                 name       TEXT NOT NULL,
@@ -351,7 +357,7 @@ def _product_row(r, rating) -> dict:
         "active": r["active"], "photos": photos,
         "pv": len(r["photos"] or ""),  # версия фото для кэш-бастинга
         "stock": r["stock"],           # None = не ограничено
-        "rating": rating.get(r["id"], {"avg": 0, "count": 0}),
+        "rating": rating.get(r["id"], {"avg": 0, "count": 0, "reviews": 0}),
     }
 
 
@@ -374,8 +380,11 @@ async def get_products(include_inactive: bool = False, conn=None) -> list:
     q = "SELECT * FROM products" + ("" if include_inactive else " WHERE active") + " ORDER BY pos, id"
     rows = await c.fetch(q)
     rrows = await c.fetch(
-        "SELECT product_id, AVG(stars) AS avg, COUNT(*) AS cnt FROM ratings GROUP BY product_id")
-    rating = {r["product_id"]: {"avg": round(float(r["avg"]), 1), "count": r["cnt"]} for r in rrows}
+        "SELECT product_id, AVG(stars) AS avg, COUNT(*) AS cnt, "
+        "COUNT(*) FILTER (WHERE text IS NOT NULL AND text <> '') AS reviews "
+        "FROM ratings GROUP BY product_id")
+    rating = {r["product_id"]: {"avg": round(float(r["avg"]), 1),
+                                "count": r["cnt"], "reviews": r["reviews"]} for r in rrows}
     return [_product_row(r, rating) for r in rows]
 
 
@@ -477,8 +486,8 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
     u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1", tg_id)
     cnt = await c.fetchval("SELECT COUNT(*) FROM users WHERE ref_by=$1", tg_id)
     rows = await c.fetch("SELECT * FROM orders WHERE user_id=$1 ORDER BY id DESC", tg_id)
-    stars = {r["order_id"]: r["stars"] for r in await c.fetch(
-        "SELECT order_id, stars FROM ratings WHERE user_id=$1", tg_id)}
+    rate = {r["order_id"]: r for r in await c.fetch(
+        "SELECT order_id, stars, text, anon FROM ratings WHERE user_id=$1", tg_id)}
     orders = [{
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "product": r["product"], "grams": r["grams"], "total": r["total"],
@@ -486,7 +495,9 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "ship": json.loads(r["ship"]) if r["ship"] else None,
         "np_status": r["np_status"], "np_status_text": r["np_status_text"],
         "np_eta": r["np_eta"], "np_arrival": r["np_arrival"],
-        "stars": stars.get(r["id"]),
+        "stars": rate.get(r["id"], {}).get("stars") if rate.get(r["id"]) else None,
+        "review": (rate[r["id"]]["text"] if rate.get(r["id"]) else None),
+        "review_anon": (rate[r["id"]]["anon"] if rate.get(r["id"]) else 0),
     } for r in rows]
     return {
         "balance": u["balance"], "ref_count": cnt, "ref_earned": u["ref_earned"],
@@ -720,13 +731,23 @@ async def delete_order(order_code: str) -> None:
         await c.execute("DELETE FROM ratings WHERE order_id=$1", oid)
 
 
-async def rate_order(tg_id: int, order_code: str, stars: int) -> dict:
+REVIEW_MAX = 600      # максимальная длина текста отзыва
+
+
+async def rate_order(tg_id: int, order_code: str, stars: int,
+                     text: str | None = None, anon: int = 0,
+                     name: str | None = None) -> dict:
+    """Оценка заказа (1–5) + необязательный текстовый отзыв.
+    text=None — только звёзды (текст не трогаем). anon: 0 = ник и аватар, 1 = инкогнито."""
     try:
         oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
     except (IndexError, ValueError):
         raise ValueError("Неверный номер заказа")
     if not 1 <= stars <= 5:
         raise ValueError("Оценка — от 1 до 5")
+    anon = 1 if anon else 0
+    write_text = text is not None
+    review = (text or "").strip()[:REVIEW_MAX] if write_text else None
     async with _pool.acquire() as c, c.transaction():
         await _auto_deliver(c)
         o = await c.fetchrow("SELECT * FROM orders WHERE id=$1 AND user_id=$2", oid, tg_id)
@@ -736,11 +757,44 @@ async def rate_order(tg_id: int, order_code: str, stars: int) -> dict:
             raise ValueError("Оценить можно после получения заказа")
         if not o["product_id"]:
             raise ValueError("Этот заказ нельзя оценить")
-        await c.execute("""
-            INSERT INTO ratings(order_id, user_id, product_id, stars) VALUES($1,$2,$3,$4)
-            ON CONFLICT (order_id) DO UPDATE SET stars=$4
-        """, oid, tg_id, o["product_id"], stars)
+        if write_text:
+            # ставим/обновляем оценку и текст сразу; имя-снимок — на момент отзыва
+            await c.execute("""
+                INSERT INTO ratings(order_id, user_id, product_id, stars, text, anon, name, created)
+                VALUES($1,$2,$3,$4,$5,$6,$7, now())
+                ON CONFLICT (order_id) DO UPDATE
+                  SET stars=$4, text=$5, anon=$6, name=$7, created=now()
+            """, oid, tg_id, o["product_id"], stars, review, anon,
+                (name or "").strip()[:64] or None)
+        else:
+            await c.execute("""
+                INSERT INTO ratings(order_id, user_id, product_id, stars) VALUES($1,$2,$3,$4)
+                ON CONFLICT (order_id) DO UPDATE SET stars=$4
+            """, oid, tg_id, o["product_id"], stars)
         return await snapshot(tg_id, c)
+
+
+async def product_reviews(product_id: int, limit: int = 60) -> list:
+    """Текстовые отзывы на товар — свежие сверху. Инкогнито имя не отдаём."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT stars, text, anon, name, created
+            FROM ratings
+            WHERE product_id=$1 AND text IS NOT NULL AND text <> ''
+            ORDER BY created DESC NULLS LAST, order_id DESC
+            LIMIT $2
+        """, product_id, limit)
+    out = []
+    for r in rows:
+        incognito = bool(r["anon"])
+        out.append({
+            "stars": r["stars"],
+            "text": r["text"],
+            "anon": 1 if incognito else 0,
+            "name": None if incognito else (r["name"] or "Покупатель"),
+            "created": r["created"].isoformat() if r["created"] else None,
+        })
+    return out
 
 
 # ── пополнения (ручная проверка) ─────────────────────────────────────────────
