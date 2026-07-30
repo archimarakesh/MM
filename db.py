@@ -183,6 +183,7 @@ async def init():
             ALTER TABLE ratings ADD COLUMN IF NOT EXISTS text    TEXT;
             ALTER TABLE ratings ADD COLUMN IF NOT EXISTS anon    INT NOT NULL DEFAULT 0;
             ALTER TABLE ratings ADD COLUMN IF NOT EXISTS name    TEXT;
+            ALTER TABLE ratings ADD COLUMN IF NOT EXISTS avatar  TEXT;   -- data-URI мини-аватар (не для инкогнито)
             ALTER TABLE ratings ADD COLUMN IF NOT EXISTS created TIMESTAMPTZ NOT NULL DEFAULT now();
             CREATE INDEX IF NOT EXISTS ratings_product_idx ON ratings(product_id);
             CREATE TABLE IF NOT EXISTS grow_plans(
@@ -736,9 +737,10 @@ REVIEW_MAX = 600      # максимальная длина текста отз�
 
 async def rate_order(tg_id: int, order_code: str, stars: int,
                      text: str | None = None, anon: int = 0,
-                     name: str | None = None) -> dict:
+                     name: str | None = None, avatar: str | None = None) -> dict:
     """Оценка заказа (1–5) + необязательный текстовый отзыв.
-    text=None — только звёзды (текст не трогаем). anon: 0 = ник и аватар, 1 = инкогнито."""
+    text=None — только звёзды (текст не трогаем). anon: 0 = ник и аватар, 1 = инкогнито.
+    avatar — data-URI мини-аватар; для инкогнито не сохраняем."""
     try:
         oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
     except (IndexError, ValueError):
@@ -748,6 +750,8 @@ async def rate_order(tg_id: int, order_code: str, stars: int,
     anon = 1 if anon else 0
     write_text = text is not None
     review = (text or "").strip()[:REVIEW_MAX] if write_text else None
+    # аватар храним только для НЕ-инкогнито и только если это data-URI картинки
+    ava = avatar if (not anon and avatar and avatar.startswith("data:image/")) else None
     async with _pool.acquire() as c, c.transaction():
         await _auto_deliver(c)
         o = await c.fetchrow("SELECT * FROM orders WHERE id=$1 AND user_id=$2", oid, tg_id)
@@ -760,12 +764,12 @@ async def rate_order(tg_id: int, order_code: str, stars: int,
         if write_text:
             # ставим/обновляем оценку и текст сразу; имя-снимок — на момент отзыва
             await c.execute("""
-                INSERT INTO ratings(order_id, user_id, product_id, stars, text, anon, name, created)
-                VALUES($1,$2,$3,$4,$5,$6,$7, now())
+                INSERT INTO ratings(order_id, user_id, product_id, stars, text, anon, name, avatar, created)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8, now())
                 ON CONFLICT (order_id) DO UPDATE
-                  SET stars=$4, text=$5, anon=$6, name=$7, created=now()
+                  SET stars=$4, text=$5, anon=$6, name=$7, avatar=$8, created=now()
             """, oid, tg_id, o["product_id"], stars, review, anon,
-                (name or "").strip()[:64] or None)
+                (name or "").strip()[:64] or None, ava)
         else:
             await c.execute("""
                 INSERT INTO ratings(order_id, user_id, product_id, stars) VALUES($1,$2,$3,$4)
@@ -778,7 +782,7 @@ async def product_reviews(product_id: int, limit: int = 60) -> list:
     """Текстовые отзывы на товар — свежие сверху. Инкогнито имя не отдаём."""
     async with _pool.acquire() as c:
         rows = await c.fetch("""
-            SELECT stars, text, anon, name, created
+            SELECT stars, text, anon, name, avatar, created
             FROM ratings
             WHERE product_id=$1 AND text IS NOT NULL AND text <> ''
             ORDER BY created DESC NULLS LAST, order_id DESC
@@ -792,6 +796,7 @@ async def product_reviews(product_id: int, limit: int = 60) -> list:
             "text": r["text"],
             "anon": 1 if incognito else 0,
             "name": None if incognito else (r["name"] or "Покупатель"),
+            "avatar": None if incognito else r["avatar"],
             "created": r["created"].isoformat() if r["created"] else None,
         })
     return out

@@ -940,6 +940,32 @@ async def api_order(request: Request):
     return snap
 
 
+async def _avatar_data_uri(uid: int) -> str | None:
+    """Реальный аватар пользователя из Telegram → маленький data-URI (для отзыва).
+    Бот магазина знает всех покупателей. Любая осечка — тихо возвращаем None."""
+    if not (bot and uid):
+        return None
+    try:
+        photos = await bot.get_user_profile_photos(uid, limit=1)
+        if not photos.total_count or not photos.photos:
+            return None
+        file = await bot.get_file(photos.photos[0][0].file_id)   # самый маленький размер
+        url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+            async with s.get(url) as r:
+                if r.status != 200:
+                    return None
+                raw = await r.read()
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        im.thumbnail((96, 96), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=78, optimize=True)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
 @app.post("/api/rate")
 async def api_rate(request: Request):
     u = tg_user(request)
@@ -951,9 +977,13 @@ async def api_rate(request: Request):
     anon = 1 if b.get("anon") else 0
     name = " ".join(filter(None, [u.get("first_name"), u.get("last_name")])) \
         or (("@" + u["username"]) if u.get("username") else "Покупатель")
+    # реальный аватар подтягиваем только для НЕ-инкогнито отзыва с текстом
+    avatar = None
+    if text is not None and not anon:
+        avatar = await _avatar_data_uri(u["id"])
     try:
         return await db.rate_order(u["id"], str(b.get("order", "")), int(b.get("stars", 0)),
-                                   text=text, anon=anon, name=name)
+                                   text=text, anon=anon, name=name, avatar=avatar)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
