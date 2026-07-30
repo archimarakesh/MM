@@ -56,7 +56,11 @@ PROMO_CHANNEL_URL = os.getenv("PROMO_CHANNEL_URL", "https://t.me/+HJLPBVv65kQ0Yj
 PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,18:00,21:00").split(",") if t.strip()]
 PROMO_POSTS = [
     ("promo/egrow-1.png", ""),
-    ("promo/egrow-3.jpg", ""),
+    ("promo/egrow-3.jpg",
+     "🤝 <b>Реферальная программа</b>\n\n"
+     "5–10% с покупок друзей <b>и с их игры в Magic Casino</b> — навсегда и на вывод. "
+     "Плюс <b>50 ₴ сразу</b> за каждого активированного друга.\n\n"
+     "Твоя персональная ссылка — в приложении: <b>Профиль → «Приглашено»</b>."),
     ("promo/egrow-4.png", ""),
 ]
 # общий секрет с внешними сервисами (казино и т.п.). Пусто — кошелёк наружу закрыт
