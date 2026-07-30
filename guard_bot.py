@@ -41,6 +41,25 @@ GUARD_BOT_TOKEN = os.getenv("GUARD_BOT_TOKEN", "")
 GUARD_ADMIN_ID = int(os.getenv("GUARD_ADMIN_ID", os.getenv("ADMIN_ID", "0")) or 0)
 RULES_CHAT_ID = os.getenv("RULES_CHAT_ID", "")
 RULES_TIMEOUT = int(os.getenv("RULES_TIMEOUT", "600") or 600)
+# канал для /stats (подписки/отписки). По умолчанию берём промо/бонус-канал.
+STATS_CHANNEL_ID = os.getenv("STATS_CHANNEL_ID",
+                             os.getenv("PROMO_CHANNEL_ID", os.getenv("BONUS_CHANNEL_ID", "")))
+
+
+def _stats_chat_ids() -> dict:
+    """{chat_id(int): подпись} — чат и канал, по которым ведём статистику."""
+    out = {}
+    if RULES_CHAT_ID:
+        try:
+            out[int(RULES_CHAT_ID)] = "💬 Чат"
+        except ValueError:
+            pass
+    if STATS_CHANNEL_ID:
+        try:
+            out[int(STATS_CHANNEL_ID)] = "📣 Канал"
+        except ValueError:
+            pass
+    return out
 
 RULES_TEXT = (
     "📜 <b>Правила Magic Market</b>\n\n"
@@ -287,6 +306,39 @@ async def run(notify=None):
             await bot.unpin_chat_message(message.chat.id, message.message_id)
         except Exception:
             pass
+
+    # ── учёт подписок/отписок чата и канала (для /stats) ──────────────────────
+    def _is_member(m) -> bool:
+        """Считается ли статус «в чате/канале»."""
+        st = getattr(m, "status", None)
+        st = getattr(st, "value", st)          # ChatMemberStatus enum → строка
+        if st in ("creator", "administrator", "member"):
+            return True
+        if st == "restricted":
+            return bool(getattr(m, "is_member", False))
+        return False
+
+    @dp.chat_member()
+    async def on_member(ev):
+        """Вход/выход участника (chat_member). Работает и для чата, и для канала —
+        бот должен быть админом. Считаем только отслеживаемые чат/канал."""
+        chat_ids = _stats_chat_ids()
+        if ev.chat.id not in chat_ids:
+            return
+        try:
+            was, now = _is_member(ev.old_chat_member), _is_member(ev.new_chat_member)
+        except Exception:
+            return
+        if was == now:
+            return                              # смена роли, не вход/выход
+        u = ev.new_chat_member.user
+        if getattr(u, "is_bot", False):
+            return
+        direction = "join" if now else "leave"
+        try:
+            await db.record_member_event(ev.chat.id, u.id, direction, u.full_name)
+        except Exception:
+            log.exception("Не записалось событие участника %s", u.id)
 
     @dp.callback_query(F.data.startswith("ack:"))
     async def on_ack(cb: CallbackQuery):
@@ -681,6 +733,79 @@ async def run(notify=None):
                       "сообщения; флуд и нарушения снижают счёт."]
         await message.answer("\n".join(lines), parse_mode="HTML")
 
+    async def _chat_total(chat_id: int):
+        try:
+            return await bot.get_chat_member_count(chat_id)
+        except Exception:
+            return None
+
+    async def build_stats() -> str:
+        """Отчёт по подпискам/отпискам чата и канала."""
+        chat_ids = _stats_chat_ids()
+        if not chat_ids:
+            return ("Не задан ни чат, ни канал.\n"
+                    "Укажите <code>RULES_CHAT_ID</code> и/или <code>STATS_CHANNEL_ID</code>.")
+        now = datetime.now(timezone.utc)
+        day_start = datetime.now(KYIV).replace(hour=0, minute=0, second=0, microsecond=0)
+        periods = [("сегодня", day_start),
+                   ("7 дней", now - timedelta(days=7)),
+                   ("30 дней", now - timedelta(days=30))]
+        blocks = []
+        for chat_id, label in chat_ids.items():
+            total = await _chat_total(chat_id)
+            head = f"{label} — сейчас <b>{total if total is not None else '—'}</b>"
+            lines = [head]
+            for pname, since in periods:
+                try:
+                    f = await db.member_flow(chat_id, since)
+                except Exception:
+                    lines.append(f"  • {pname}: —")
+                    continue
+                sign = "+" if f["net"] >= 0 else ""
+                lines.append(
+                    f"  • {pname}: +{f['joined']} / −{f['left']} "
+                    f"(чистыми {sign}{f['net']})")
+            try:
+                since_ts = await db.member_tracking_since(chat_id)
+            except Exception:
+                since_ts = None
+            if since_ts:
+                lines.append(f"  <i>учёт с {since_ts.astimezone(KYIV).strftime('%d.%m.%Y')}</i>")
+            else:
+                lines.append("  <i>данных пока нет — учёт только начался</i>")
+            blocks.append("\n".join(lines))
+        return ("📊 <b>Статистика подписок</b>\n"
+                "<i>подписалось / отписалось · чистый прирост</i>\n\n"
+                + "\n\n".join(blocks)
+                + "\n\n<i>Telegram не отдаёт историю — считаем с момента запуска.</i>")
+
+    @dp.message(Command("stats", "стата", "статистика"))
+    async def cmd_stats(message: Message):
+        """Отчёт по подпискам чата/канала — только для админа."""
+        if message.from_user.id != GUARD_ADMIN_ID and \
+           not await is_admin(message.chat.id, message.from_user.id):
+            return
+        try:
+            report = await build_stats()
+        except Exception as e:
+            report = f"❌ Не удалось собрать статистику:\n<code>{_esc(str(e)[:400])}</code>"
+        await message.answer(report, parse_mode="HTML")
+
+    async def snapshot_loop():
+        """Раз в 6 часов пишем текущее число участников — базовая линия и график."""
+        while True:
+            try:
+                await asyncio.sleep(6 * 3600)
+                for chat_id in _stats_chat_ids():
+                    total = await _chat_total(chat_id)
+                    if total is not None:
+                        await db.save_member_snapshot(chat_id, total)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                log.exception("Ошибка снимка участников")
+                await asyncio.sleep(300)
+
     _last_pt = {}                                          # анти-очередь по очкам
     WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ]{3,}")   # хотя бы одно живое слово
 
@@ -905,15 +1030,33 @@ async def run(notify=None):
                 pass
             await add_warn(message, name, "флуд")
 
-    log.info("Guard-бот запущен. RULES_CHAT_ID=%r, ADMIN=%s, таймаут=%s c",
-             RULES_CHAT_ID, GUARD_ADMIN_ID, RULES_TIMEOUT)
+    async def initial_snapshot():
+        """Стартовый снимок — чтобы базовая линия и «учёт с …» появились сразу."""
+        for chat_id in _stats_chat_ids():
+            total = await _chat_total(chat_id)
+            if total is not None:
+                try:
+                    await db.save_member_snapshot(chat_id, total)
+                except Exception:
+                    log.exception("Стартовый снимок не записан: %s", chat_id)
+
+    log.info("Guard-бот запущен. RULES_CHAT_ID=%r, STATS_CHANNEL_ID=%r, ADMIN=%s, таймаут=%s c",
+             RULES_CHAT_ID, STATS_CHANNEL_ID, GUARD_ADMIN_ID, RULES_TIMEOUT)
     awards = asyncio.create_task(weekly_awards())
     contest = asyncio.create_task(contest_poster())
+    snaps = asyncio.create_task(snapshot_loop())
+    await initial_snapshot()
+    # chat_member нужно запросить явно: aiogram включит его в allowed_updates,
+    # только если тип обновления зарегистрирован (у нас есть @dp.chat_member)
+    allowed = dp.resolve_used_update_types()
+    if "chat_member" not in allowed:
+        allowed.append("chat_member")
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, allowed_updates=allowed)
     finally:
         awards.cancel()
         contest.cancel()
+        snaps.cancel()
 
 
 if __name__ == "__main__":
