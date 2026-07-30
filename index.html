@@ -180,8 +180,9 @@ h1.page-title em{font-style:normal;color:inherit}
 .rev-item{border:1px solid var(--line);border-radius:16px;padding:13px 14px;background:rgba(255,255,255,.02)}
 .rev-head{display:flex;align-items:center;gap:10px}
 .rev-ava{width:38px;height:38px;border-radius:50%;flex:none;display:grid;place-items:center;
-  font-weight:800;font-size:15px;color:#140f03}
+  font-weight:800;font-size:15px;color:#140f03;object-fit:cover;overflow:hidden}
 .rev-ava.inc{background:rgba(255,255,255,.06);color:var(--muted)}
+img.rev-ava{background:rgba(255,255,255,.06)}
 .rev-who{flex:1;min-width:0}
 .rev-name{font-size:13.5px;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rev-date{font-size:10.5px;color:var(--muted-2);margin-top:1px}
@@ -1702,9 +1703,16 @@ function renderReviews(title, list) {
     const name = inc ? 'Инкогнито' : (r.name || 'Покупатель');
     const av = avaFor(name);
     const stars = '★★★★★'.slice(0, r.stars || 0) + '☆☆☆☆☆'.slice(0, 5 - (r.stars || 0));
+    // реальное фото профиля, если есть; при сбое загрузки — буква-заглушка
+    const ava = inc
+      ? `<div class="rev-ava inc">🕶</div>`
+      : (r.avatar
+          ? `<img class="rev-ava" src="${r.avatar}" alt="" loading="lazy"
+               onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'rev-ava',style:'background:${av.bg}',textContent:'${av.letter}'}))">`
+          : `<div class="rev-ava" style="background:${av.bg}">${av.letter}</div>`);
     return `<div class="rev-item">
       <div class="rev-head">
-        <div class="rev-ava ${inc ? 'inc' : ''}" ${inc ? '' : `style="background:${av.bg}"`}>${inc ? '🕶' : av.letter}</div>
+        ${ava}
         <div class="rev-who">
           <div class="rev-name">${esc(name)}</div>
           <div class="rev-date">${reviewDate(r.created)}</div>
