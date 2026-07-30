@@ -1189,6 +1189,12 @@ async def api_bonus_claim(request: Request):
     await notify(ADMIN_ID,
                  f"🎁 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) получил "
                  f"приветственный бонус {BONUS_AMOUNT} ₴.")
+    # мгновенный бонус пригласившему за активацию друга (если сработал)
+    for r in db.pop_activation_notify():
+        await notify(r["ref_by"],
+                     f"🎉 <b>+{r['bonus']} ₴ за друга!</b>\n"
+                     "Ваш приглашённый активировался — забрал приветственный бонус. "
+                     "Начислено на баланс магазина.")
     return await _snap(u["id"])
 
 
