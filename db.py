@@ -2305,9 +2305,12 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             SELECT u.tg_id, u.name, u.username, u.created AS joined, u.bonus_claimed,
                    COUNT(o.id) FILTER (WHERE o.status >= 0)                    AS orders,
                    COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0)      AS spent,
-                   MAX(o.created) FILTER (WHERE o.status >= 0)                 AS last_order
+                   MAX(o.created) FILTER (WHERE o.status >= 0)                 AS last_order,
+                   MAX(bc.device_hash)                                        AS device,
+                   MAX(bc.ip)                                                 AS ip
             FROM users u
-            LEFT JOIN orders o ON o.user_id = u.tg_id
+            LEFT JOIN orders o        ON o.user_id = u.tg_id
+            LEFT JOIN bonus_claims bc ON bc.user_id = u.tg_id
             WHERE u.ref_by = $1
             GROUP BY u.tg_id, u.name, u.username, u.created, u.bonus_claimed
             ORDER BY spent DESC, joined DESC
@@ -2325,6 +2328,7 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
             "last_order": r["last_order"].isoformat() if r["last_order"] else None,
             "bonus": bool(r["bonus_claimed"]),
+            "device": r["device"], "ip": r["ip"],   # только для админа: сверять накрутку
         } for r in rows],
     }
 
