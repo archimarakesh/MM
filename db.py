@@ -2302,14 +2302,14 @@ async def admin_ref_detail(referrer_id: int) -> dict:
         ref = await c.fetchrow(
             "SELECT tg_id, name, username, ref_earned FROM users WHERE tg_id=$1", referrer_id)
         rows = await c.fetch("""
-            SELECT u.tg_id, u.name, u.username, u.created AS joined,
+            SELECT u.tg_id, u.name, u.username, u.created AS joined, u.bonus_claimed,
                    COUNT(o.id) FILTER (WHERE o.status >= 0)                    AS orders,
                    COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0)      AS spent,
                    MAX(o.created) FILTER (WHERE o.status >= 0)                 AS last_order
             FROM users u
             LEFT JOIN orders o ON o.user_id = u.tg_id
             WHERE u.ref_by = $1
-            GROUP BY u.tg_id, u.name, u.username, u.created
+            GROUP BY u.tg_id, u.name, u.username, u.created, u.bonus_claimed
             ORDER BY spent DESC, joined DESC
         """, referrer_id)
     return {
@@ -2324,6 +2324,7 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             "joined": r["joined"].isoformat() if r["joined"] else None,
             "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
             "last_order": r["last_order"].isoformat() if r["last_order"] else None,
+            "bonus": bool(r["bonus_claimed"]),
         } for r in rows],
     }
 
@@ -2345,7 +2346,7 @@ async def my_referrals(tg_id: int) -> dict:
         invited = int(await c.fetchval(
             "SELECT COUNT(*) FROM users WHERE ref_by=$1", tg_id) or 0)
         rows = await c.fetch("""
-            SELECT u.name, u.created AS joined,
+            SELECT u.tg_id, u.name, u.created AS joined, u.bonus_claimed,
                    COUNT(o.id) FILTER (WHERE o.status >= 0)               AS orders,
                    COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0) AS spent,
                    MAX(o.created) FILTER (WHERE o.status >= 0)            AS last_order,
@@ -2353,7 +2354,7 @@ async def my_referrals(tg_id: int) -> dict:
             FROM users u
             LEFT JOIN orders o ON o.user_id = u.tg_id
             WHERE u.ref_by = $1
-            GROUP BY u.tg_id, u.name, u.created
+            GROUP BY u.tg_id, u.name, u.created, u.bonus_claimed
             ORDER BY spent DESC, joined DESC
         """, tg_id)
     active = sum(1 for r in rows if int(r["orders"] or 0) > 0)
@@ -2362,11 +2363,13 @@ async def my_referrals(tg_id: int) -> dict:
         "earned_total": earned_total, "earned_casino": casino, "earned_shop": shop,
         "active": active,
         "referrals": [{
+            "tg_id": r["tg_id"],
             "name": r["name"], "joined": r["joined"].isoformat() if r["joined"] else None,
             "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
             "avg": (int(r["spent"]) // int(r["orders"])) if int(r["orders"] or 0) else 0,
             "last_order": r["last_order"].isoformat() if r["last_order"] else None,
             "first_order": r["first_order"].isoformat() if r["first_order"] else None,
+            "bonus": bool(r["bonus_claimed"]),
         } for r in rows],
     }
 

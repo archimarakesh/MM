@@ -1248,6 +1248,39 @@ async def _member_state(chat_id: str, user_id: int) -> str:
         return "err"
 
 
+_sub_cache: dict = {}   # (chat_id, user_id) -> (state, ts) — кэш проверки подписки (5 мин)
+
+
+async def _member_state_cached(chat_id: str, user_id: int) -> str:
+    key = (str(chat_id), user_id)
+    hit = _sub_cache.get(key)
+    if hit and time.time() - hit[1] < 300:
+        return hit[0]
+    st = await _member_state(chat_id, user_id)
+    _sub_cache[key] = (st, time.time())
+    return st
+
+
+async def _enrich_ref_status(refs: list, strip_tgid: bool = False) -> list:
+    """К каждому рефералу (dict с 'tg_id') добавляет подписку на канал/чат
+    ('yes'/'no'/'err'). Проверки параллельно, с ограничением нагрузки на Telegram.
+    strip_tgid=True — убрать tg_id из выдачи (для клиента)."""
+    sem = asyncio.Semaphore(8)
+
+    async def one(r):
+        uid = r.get("tg_id")
+        async with sem:
+            r["sub_channel"] = (await _member_state_cached(BONUS_CHANNEL_ID, uid)
+                                if bot and uid and BONUS_CHANNEL_ID else "err")
+            r["sub_chat"] = (await _member_state_cached(BONUS_CHAT_ID, uid)
+                             if bot and uid and BONUS_CHAT_ID else "err")
+        if strip_tgid:
+            r.pop("tg_id", None)
+
+    await asyncio.gather(*(one(r) for r in refs))
+    return refs
+
+
 _bonus_err_notified = 0.0   # чтобы не спамить админу на каждый клик
 
 
@@ -1725,17 +1758,22 @@ async def api_admin_referrals(request: Request):
 
 @app.post("/api/admin/referrals/detail")
 async def api_admin_referrals_detail(request: Request):
-    """Детализация одного реферера: кто им приглашён и сколько купил."""
+    """Детализация одного реферера: кто им приглашён, покупки + статус подписки/бонуса."""
     admin_user(request)
     b = await request.json()
-    return await db.admin_ref_detail(pint(b.get("id")))
+    d = await db.admin_ref_detail(pint(b.get("id")))
+    await _enrich_ref_status(d.get("invitees", []))
+    return d
 
 
 @app.post("/api/referrals")
 async def api_referrals(request: Request):
-    """Подробности реф-программы клиента: сплит казино/покупки + свои рефералы."""
+    """Подробности реф-программы клиента: сплит казино/покупки + свои рефералы
+    со статусом подписки на канал/чат и бонуса."""
     u = tg_user(request)
-    return await db.my_referrals(u["id"])
+    d = await db.my_referrals(u["id"])
+    await _enrich_ref_status(d.get("referrals", []), strip_tgid=True)
+    return d
 
 
 @app.post("/api/admin/data")
