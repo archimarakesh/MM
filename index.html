@@ -390,6 +390,9 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 .ref-card-grid b{display:block;font-size:15px;font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums}
 .ref-card-grid span{font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-2)}
 .ref-card-meta{font-size:10.5px;color:var(--muted-2);margin-top:9px;padding-top:8px;border-top:1px solid var(--line)}
+.ref-status{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;color:var(--muted)}
+.ref-status span{display:inline-flex;align-items:center}
+.ref-inv .ref-status{width:100%;margin-top:4px}
 .ref-link{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:16px;cursor:pointer;
   background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.16);
   font-size:12px;color:var(--muted);word-break:break-all;
@@ -2255,6 +2258,19 @@ function refDetailFmtDate(iso) {
   try { return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); }
   catch (e) { return ''; }
 }
+/* точка статуса: yes/true — зелёная, no/false — красная, err/иное — серая */
+function stDot(s) {
+  const ok = s === true || s === 'yes', bad = s === false || s === 'no';
+  const col = ok ? 'var(--ok)' : bad ? 'var(--danger)' : 'var(--muted-2)';
+  return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-left:5px;flex:none"></span>`;
+}
+function refStatusRow(r) {
+  return `<div class="ref-status">
+    <span>📣 Канал${stDot(r.sub_channel)}</span>
+    <span>💬 Чат${stDot(r.sub_chat)}</span>
+    <span>🎁 Бонус${stDot(r.bonus)}</span>
+  </div>`;
+}
 async function renderReferrals() {
   const box = document.getElementById('referralsBody');
   if (!box) return;
@@ -2278,6 +2294,7 @@ async function renderReferrals() {
         <div class="ref-card-meta">
           ${r.joined ? 'пришёл ' + refDetailFmtDate(r.joined) : ''}${r.last_order ? ' · последний заказ ' + refDetailFmtDate(r.last_order) : (active ? '' : ' · ещё не заказывал')}
         </div>
+        ${refStatusRow(r)}
       </div>`;
     }).join('');
     box.innerHTML = `
@@ -3289,6 +3306,7 @@ async function adminRefOpen(id) {
         <span class="nm">${esc(v.name || 'Без имени')}${v.username ? ' · @' + esc(v.username) : ''}</span>
         <span class="sp">${fmt(v.spent)} ₴</span>
         <small>${v.orders} зак.${v.joined ? ' · пришёл ' + fd(v.joined) : ''}${v.last_order ? ' · посл. ' + fd(v.last_order) : ''} · ID ${v.tg_id}</small>
+        ${refStatusRow(v)}
       </div>`).join('') : '<p class="note" style="margin:6px 0 10px 8px">приглашённых нет</p>';
   } catch (e) {
     box.innerHTML = '<p class="note" style="margin:6px 0 10px 8px">не удалось загрузить</p>';
