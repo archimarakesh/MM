@@ -1034,6 +1034,21 @@ async def api_topup_receipt(request: Request):
     return await _snap(u["id"])
 
 
+@app.post("/api/rates")
+async def api_rates(request: Request):
+    """Курсы UAH за монету + точность отображения — для предпросмотра суммы
+    в каждой крипте до создания счёта."""
+    u = tg_user(request)
+    if not rate_limit(f"rates:{u['id']}", 30, 60):
+        raise HTTPException(429, "Слишком часто — подождите минуту")
+    try:
+        rates = await get_rates()
+    except Exception:
+        rates = {}
+    disp = {k: m["disp"] for k, m in CRYPTO.items()}
+    return {"rates": rates, "disp": disp}
+
+
 @app.post("/api/invoice")
 async def api_invoice(request: Request):
     u = tg_user(request)
