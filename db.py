@@ -1170,11 +1170,13 @@ async def order_to_work(order_code: str) -> dict:
 
 
 async def compensate_delayed_orders(amount: int) -> list:
-    """Компенсация за просрочку отправки: заказ «в работе» (status=1) без ТТН —
-    за КАЖДЫЕ просроченные сутки (полночь Киева после «взяли в работу», за которую
-    ТТН так и не прикрепили) начисляем `amount` ₴ на баланс. Идемпотентно по
-    delay_paid — повторный запуск за те же сутки не начислит дважды. Как только
-    прикрепят ТТН, статус станет ≥2 и заказ выпадет из выборки.
+    """Компенсация за просрочку отправки. Девиз — отправка в день заказа, поэтому
+    дедлайн считаем от ДАТЫ СОЗДАНИЯ заказа (created): за КАЖДЫЕ просроченные сутки
+    (полночь Киева, к которой оплаченный заказ без ТТН так и не отправлен) начисляем
+    `amount` ₴ БОНУСОМ (в locked, с вейджером — как остальные бонусы). Берём заказы
+    оплаченные/в работе (status 0 или 1) без ТТН — сюда попадают и уже висящие в
+    работе. Идемпотентно по delay_paid: повтор за те же сутки не начислит дважды,
+    пропущенный день догоняется. Прикрепили ТТН (status≥2) — заказ выпал из выборки.
     Возвращает список начислений для уведомления покупателей."""
     if amount <= 0:
         return []
@@ -1183,9 +1185,9 @@ async def compensate_delayed_orders(amount: int) -> list:
         rows = await c.fetch("""
             SELECT id, user_id, delay_paid,
                    ((now() AT TIME ZONE 'Europe/Kyiv')::date
-                    - (worked_at AT TIME ZONE 'Europe/Kyiv')::date) AS overdue
+                    - (created AT TIME ZONE 'Europe/Kyiv')::date) AS overdue
             FROM orders
-            WHERE status = 1 AND ttn IS NULL AND worked_at IS NOT NULL
+            WHERE status IN (0, 1) AND ttn IS NULL
             FOR UPDATE
         """)
         for r in rows:
@@ -1194,8 +1196,11 @@ async def compensate_delayed_orders(amount: int) -> list:
             if new_days <= 0:
                 continue
             add = amount * new_days
-            await c.execute("UPDATE users SET balance = balance + $1 WHERE tg_id = $2",
-                            add, r["user_id"])
+            # бонус: в locked + вейджер, как в остальных начислениях
+            await c.execute(
+                f"UPDATE users SET balance = balance + $1, locked = locked + $1, "
+                f"wager_req = (CASE WHEN locked <= 0 THEN 0 ELSE wager_req END) "
+                f"+ $1 * {BONUS_WAGER_X} WHERE tg_id = $2", add, r["user_id"])
             await c.execute("UPDATE orders SET delay_paid = $2 WHERE id = $1",
                             r["id"], overdue)
             out.append({"user_id": r["user_id"],

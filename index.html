@@ -1597,7 +1597,7 @@ function renderOrderBody(i) {
       : 'Заказ отменён — оплата не поступила или не прошла проверку.'}</p>`}
     ${o.delay_paid > 0 ? `
     <div class="ttn" style="margin-bottom:10px;background:rgba(212,175,55,.1)">
-      <span>⏳ Компенсация за задержку</span>
+      <span>⏳ Компенсация за задержку (бонус)</span>
       <b style="color:var(--gold-soft)">+${fmt(o.delay_paid * 50)} ₴ · ${o.delay_paid} сут</b>
     </div>` : ''}
     ${o.ttn ? `

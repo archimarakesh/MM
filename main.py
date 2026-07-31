@@ -486,9 +486,10 @@ async def delay_compensator():
             for r in await db.compensate_delayed_orders(DELAY_BONUS):
                 await notify(r["user_id"],
                     f"⏳ Приносим извинения за задержку отправки заказа <b>{r['code']}</b>.\n"
-                    f"Начислили компенсацию <b>+{r['amount']} ₴</b> на баланс "
+                    f"Начислили компенсацию <b>+{r['amount']} ₴</b> бонусом на баланс "
                     f"({r['each']} ₴ за сутки × {r['new_days']}). "
                     f"Всего задержка: <b>{r['total_days']}</b> сут. "
+                    f"Бонус можно потратить в магазине или отыграть в казино. "
                     f"Как только прикрепим ТТН — компенсация прекратится.")
         except Exception:
             log.exception("Ошибка компенсации за просрочку")
