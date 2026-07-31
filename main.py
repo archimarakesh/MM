@@ -1560,7 +1560,7 @@ async def api_wallet_credit(request: Request):
 
 @app.post("/api/wallet/bonus")
 async def api_wallet_bonus(request: Request):
-    """Бонус (рейкбек казино): в locked — только на покупки в магазине, не вывод."""
+    """Бонус (рейкбек казино): в locked — тратится в магазине или отыгрывается в казино, не вывод."""
     b = await request.json()
     _wallet_auth(b, request)
     uid, amount = pint(b.get("user_id")), pint(b.get("amount"))
