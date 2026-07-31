@@ -253,6 +253,12 @@ async def init():
                 balance_after BIGINT NOT NULL,
                 created       TIMESTAMPTZ NOT NULL DEFAULT now());
             CREATE INDEX IF NOT EXISTS wallet_ops_user_idx ON wallet_ops(user_id, created DESC);
+            -- real_delta: изменение ВЫВОДИМЫХ средств этой операцией (Δ(balance−locked)).
+            -- Реальный банк казино = −Σ real_delta по ставкам/выигрышам: бонусные
+            -- ставки не считаются, а момент, когда бонус отыгрался и стал выводимым,
+            -- автоматически попадает как реальная выплата.
+            ALTER TABLE wallet_ops ADD COLUMN IF NOT EXISTS real_delta BIGINT NOT NULL DEFAULT 0;
+            CREATE INDEX IF NOT EXISTS wallet_ops_kind_idx ON wallet_ops(kind);
             CREATE TABLE IF NOT EXISTS chat_activity(
                 user_id BIGINT NOT NULL,
                 day     DATE   NOT NULL,
@@ -2332,15 +2338,31 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
             await c.execute(
                 "UPDATE users SET ref_earned = ref_earned + $1 WHERE tg_id=$2",
                 amount, tg_id)
+        # Δ выводимых средств — по нему казино считает РЕАЛЬНЫЙ банк
+        # (бонусные ставки не считаются; отыгранный бонус входит как реальная выплата)
+        real_delta = (new_balance - new_locked) - (balance - locked)
         await c.execute("""
-            INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
-            VALUES($1,$2,$3,$4,$5,$6)
-        """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), new_balance)
+            INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after, real_delta)
+            VALUES($1,$2,$3,$4,$5,$6,$7)
+        """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None),
+             new_balance, real_delta)
         active = new_wager > 0 and new_locked > 0
         return {"balance": new_balance, "locked": new_locked,
                 "wager": new_wager if active else 0,
                 "bonus_max_bet": (BONUS_MAX_BET if active else None),
                 "withdrawable": max(0, new_balance - new_locked), "duplicate": False}
+
+
+async def casino_real_bank() -> int:
+    """Реальный банк казино = −Σ Δвыводимых по ставкам/выигрышам (kind bet/win).
+    Считает движение ТОЛЬКО реальных (выводимых) денег: бонус-ставки в банк не
+    идут, а отыгранный бонус (стал выводимым) входит как реальная выплата.
+    Реф-выплаты исключаем — это маркетинг, не игровой оборот."""
+    async with _pool.acquire() as c:
+        v = await c.fetchval(
+            "SELECT -COALESCE(SUM(real_delta), 0) FROM wallet_ops "
+            "WHERE kind IN ('bet', 'win') AND (ref IS NULL OR ref <> 'referral')")
+    return int(v or 0)
 
 
 async def wallet_bonus(tg_id: int, amount: int, op_id: str,

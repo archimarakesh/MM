@@ -1603,6 +1603,14 @@ async def api_wallet_bonus(request: Request):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/wallet/house_bank")
+async def api_wallet_house_bank(request: Request):
+    """Реальный банк казино (движение только выводимых средств) — для плавающего RTP."""
+    b = await request.json()
+    _wallet_auth(b, request)
+    return {"real_bank": await db.casino_real_bank()}
+
+
 @app.post("/api/wallet/avatar")
 async def api_wallet_avatar(request: Request):
     """Фото профиля для казино. Его бот видит только тех, кто жал Start,
