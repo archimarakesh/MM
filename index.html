@@ -1595,6 +1595,11 @@ function renderOrderBody(i) {
     <p class="note" style="margin-bottom:10px">${o.status === -1
       ? '⏳ Заказ ждёт подтверждения оплаты.'
       : 'Заказ отменён — оплата не поступила или не прошла проверку.'}</p>`}
+    ${o.delay_paid > 0 ? `
+    <div class="ttn" style="margin-bottom:10px;background:rgba(212,175,55,.1)">
+      <span>⏳ Компенсация за задержку</span>
+      <b style="color:var(--gold-soft)">+${fmt(o.delay_paid * 50)} ₴ · ${o.delay_paid} сут</b>
+    </div>` : ''}
     ${o.ttn ? `
     <div class="ttn" style="cursor:pointer" onclick="copyText('${o.ttn}')">
       <span>ТТН Новой Почты · нажмите, чтобы скопировать</span>
@@ -2721,6 +2726,7 @@ function renderAdmin(tab) {
           </div>` : ''}
         ${o.status === -1 && !o.receipt ? `<p class="note" style="margin-top:8px">⏳ Ждёт крипто-оплату</p>` : ''}
         ${o.status === 0 ? `<button class="btn btn-ghost" style="margin-top:10px;padding:11px" onclick="workOrder('${o.id}')">🛠 Взять в работу</button>` : ''}
+        ${o.delay_paid > 0 ? `<p class="note" style="margin-top:8px;color:var(--lose)">⏳ Просрочка отправки: ${o.delay_paid} сут · компенсировано покупателю ${fmt(o.delay_paid * 50)} ₴${o.status === 1 ? ' · капает каждую полночь до ТТН' : ''}</p>` : ''}
         ${o.ttn && !ttnEditing.has(o.id) ? `
           <div class="ttn" style="cursor:pointer" onclick="editTtn('${o.id}')" title="Нажмите, чтобы изменить ТТН">
             <span>ТТН</span><b style="display:flex;align-items:center;gap:7px">${o.ttn} <span style="font-size:11px;opacity:.55">✏️</span></b>

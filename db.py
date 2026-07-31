@@ -141,6 +141,10 @@ async def init():
             -- реальная метка времени заказа: date хранится строкой 'DD.MM.YYYY'
             -- (для показа), а агрегаты по времени считаем по created
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS created TIMESTAMPTZ NOT NULL DEFAULT now();
+            -- взяли в работу (status→1): дедлайн отправки — ближайшая полночь Киева;
+            -- delay_paid — за сколько просроченных суток уже начислена компенсация
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS worked_at TIMESTAMPTZ;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS delay_paid INT NOT NULL DEFAULT 0;
             UPDATE orders SET ship=NULL WHERE status=3 AND ship IS NOT NULL;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
             CREATE TABLE IF NOT EXISTS topups(
@@ -529,6 +533,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "product": r["product"], "grams": r["grams"], "total": r["total"],
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
+        "delay_paid": r["delay_paid"],
         "ship": json.loads(r["ship"]) if r["ship"] else None,
         "np_status": r["np_status"], "np_status_text": r["np_status_text"],
         "np_eta": r["np_eta"], "np_arrival": r["np_arrival"],
@@ -1118,7 +1123,7 @@ async def admin_orders() -> list:
         "user": r["name"] or "?", "username": r["username"], "user_id": r["user_id"],
         "product": r["product"], "grams": r["grams"], "total": r["total"],
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
-        "pay": r["pay"],
+        "pay": r["pay"], "delay_paid": r["delay_paid"],
         "receipt": r["receipt"] if r["status"] == -1 else None,
         "ship": json.loads(r["ship"]) if r["ship"] else None,
         "np_status_text": r["np_status_text"], "np_eta": r["np_eta"], "np_arrival": r["np_arrival"],
@@ -1158,8 +1163,46 @@ async def order_to_work(order_code: str) -> dict:
         o = await c.fetchrow("SELECT user_id FROM orders WHERE id=$1 AND status=0", oid)
         if not o:
             raise ValueError("Заказ не найден или уже в работе")
-        await c.execute("UPDATE orders SET status=1 WHERE id=$1", oid)
+        # worked_at — точка отсчёта дедлайна отправки (компенсация за просрочку)
+        await c.execute(
+            "UPDATE orders SET status=1, worked_at=COALESCE(worked_at, now()) WHERE id=$1", oid)
         return {"user_id": o["user_id"], "code": order_code}
+
+
+async def compensate_delayed_orders(amount: int) -> list:
+    """Компенсация за просрочку отправки: заказ «в работе» (status=1) без ТТН —
+    за КАЖДЫЕ просроченные сутки (полночь Киева после «взяли в работу», за которую
+    ТТН так и не прикрепили) начисляем `amount` ₴ на баланс. Идемпотентно по
+    delay_paid — повторный запуск за те же сутки не начислит дважды. Как только
+    прикрепят ТТН, статус станет ≥2 и заказ выпадет из выборки.
+    Возвращает список начислений для уведомления покупателей."""
+    if amount <= 0:
+        return []
+    out = []
+    async with _pool.acquire() as c, c.transaction():
+        rows = await c.fetch("""
+            SELECT id, user_id, delay_paid,
+                   ((now() AT TIME ZONE 'Europe/Kyiv')::date
+                    - (worked_at AT TIME ZONE 'Europe/Kyiv')::date) AS overdue
+            FROM orders
+            WHERE status = 1 AND ttn IS NULL AND worked_at IS NOT NULL
+            FOR UPDATE
+        """)
+        for r in rows:
+            overdue = int(r["overdue"] or 0)
+            new_days = overdue - int(r["delay_paid"] or 0)
+            if new_days <= 0:
+                continue
+            add = amount * new_days
+            await c.execute("UPDATE users SET balance = balance + $1 WHERE tg_id = $2",
+                            add, r["user_id"])
+            await c.execute("UPDATE orders SET delay_paid = $2 WHERE id = $1",
+                            r["id"], overdue)
+            out.append({"user_id": r["user_id"],
+                        "code": f"MM-{r['id'] + ORDER_CODE_BASE}",
+                        "new_days": new_days, "total_days": overdue,
+                        "amount": add, "each": amount})
+    return out
 
 
 async def shipped_orders() -> list:
