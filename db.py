@@ -2276,6 +2276,10 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
     if amount == 0:
         raise ValueError("Нулевая операция")
     is_referral = amount > 0 and (str(ref) == "referral" or str(kind) == "referral")
+    # PvP-покер: op_id казино всегда начинается с "pv:" (бай-ин/кэшаут/возврат).
+    # Там игроки могут «подыгрывать» друг другу, поэтому бонус в PvP не пускаем
+    # и оборот PvP не засчитываем в вейджер.
+    is_pvp = op_id.startswith("pv:")
     async with _pool.acquire() as c, c.transaction():
         # пользователя блокируем ПЕРВЫМ: тогда параллельный повтор с тем же op_id
         # дождётся коммита и увидит готовую запись, а не словит конфликт ключа
@@ -2289,27 +2293,35 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
         balance = u["balance"]
         locked = u["locked"] or 0
         wager = u["wager_req"] or 0
-        if amount < 0 and balance < -amount:
-            raise ValueError("Недостаточно средств")
-        # лимит ставки, пока есть неотыгранный бонус (locked>0 отсекает «повисший»
-        # вейджер после проигрыша бонуса — тогда лимит уже не нужен)
-        if amount < 0 and wager > 0 and locked > 0 and (-amount) > BONUS_MAX_BET:
-            raise ValueError(f"Пока бонус не отыгран, ставка не больше {BONUS_MAX_BET} ₴")
+        withdrawable = balance - locked
+        if amount < 0:
+            if is_pvp:
+                # PvP — только выводимые деньги, бонус сюда не пускаем
+                if withdrawable < -amount:
+                    raise ValueError("В PvP-покере бонусными деньгами играть нельзя — только выводимыми")
+            else:
+                if balance < -amount:
+                    raise ValueError("Недостаточно средств")
+                # лимит ставки, пока есть неотыгранный бонус (locked>0 отсекает
+                # «повисший» вейджер после проигрыша бонуса — тогда лимит не нужен)
+                if wager > 0 and locked > 0 and (-amount) > BONUS_MAX_BET:
+                    raise ValueError(f"Пока бонус не отыгран, ставка не больше {BONUS_MAX_BET} ₴")
 
         new_balance = balance + amount
         new_locked = locked
         new_wager = wager
-        if amount < 0:
+        if amount < 0 and not is_pvp:
             # ставка: бонус тратится последним (locked ≤ остатка), оборот уменьшается
             new_locked = min(locked, new_balance)
             new_wager = max(0, wager - (-amount))
             if wager > 0 and new_wager == 0:
                 new_locked = 0            # вейджер добит — весь бонус в вывод
-        elif amount > 0 and not is_referral:
+        elif amount > 0 and not is_referral and not is_pvp:
             # выигрыш: липкий, только если играли на бонус (нет выводимых) и вейджер жив
-            playing_bonus = (balance - locked) <= 0
+            playing_bonus = withdrawable <= 0
             if wager > 0 and playing_bonus:
                 new_locked = min(new_balance, locked + amount)
+        # PvP (бай-ин или кэшаут): locked и wager не трогаем — всё на выводимых
 
         await c.execute(
             "UPDATE users SET balance=$1, locked=$2, wager_req=$3 WHERE tg_id=$4",
