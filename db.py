@@ -37,6 +37,13 @@ MAX_PENDING_ORDERS = 8    # незакрытых заказов на юзера 
 WITHDRAW_FEE_PCT = int(os.getenv("WITHDRAW_FEE_PCT", "10") or 10)
 PARCEL_COST = int(os.getenv("PARCEL_COST", "80") or 80)
 MAX_PENDING_TOPUPS = 8    # квитанций на проверке на юзера
+
+# ── вейджер (отыгрыш бонуса) ─────────────────────────────────────────────────
+# Бонус (locked) нельзя вывести, пока не сделан оборот ставок = бонус × WAGER_X.
+# Пока вейджер активен: выигрыш с чисто-бонусной игры «липкий» (тоже в locked),
+# а ставка ограничена BONUS_MAX_BET — нельзя слить весь бонус в один спин.
+BONUS_WAGER_X = int(os.getenv("BONUS_WAGER_X", "25") or 25)
+BONUS_MAX_BET = int(os.getenv("BONUS_MAX_BET", "100") or 100)
 SEED_PRODUCTS = [
     ("Golden Reserve", "Флагманская позиция", "🏆", "ХИТ", 120),
     ("Black Label", "Тёмная классика", "🖤", "", 95),
@@ -83,6 +90,9 @@ async def init():
             ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT;
             -- locked: часть баланса (бонус), которую нельзя вывести — только потратить в магазине или отыграть в казино
             ALTER TABLE users ADD COLUMN IF NOT EXISTS locked BIGINT NOT NULL DEFAULT 0;
+            -- wager_req: сколько ещё оборота ставок нужно, чтобы бонус «отыгрался»
+            -- и locked стал выводимым. Начисляется = сумма бонуса × BONUS_WAGER_X.
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS wager_req BIGINT NOT NULL DEFAULT 0;
             -- серверный пин-код (хэш + соль), счётчик попыток и блокировка
             ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_salt TEXT;
@@ -531,6 +541,8 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "ref_percent": round(ref_percent(cnt) * 100),
         "bonus_claimed": u["bonus_claimed"],
         "withdrawable": max(0, u["balance"] - (u["locked"] or 0)),
+        "locked": (u["locked"] or 0),
+        "wager": ((u["wager_req"] or 0) if (u["locked"] or 0) > 0 else 0),
         "has_pin": bool(u["pin_hash"]),
         "pin_locked_until": u["pin_locked_until"].isoformat() if u["pin_locked_until"] else None,
         "orders": orders,
@@ -585,9 +597,12 @@ def ref_percent(invited: int) -> float:
 
 
 async def _spend_locked(c, tg_id: int, amount: int):
-    """Трата уменьшает «залоченный» бонус (его можно потратить в магазине)."""
+    """Трата уменьшает «залоченный» бонус (его можно потратить в магазине).
+    Если бонус закончился — снимаем и вейджер (нечего отыгрывать)."""
     await c.execute(
-        "UPDATE users SET locked = GREATEST(0, locked - $1) WHERE tg_id=$2", amount, tg_id)
+        "UPDATE users SET locked = GREATEST(0, locked - $1), "
+        "wager_req = CASE WHEN locked - $1 <= 0 THEN 0 ELSE wager_req END "
+        "WHERE tg_id=$2", amount, tg_id)
 
 
 # очередь реф-уведомлений: заполняется в _ref_bonus, main.py разбирает её и
@@ -1363,7 +1378,8 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
                 "SELECT 1 FROM bonus_claims WHERE device_hash=$1 LIMIT 1", device):
             raise ValueError("С этого устройства бонус уже получали")
         await c.execute(
-            "UPDATE users SET bonus_claimed=true, balance=balance+$1, locked=locked+$1 WHERE tg_id=$2",
+            f"UPDATE users SET bonus_claimed=true, balance=balance+$1, locked=locked+$1, "
+            f"wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} WHERE tg_id=$2",
             amount, tg_id)
         await c.execute("""
             INSERT INTO bonus_claims(user_id, device_hash, ip) VALUES($1,$2,$3)
@@ -1377,9 +1393,10 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
                 "SELECT ref_by, ref_activated FROM users WHERE tg_id=$1", tg_id)
             ref_by = inv["ref_by"]
             if ref_by and ref_by != tg_id and not inv["ref_activated"]:
-                paid = await c.fetchval("""
+                paid = await c.fetchval(f"""
                     UPDATE users SET balance=balance+$1, locked=locked+$1,
-                                     ref_earned=ref_earned+$1
+                                     ref_earned=ref_earned+$1,
+                                     wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X}
                     WHERE tg_id=$2 RETURNING tg_id
                 """, REF_ACTIVATION_BONUS, ref_by)   # NULL, если реферер удалён
                 if paid:
@@ -1423,9 +1440,10 @@ async def promo_redeem(tg_id: int, code: str) -> dict:
         if p["used_by"]:
             raise ValueError("Промокод уже использован")
         await c.execute("UPDATE promos SET used_by=$1, used_at=now() WHERE code=$2", tg_id, code)
-        # деньги в locked — потратить в магазине можно, вывести нельзя
+        # деньги в locked — потратить в магазине можно, вывести нельзя (до отыгрыша вейджера)
         await c.execute(
-            "UPDATE users SET balance=balance+$1, locked=locked+$1 WHERE tg_id=$2",
+            f"UPDATE users SET balance=balance+$1, locked=locked+$1, "
+            f"wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} WHERE tg_id=$2",
             p["amount"], tg_id)
         snap = await snapshot(tg_id, c)
         snap["promo_amount"] = p["amount"]
@@ -2162,8 +2180,9 @@ async def ref_race_award_record(week_start, user_id: int, cnt: int, prize: int) 
             return False
         await c.execute("INSERT INTO users(tg_id) VALUES($1) "
                         "ON CONFLICT (tg_id) DO NOTHING", user_id)
-        await c.execute("UPDATE users SET balance=balance+$1, locked=locked+$1 "
-                        "WHERE tg_id=$2", prize, user_id)
+        await c.execute(f"UPDATE users SET balance=balance+$1, locked=locked+$1, "
+                        f"wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} "
+                        f"WHERE tg_id=$2", prize, user_id)
         await c.execute("""
             INSERT INTO ref_race_awards(week_start, user_id, cnt, amount)
             VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING
@@ -2174,11 +2193,16 @@ async def ref_race_award_record(week_start, user_id: int, cnt: int, prize: int) 
 # ── общий кошелёк для внешних сервисов ───────────────────────────────────────
 async def wallet_balance(tg_id: int) -> dict:
     async with _pool.acquire() as c:
-        u = await c.fetchrow("SELECT balance, locked FROM users WHERE tg_id=$1", tg_id)
+        u = await c.fetchrow(
+            "SELECT balance, locked, wager_req FROM users WHERE tg_id=$1", tg_id)
     if not u:
         raise ValueError("Пользователь не найден")
     locked = u["locked"] or 0
+    wager = u["wager_req"] or 0
+    active = wager > 0 and locked > 0    # «повисший» вейджер без бонуса не показываем
     return {"balance": u["balance"], "locked": locked,
+            "wager": wager if active else 0,
+            "bonus_max_bet": (BONUS_MAX_BET if active else None),
             "withdrawable": max(0, u["balance"] - locked)}
 
 
@@ -2186,38 +2210,65 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
     """Движение по кошельку: amount>0 — начисление, amount<0 — списание.
 
     Играть в казино можно на ВЕСЬ баланс, включая бонусы (locked): ставка
-    списывается сначала с выводимых средств, а бонус — в последнюю очередь.
-    Когда ставка залезает в бонусную часть, locked уменьшаем на ту же сумму —
-    так проигранный бонус не раздувает выводимый остаток. Выигрыш (amount>0)
-    попадает в обычный баланс и выводим (маржа казино — защита от слива бонусов).
-    Вывести бонусы напрямую по-прежнему нельзя: вывод считает balance-locked.
+    списывается сначала с выводимых средств, бонус — в последнюю очередь.
+
+    Вейджер (отыгрыш бонуса):
+    • Ставка уменьшает wager_req на свою сумму (оборот). Пока wager_req>0,
+      ставка не может превышать BONUS_MAX_BET — нельзя слить бонус в один спин.
+    • Выигрыш при активном вейджере и игре «на бонус» (нет выводимых средств)
+      липкий — идёт в locked, а не в вывод. Так удачный бонус нельзя сразу
+      обналичить; его ещё надо отыграть. Выигрыш на свои деньги — выводим.
+    • Как только оборот добит (wager_req дошёл до 0) — весь locked
+      разблокируется в вывод: бонус отыгран.
+    Вывести бонус напрямую по-прежнему нельзя: вывод считает balance-locked.
     Идемпотентно по op_id: повтор запроса вернёт прежний результат, а не спишет дважды."""
     op_id = str(op_id or "").strip()
     if not op_id or len(op_id) > 64:
         raise ValueError("Неверный op_id")
     if amount == 0:
         raise ValueError("Нулевая операция")
+    is_referral = amount > 0 and (str(ref) == "referral" or str(kind) == "referral")
     async with _pool.acquire() as c, c.transaction():
         # пользователя блокируем ПЕРВЫМ: тогда параллельный повтор с тем же op_id
         # дождётся коммита и увидит готовую запись, а не словит конфликт ключа
-        u = await c.fetchrow("SELECT balance, locked FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        u = await c.fetchrow(
+            "SELECT balance, locked, wager_req FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         if not u:
             raise ValueError("Пользователь не найден")
         prev = await c.fetchrow("SELECT balance_after FROM wallet_ops WHERE op_id=$1", op_id)
         if prev:
             return {"balance": prev["balance_after"], "duplicate": True}
+        balance = u["balance"]
         locked = u["locked"] or 0
-        if amount < 0 and u["balance"] < -amount:
+        wager = u["wager_req"] or 0
+        if amount < 0 and balance < -amount:
             raise ValueError("Недостаточно средств")
-        new_balance = u["balance"] + amount
-        # бонус тратится последним: при ставке locked не может превышать остаток,
-        # значит проигранная бонусная часть автоматически списывается из locked.
-        new_locked = min(locked, new_balance) if amount < 0 else locked
-        await c.execute("UPDATE users SET balance=$1, locked=$2 WHERE tg_id=$3",
-                        new_balance, new_locked, tg_id)
+        # лимит ставки, пока есть неотыгранный бонус (locked>0 отсекает «повисший»
+        # вейджер после проигрыша бонуса — тогда лимит уже не нужен)
+        if amount < 0 and wager > 0 and locked > 0 and (-amount) > BONUS_MAX_BET:
+            raise ValueError(f"Пока бонус не отыгран, ставка не больше {BONUS_MAX_BET} ₴")
+
+        new_balance = balance + amount
+        new_locked = locked
+        new_wager = wager
+        if amount < 0:
+            # ставка: бонус тратится последним (locked ≤ остатка), оборот уменьшается
+            new_locked = min(locked, new_balance)
+            new_wager = max(0, wager - (-amount))
+            if wager > 0 and new_wager == 0:
+                new_locked = 0            # вейджер добит — весь бонус в вывод
+        elif amount > 0 and not is_referral:
+            # выигрыш: липкий, только если играли на бонус (нет выводимых) и вейджер жив
+            playing_bonus = (balance - locked) <= 0
+            if wager > 0 and playing_bonus:
+                new_locked = min(new_balance, locked + amount)
+
+        await c.execute(
+            "UPDATE users SET balance=$1, locked=$2, wager_req=$3 WHERE tg_id=$4",
+            new_balance, new_locked, new_wager, tg_id)
         # реферальные выплаты казино приходят сюда с ref='referral' —
         # учитываем их и в ref_earned, чтобы статистика была общей
-        if amount > 0 and (str(ref) == "referral" or str(kind) == "referral"):
+        if is_referral:
             await c.execute(
                 "UPDATE users SET ref_earned = ref_earned + $1 WHERE tg_id=$2",
                 amount, tg_id)
@@ -2225,7 +2276,10 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
             INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
             VALUES($1,$2,$3,$4,$5,$6)
         """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), new_balance)
+        active = new_wager > 0 and new_locked > 0
         return {"balance": new_balance, "locked": new_locked,
+                "wager": new_wager if active else 0,
+                "bonus_max_bet": (BONUS_MAX_BET if active else None),
                 "withdrawable": max(0, new_balance - new_locked), "duplicate": False}
 
 
@@ -2244,8 +2298,9 @@ async def wallet_bonus(tg_id: int, amount: int, op_id: str,
         prev = await c.fetchrow("SELECT balance_after FROM wallet_ops WHERE op_id=$1", op_id)
         if prev:
             return {"balance": prev["balance_after"], "duplicate": True}
-        r = await c.fetchrow("""
-            UPDATE users SET balance=balance+$1, locked=locked+$1 WHERE tg_id=$2
+        r = await c.fetchrow(f"""
+            UPDATE users SET balance=balance+$1, locked=locked+$1,
+                             wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} WHERE tg_id=$2
             RETURNING balance
         """, amount, tg_id)
         await c.execute("""

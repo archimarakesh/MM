@@ -2215,8 +2215,15 @@ function renderWithdraw() {
   document.getElementById('wdReq').placeholder = WD_METHODS.find(m => m[0] === wdMethod)[2];
   const w = S.withdrawable != null ? S.withdrawable : S.balance;
   const el = document.getElementById('wdAvail');
-  if (el) el.textContent = `Доступно к выводу: ${fmt(w)} ₴` +
-    (w < S.balance ? ` (бонус ${fmt(S.balance - w)} ₴ — на покупки и в казино)` : '');
+  if (el) {
+    let t = `Доступно к выводу: ${fmt(w)} ₴`;
+    if (w < S.balance) {
+      t += ` (бонус ${fmt(S.balance - w)} ₴ — на покупки и в казино)`;
+      if (S.wager > 0) t += `\nЧтобы вывести бонус — отыграйте ещё ${fmt(S.wager)} ₴ ставками в казино.`;
+    }
+    el.textContent = t;
+    el.style.whiteSpace = 'pre-line';
+  }
 }
 function wdSel(k) { haptic('light'); wdMethod = k; renderWithdraw(); }
 async function submitWithdraw() {
