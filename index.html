@@ -398,6 +398,8 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 .ref-inv.flag{background:rgba(224,122,95,.07);border-left:3px solid var(--danger);padding-left:8px;border-radius:6px}
 .ref-inv.flag .nm{color:var(--danger)}
 .ref-flag{width:100%;margin-top:3px;font-size:11px;font-weight:700;color:var(--danger)}
+.ref-owner{padding:6px 4px 8px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line);margin-bottom:4px}
+.ref-owner b{color:var(--txt)}
 .ref-link{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:16px;cursor:pointer;
   background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.16);
   font-size:12px;color:var(--muted);word-break:break-all;
@@ -1111,6 +1113,8 @@ async function adminSync() {
   if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;   // админ печатает — не сбиваем
   // в полях уже есть набранное (например ТТН) — перерисовка стёрла бы его
   if ([...document.querySelectorAll('#adminBody input')].some(i => i.value.trim())) return;
+  // раскрыт список приглашённых у реферера — не сбиваем его авто-перерисовкой
+  if (document.querySelector('#adminBody .ref-detail:not(.hide)')) return;
   adminSyncing = true;
   try {
     AD = await API.call('/api/admin/data');
@@ -3312,7 +3316,10 @@ async function adminRefOpen(id) {
     box.dataset.loaded = '1';
     const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch]));
     const fd = iso => { if (!iso) return ''; try { return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: '2-digit' }); } catch (e) { return ''; } };
-    box.innerHTML = (d.invitees || []).length ? d.invitees.map(v => `
+    const rf = d.referrer || {};
+    const refHead = `<div class="ref-owner">Реферер · <b>ID ${rf.tg_id}</b><br>
+      <span class="ref-tech" style="margin:0">📱 ${rf.device ? esc(String(rf.device).slice(0, 12)) : '—'} · 🌐 ${rf.ip ? esc(rf.ip) : '—'}</span></div>`;
+    box.innerHTML = refHead + ((d.invitees || []).length ? d.invitees.map(v => `
       <div class="ref-inv${v.flag ? ' flag' : ''}">
         <span class="nm">${v.flag ? '🚩 ' : ''}${esc(v.name || 'Без имени')}${v.username ? ' · @' + esc(v.username) : ''}</span>
         <span class="sp">${fmt(v.spent)} ₴</span>
@@ -3320,7 +3327,7 @@ async function adminRefOpen(id) {
         ${refStatusRow(v)}
         <small class="ref-tech">📱 ${v.device ? esc(String(v.device).slice(0, 12)) : '—'} · 🌐 ${v.ip ? esc(v.ip) : '—'}</small>
         ${v.flag ? `<small class="ref-flag">⚠ Подозрение: ${esc(v.flag_reason)}</small>` : ''}
-      </div>`).join('') : '<p class="note" style="margin:6px 0 10px 8px">приглашённых нет</p>';
+      </div>`).join('') : '<p class="note" style="margin:6px 0 10px 8px">приглашённых нет</p>');
   } catch (e) {
     box.innerHTML = '<p class="note" style="margin:6px 0 10px 8px">не удалось загрузить</p>';
   }
