@@ -65,11 +65,12 @@ PROMO_CASINO_URL = os.getenv("PROMO_CASINO_URL", "") or _promo_cas
 PROMO_CHAT_URL = os.getenv("PROMO_CHAT_URL", "https://t.me/+0_b77ETKGVpiZGY6")
 PROMO_CHANNEL_URL = os.getenv("PROMO_CHANNEL_URL", "https://t.me/+HJLPBVv65kQ0YjAy")
 # 4 поста в день: каждое из двух промо — по 2 раза (чередование по слотам)
-PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,18:00,21:00").split(",") if t.strip()]
-# порядок = порядок слотов PROMO_TIMES: 10:00 общий · 14:00 викторина ·
-# 18:00 egrow-4 · 21:00 реферальный
+PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,17:00,21:00").split(",") if t.strip()]
+# порядок = порядок слотов PROMO_TIMES: 10:00 общий · 14:00 egrow-4 ·
+# 17:00 анонс викторины (за час до старта в 18:00) · 21:00 реферальный
 PROMO_POSTS = [
     ("promo/egrow-1.png", ""),
+    ("promo/egrow-4.png", ""),
     ("promo/egrow-quiz.jpg",
      "🧠 <b>ВИКТОРИНА ДНЯ</b> — сегодня в 18:00!\n\n"
      "• Голосуем за тему дня (история, космос, кино и др.)\n"
@@ -78,8 +79,7 @@ PROMO_POSTS = [
      "Награды на баланс магазина:\n"
      "• <b>+20 ₴</b> за каждый правильный ответ\n"
      "• <b>+50 ₴</b> лучшему по итогу дня\n\n"
-     "⏰ Старт в <b>18:00</b> по Киеву — не пропусти!"),
-    ("promo/egrow-4.png", ""),
+     "⏰ Старт через час, в <b>18:00</b> по Киеву — не пропусти!"),
     ("promo/egrow-3.jpg",
      "🤝 <b>Реферальная программа</b>\n\n"
      "5–10% с покупок друзей <b>и с их игры в Magic Casino</b> — навсегда и на вывод. "
