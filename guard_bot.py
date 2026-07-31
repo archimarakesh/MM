@@ -76,6 +76,9 @@ QUIZ_Q_SEC = int(os.getenv("QUIZ_Q_SEC", "150") or 150)     # время на в
 REF_RACE_PRIZE = int(os.getenv("REF_RACE_PRIZE", "1000") or 1000)
 REF_RACE_MIN_TOTAL = int(os.getenv("REF_RACE_MIN_TOTAL", "20") or 20)  # общий порог за неделю
 REF_RACE_HOUR = int(os.getenv("REF_RACE_HOUR", "13") or 13)  # понедельник, Киев
+# где проверяем, что приглашённый не отписался (канал приоритетнее чата).
+# Бот должен быть админом этой цели, иначе проверка пропускается (все засчитываются).
+REF_CHECK_CHAT = os.getenv("REF_CHECK_CHAT", "") or STATS_CHANNEL_ID or RULES_CHAT_ID
 
 
 def _week_start(d):
@@ -1138,6 +1141,45 @@ async def run(notify=None):
                 log.exception("Ошибка викторины")
                 await asyncio.sleep(300)
 
+    _sub_cache = {}   # uid -> (subscribed:bool, ts) — кэш проверки подписки (5 мин)
+
+    async def still_subscribed(uid: int) -> bool:
+        """Приглашённый всё ещё подписан на канал/чат? Не смогли проверить
+        (бот не админ / сбой) — не наказываем, считаем подписанным."""
+        if not REF_CHECK_CHAT:
+            return True
+        hit = _sub_cache.get(uid)
+        if hit and time.time() - hit[1] < 300:
+            return hit[0]
+        ok = True
+        try:
+            m = await bot.get_chat_member(int(REF_CHECK_CHAT), uid)
+            st = getattr(m.status, "value", m.status)
+            ok = st not in ("left", "kicked")
+        except Exception:
+            ok = True
+        _sub_cache[uid] = (ok, time.time())
+        return ok
+
+    async def race_standings_live(ws, we):
+        """Зачёт гонки с проверкой подписки: считаем только тех приглашённых,
+        кто сейчас подписан. Возвращает (standings[], total)."""
+        try:
+            acts = await db.ref_race_activated(ws, we)
+        except Exception:
+            return [], 0
+        counts, meta = {}, {}
+        for a in acts:
+            if await still_subscribed(a["friend_id"]):
+                rid = a["referrer_id"]
+                counts[rid] = counts.get(rid, 0) + 1
+                meta[rid] = (a["name"], a["username"])
+        standings = sorted(
+            ({"user_id": rid, "cnt": n, "name": meta[rid][0], "username": meta[rid][1]}
+             for rid, n in counts.items()),
+            key=lambda x: (-x["cnt"], x["user_id"]))
+        return standings, sum(counts.values())
+
     async def ref_race_weekly():
         if not RULES_CHAT_ID:
             return
@@ -1152,25 +1194,29 @@ async def run(notify=None):
                 await asyncio.sleep(max(30, (nxt - now).total_seconds()))
                 this_mon = nxt.date()
                 prev_mon = this_mon - timedelta(days=7)
-                winner = await db.ref_race_award(prev_mon, this_mon, REF_RACE_MIN_TOTAL, REF_RACE_PRIZE)
-                if winner:
-                    await quiz_send(
-                        "🏁 <b>Реферальная гонка недели</b>\n\n"
-                        f"Все вместе привели <b>{winner['total']}</b> друзей — цель взята! 🎯\n\n"
-                        f"👑 Больше всех — <b>{_esc(winner['name'])}</b> "
-                        f"(<b>{winner['cnt']}</b>). Приз <b>{REF_RACE_PRIZE} ₴</b> уже на балансе.\n"
-                        "Спасибо всем, кто растит комьюнити 🔥")
-                    if notify:
-                        try:
-                            await notify(winner["user_id"],
-                                         "🏁 Вы выиграли реферальную гонку недели! "
-                                         f"Начислено {REF_RACE_PRIZE} ₴ бонусом.")
-                        except Exception:
-                            pass
-                    log.info("Реф-гонка: победитель %s (%s реф., всего %s)",
-                             winner["user_id"], winner["cnt"], winner["total"])
+                # перепроверка подписки на выплате: отписавшиеся в зачёт не идут
+                standings, total = await race_standings_live(prev_mon, this_mon)
+                if total >= REF_RACE_MIN_TOTAL and standings:
+                    w = standings[0]
+                    if await db.ref_race_award_record(prev_mon, w["user_id"], w["cnt"], REF_RACE_PRIZE):
+                        await quiz_send(
+                            "🏁 <b>Реферальная гонка недели</b>\n\n"
+                            f"Все вместе привели <b>{total}</b> друзей (подписанных) — цель взята! 🎯\n\n"
+                            f"👑 Больше всех — <b>{_esc(w['name'])}</b> "
+                            f"(<b>{w['cnt']}</b>). Приз <b>{REF_RACE_PRIZE} ₴</b> уже на балансе.\n"
+                            "Спасибо всем, кто растит комьюнити 🔥")
+                        if notify:
+                            try:
+                                await notify(w["user_id"],
+                                             "🏁 Вы выиграли реферальную гонку недели! "
+                                             f"Начислено {REF_RACE_PRIZE} ₴ бонусом.")
+                            except Exception:
+                                pass
+                        log.info("Реф-гонка: победитель %s (%s реф., всего %s подписанных)",
+                                 w["user_id"], w["cnt"], total)
                 else:
-                    log.info("Реф-гонка: общий порог %s за неделю не взят", REF_RACE_MIN_TOTAL)
+                    log.info("Реф-гонка: общий порог %s (подписанных) за неделю не взят",
+                             REF_RACE_MIN_TOTAL)
             except Exception:
                 log.exception("Ошибка реф-гонки")
                 await asyncio.sleep(300)
@@ -1203,10 +1249,10 @@ async def run(notify=None):
         ws = _week_start(today)
         we = ws + timedelta(days=7)
         try:
-            rows = await db.ref_race_standings(ws, we, 10)
-            total = await db.ref_race_total(ws, we)
+            rows, total = await race_standings_live(ws, we)   # только подписанные
         except Exception:
             return
+        rows = rows[:10]
         reached = total >= REF_RACE_MIN_TOTAL
         goal = (f"Всего за неделю: <b>{total}</b> / {REF_RACE_MIN_TOTAL} "
                 + ("✅ цель взята — топ-1 получит приз!" if reached
@@ -1214,7 +1260,7 @@ async def run(notify=None):
         head = ("🏁 <b>Реферальная гонка недели</b>\n"
                 f"Общая цель: <b>{REF_RACE_MIN_TOTAL}+</b> приглашённых со всех участников — "
                 f"тогда тот, кто привёл больше всех, забирает <b>{REF_RACE_PRIZE} ₴</b>. "
-                f"Итоги — в понедельник.\n\n{goal}\n\n")
+                f"Считаются только оставшиеся подписанными. Итоги — в понедельник.\n\n{goal}\n\n")
         if not rows:
             await message.answer(
                 head + "Пока никто никого не привёл. Дерзай — ссылка в приложении, «Профиль»!",
