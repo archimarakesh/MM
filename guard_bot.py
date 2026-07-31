@@ -74,7 +74,7 @@ QUIZ_POLL_SEC = int(os.getenv("QUIZ_POLL_SEC", str(20 * 60)) or 20 * 60)  # го
 QUIZ_Q_SEC = int(os.getenv("QUIZ_Q_SEC", "150") or 150)     # время на вопрос
 # ── недельная реферальная гонка ─────────────────────────────────────────────
 REF_RACE_PRIZE = int(os.getenv("REF_RACE_PRIZE", "1000") or 1000)
-REF_RACE_MIN = int(os.getenv("REF_RACE_MIN", "5") or 5)     # порог рефералов для приза
+REF_RACE_MIN_TOTAL = int(os.getenv("REF_RACE_MIN_TOTAL", "20") or 20)  # общий порог за неделю
 REF_RACE_HOUR = int(os.getenv("REF_RACE_HOUR", "13") or 13)  # понедельник, Киев
 
 
@@ -1152,13 +1152,14 @@ async def run(notify=None):
                 await asyncio.sleep(max(30, (nxt - now).total_seconds()))
                 this_mon = nxt.date()
                 prev_mon = this_mon - timedelta(days=7)
-                winner = await db.ref_race_award(prev_mon, this_mon, REF_RACE_MIN, REF_RACE_PRIZE)
+                winner = await db.ref_race_award(prev_mon, this_mon, REF_RACE_MIN_TOTAL, REF_RACE_PRIZE)
                 if winner:
                     await quiz_send(
                         "🏁 <b>Реферальная гонка недели</b>\n\n"
-                        f"👑 Победитель: <b>{_esc(winner['name'])}</b> — привёл "
-                        f"<b>{winner['cnt']}</b> друзей!\nПриз <b>{REF_RACE_PRIZE} ₴</b> "
-                        "уже на балансе. Спасибо, что растишь комьюнити 🔥")
+                        f"Все вместе привели <b>{winner['total']}</b> друзей — цель взята! 🎯\n\n"
+                        f"👑 Больше всех — <b>{_esc(winner['name'])}</b> "
+                        f"(<b>{winner['cnt']}</b>). Приз <b>{REF_RACE_PRIZE} ₴</b> уже на балансе.\n"
+                        "Спасибо всем, кто растит комьюнити 🔥")
                     if notify:
                         try:
                             await notify(winner["user_id"],
@@ -1166,9 +1167,10 @@ async def run(notify=None):
                                          f"Начислено {REF_RACE_PRIZE} ₴ бонусом.")
                         except Exception:
                             pass
-                    log.info("Реф-гонка: победитель %s (%s реф.)", winner["user_id"], winner["cnt"])
+                    log.info("Реф-гонка: победитель %s (%s реф., всего %s)",
+                             winner["user_id"], winner["cnt"], winner["total"])
                 else:
-                    log.info("Реф-гонка: порог %s не взят", REF_RACE_MIN)
+                    log.info("Реф-гонка: общий порог %s за неделю не взят", REF_RACE_MIN_TOTAL)
             except Exception:
                 log.exception("Ошибка реф-гонки")
                 await asyncio.sleep(300)
@@ -1199,13 +1201,20 @@ async def run(notify=None):
             return
         today = datetime.now(KYIV).date()
         ws = _week_start(today)
+        we = ws + timedelta(days=7)
         try:
-            rows = await db.ref_race_standings(ws, ws + timedelta(days=7), 10)
+            rows = await db.ref_race_standings(ws, we, 10)
+            total = await db.ref_race_total(ws, we)
         except Exception:
             return
+        reached = total >= REF_RACE_MIN_TOTAL
+        goal = (f"Всего за неделю: <b>{total}</b> / {REF_RACE_MIN_TOTAL} "
+                + ("✅ цель взята — топ-1 получит приз!" if reached
+                   else f"(осталось {REF_RACE_MIN_TOTAL - total})"))
         head = ("🏁 <b>Реферальная гонка недели</b>\n"
-                f"Больше всех активированных друзей — забирает <b>{REF_RACE_PRIZE} ₴</b> "
-                f"(нужно ≥{REF_RACE_MIN}). Итоги — в понедельник.\n\n")
+                f"Общая цель: <b>{REF_RACE_MIN_TOTAL}+</b> приглашённых со всех участников — "
+                f"тогда тот, кто привёл больше всех, забирает <b>{REF_RACE_PRIZE} ₴</b>. "
+                f"Итоги — в понедельник.\n\n{goal}\n\n")
         if not rows:
             await message.answer(
                 head + "Пока никто никого не привёл. Дерзай — ссылка в приложении, «Профиль»!",
@@ -1216,8 +1225,7 @@ async def run(notify=None):
         for i, r in enumerate(rows):
             mark = medals[i] if i < 3 else f"{i+1}."
             nm = _esc(r["name"]) + (f" · @{_esc(r['username'])}" if r["username"] else "")
-            ok = " ✅" if r["cnt"] >= REF_RACE_MIN else ""
-            lines.append(f"{mark} {nm} — <b>{r['cnt']}</b>{ok}")
+            lines.append(f"{mark} {nm} — <b>{r['cnt']}</b>")
         await message.answer(head + "\n".join(lines), parse_mode="HTML")
 
     @dp.poll_answer()

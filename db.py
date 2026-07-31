@@ -2157,12 +2157,31 @@ async def ref_race_standings(week_start, week_end, limit: int = 10) -> list:
              "name": r["name"] or "участник", "username": r["username"]} for r in rows]
 
 
-async def ref_race_award(week_start, week_end, min_ref: int, prize: int) -> dict | None:
-    """Идемпотентно раз в неделю: топ-1 реферер получает приз, если привёл
-    не меньше min_ref активированных друзей. Иначе — победителя нет."""
+async def ref_race_total(week_start, week_end) -> int:
+    """Сколько ВСЕГО активированных приглашённых за неделю (со всех участников)."""
+    async with _pool.acquire() as c:
+        n = await c.fetchval("""
+            SELECT COUNT(*) FROM users u
+            JOIN bonus_claims bc ON bc.user_id = u.tg_id
+            WHERE u.ref_by IS NOT NULL AND bc.created >= $1 AND bc.created < $2
+        """, week_start, week_end)
+    return int(n or 0)
+
+
+async def ref_race_award(week_start, week_end, min_total: int, prize: int) -> dict | None:
+    """Идемпотентно раз в неделю: если ВСЕГО за неделю набралось не меньше
+    min_total активированных приглашённых со всех участников — топ-1 реферер
+    получает приз. Иначе (общего числа не хватило) — победителя нет."""
     async with _pool.acquire() as c, c.transaction():
         if await c.fetchval("SELECT 1 FROM ref_race_awards WHERE week_start=$1", week_start):
             return None
+        total = int(await c.fetchval("""
+            SELECT COUNT(*) FROM users u
+            JOIN bonus_claims bc ON bc.user_id = u.tg_id
+            WHERE u.ref_by IS NOT NULL AND bc.created >= $1 AND bc.created < $2
+        """, week_start, week_end) or 0)
+        if total < min_total:
+            return None                                  # общий порог не взят
         top = await c.fetch("""
             SELECT u.ref_by AS uid, COUNT(*) AS cnt, max(ref.name) AS name
             FROM users u
@@ -2174,7 +2193,7 @@ async def ref_race_award(week_start, week_end, min_ref: int, prize: int) -> dict
             ORDER BY cnt DESC, uid ASC
             LIMIT 1
         """, week_start, week_end)
-        if not top or int(top[0]["cnt"]) < min_ref:
+        if not top:
             return None
         w = top[0]
         uid, cnt, name = w["uid"], int(w["cnt"]), w["name"] or "участник"
@@ -2186,7 +2205,7 @@ async def ref_race_award(week_start, week_end, min_ref: int, prize: int) -> dict
             INSERT INTO ref_race_awards(week_start, user_id, cnt, amount)
             VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING
         """, week_start, uid, cnt, prize)
-    return {"user_id": uid, "cnt": cnt, "name": name, "amount": prize}
+    return {"user_id": uid, "cnt": cnt, "name": name, "amount": prize, "total": total}
 
 
 # ── общий кошелёк для внешних сервисов ───────────────────────────────────────
