@@ -42,7 +42,7 @@ MAX_PENDING_TOPUPS = 8    # квитанций на проверке на юзе
 # Бонус (locked) нельзя вывести, пока не сделан оборот ставок = бонус × WAGER_X.
 # Пока вейджер активен: выигрыш с чисто-бонусной игры «липкий» (тоже в locked),
 # а ставка ограничена BONUS_MAX_BET — нельзя слить весь бонус в один спин.
-BONUS_WAGER_X = int(os.getenv("BONUS_WAGER_X", "25") or 25)
+BONUS_WAGER_X = int(os.getenv("BONUS_WAGER_X", "15") or 15)
 BONUS_MAX_BET = int(os.getenv("BONUS_MAX_BET", "100") or 100)
 SEED_PRODUCTS = [
     ("Golden Reserve", "Флагманская позиция", "🏆", "ХИТ", 120),
