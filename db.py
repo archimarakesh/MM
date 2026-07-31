@@ -2299,8 +2299,12 @@ async def admin_ref_detail(referrer_id: int) -> dict:
     приглашённых с покупками каждого (кто когда пришёл, сколько заказов, на
     сколько ₴)."""
     async with _pool.acquire() as c:
-        ref = await c.fetchrow(
-            "SELECT tg_id, name, username, ref_earned FROM users WHERE tg_id=$1", referrer_id)
+        ref = await c.fetchrow("""
+            SELECT u.tg_id, u.name, u.username, u.ref_earned,
+                   bc.device_hash AS device, bc.ip AS ip
+            FROM users u LEFT JOIN bonus_claims bc ON bc.user_id = u.tg_id
+            WHERE u.tg_id = $1
+        """, referrer_id)
         rows = await c.fetch("""
             SELECT u.tg_id, u.name, u.username, u.created AS joined, u.bonus_claimed,
                    COUNT(o.id) FILTER (WHERE o.status >= 0)                    AS orders,
@@ -2315,6 +2319,36 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             GROUP BY u.tg_id, u.name, u.username, u.created, u.bonus_claimed
             ORDER BY spent DESC, joined DESC
         """, referrer_id)
+
+    ref_device = ref["device"] if ref else None
+    ref_ip = ref["ip"] if ref else None
+    # частота device/IP среди приглашённых — для ловли фермы с одного устройства
+    dev_cnt, ip_cnt = {}, {}
+    for r in rows:
+        if r["device"]:
+            dev_cnt[r["device"]] = dev_cnt.get(r["device"], 0) + 1
+        if r["ip"]:
+            ip_cnt[r["ip"]] = ip_cnt.get(r["ip"], 0) + 1
+
+    invitees = []
+    for r in rows:
+        dev, ip = r["device"], r["ip"]
+        reasons = []
+        if dev and dev == ref_device:
+            reasons.append("устройство как у реферера")
+        if dev and dev_cnt.get(dev, 0) > 1:
+            reasons.append("устройство дублируется у приглашённых")
+        if ip and ip == ref_ip:
+            reasons.append("IP как у реферера")
+        invitees.append({
+            "tg_id": r["tg_id"], "name": r["name"], "username": r["username"],
+            "joined": r["joined"].isoformat() if r["joined"] else None,
+            "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
+            "last_order": r["last_order"].isoformat() if r["last_order"] else None,
+            "bonus": bool(r["bonus_claimed"]),
+            "device": dev, "ip": ip,                 # только для админа
+            "flag": bool(reasons), "flag_reason": "; ".join(reasons),
+        })
     return {
         "referrer": {
             "tg_id": referrer_id,
@@ -2322,14 +2356,7 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             "username": (ref["username"] if ref else None),
             "ref_earned": int(ref["ref_earned"]) if ref else 0,
         },
-        "invitees": [{
-            "tg_id": r["tg_id"], "name": r["name"], "username": r["username"],
-            "joined": r["joined"].isoformat() if r["joined"] else None,
-            "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
-            "last_order": r["last_order"].isoformat() if r["last_order"] else None,
-            "bonus": bool(r["bonus_claimed"]),
-            "device": r["device"], "ip": r["ip"],   # только для админа: сверять накрутку
-        } for r in rows],
+        "invitees": invitees,
     }
 
 
