@@ -201,6 +201,15 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 .mod-btn{flex:1;padding:9px 8px;border-radius:11px;cursor:pointer;font-size:12px;font-weight:700;
   border:1px solid var(--line);color:var(--txt);background:rgba(255,255,255,.03)}
 .mod-btn.danger{color:var(--danger);border-color:rgba(224,122,95,.35);background:rgba(224,122,95,.06)}
+/* карточки крипты с предпросмотром суммы */
+.crypto-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.crypto-card{border:1px solid var(--line);border-radius:14px;padding:11px 12px;cursor:pointer;
+  background:rgba(255,255,255,.03);transition:border-color .15s,background .15s}
+.crypto-card:active{border-color:var(--gold);background:rgba(212,175,55,.06)}
+.crypto-card .cc-top{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--txt)}
+.crypto-card .cc-top span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crypto-card .cc-amt{margin-top:7px;font-size:14px;font-weight:800;color:var(--gold-soft);
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .good-price{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
 .good-price b{font-size:17px;color:var(--txt)}
 .good-price span{font-size:10.5px;color:var(--muted-2)}
@@ -1751,6 +1760,24 @@ function syncBalance() {
 }
 let tuMethod = '', tuReceipt = '', INV = null, invTimer = null, invPoll = null;
 let CARD = null, cardTimer = null, cardPoll = null;
+let RATES = {}, RDISP = {}, ratesTs = 0;   // курсы для предпросмотра суммы в крипте
+async function loadRates(force) {
+  if (!API.ok) return;
+  if (!force && Date.now() - ratesTs < 90000 && Object.keys(RATES).length) return;
+  try {
+    const r = await API.call('/api/rates');
+    RATES = r.rates || {}; RDISP = r.disp || {}; ratesTs = Date.now();
+  } catch (e) { /* оставим прежние/пустые — покажем «курс…» */ }
+}
+/* сумма в крипте по введённой сумме в ₴ (предпросмотр, без «хвоста» счёта) */
+function cryptoPreview(key) {
+  const uah = tuAmount(), rate = RATES[key];
+  if (!uah || !rate) return '';
+  const d = RDISP[key] != null ? RDISP[key] : 6;
+  let s = (uah / rate).toFixed(d);
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');  // без хвостовых нулей
+  return s;
+}
 const TU_ST_CARD = ['⏳ Проверяется', '✅ Зачислено', '❌ Отклонено'];
 const TU_ST_CRYPTO = ['⏳ Ожидает оплаты', '✅ Зачислено', '⌛ Отменён'];
 const TU_ST_OUT = ['⏳ В обработке', '✅ Выплачено', '↩️ Отклонён'];
@@ -1803,6 +1830,7 @@ async function renderTopup() {
   renderTopupChips();
   renderTuBody();
   renderPayHistory();
+  loadRates().then(() => { if (tuMethod === 'crypto') renderTuBody(); });
   if (API.ok && INV === null) {
     /* восстановить активный счёт после переоткрытия */
     try { INV = (await API.call('/api/invoice/active')).invoice || false; }
@@ -1832,7 +1860,9 @@ function renderTopupChips() {
         ? `<p class="note" style="width:100%;margin:4px 0 0">💳 Картой — от ${fmt(CARD_MIN)} ₴. Меньшую сумму можно пополнить криптой.</p>` : '');
 }
 document.getElementById('tuSum').addEventListener('input', () => {
-  if (API.ok) renderTopupChips();
+  if (!API.ok) return;
+  renderTopupChips();
+  if (tuMethod === 'crypto') renderTuBody();   // живой пересчёт сумм в крипте
 });
 function renderTuBody() {
   const b = document.getElementById('tuBody');
@@ -1861,11 +1891,23 @@ function renderTuBody() {
       <p class="note">Переведите сумму на карту и приложите фото квитанции — зачислим после ручной проверки.</p>`;
   } else if (tuMethod === 'crypto') {
     const list = availCryptos();
+    const uah = tuAmount();
+    const haveRates = Object.keys(RATES).length > 0;
     b.innerHTML = `
-      <p class="note" style="margin:0 0 12px">Выберите криптовалюту:</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        ${list.map(c => `<div class="wchip" style="justify-content:flex-start;gap:8px;display:flex;align-items:center" onclick="cryptoPick('${c.key}')">${cryptoIcon(c.key)}${c.label}</div>`).join('')}
-      </div>`;
+      <p class="note" style="margin:0 0 12px">Выберите криптовалюту${uah ? ` — сумма к отправке для <b style="color:var(--gold-soft)">${fmt(uah)} ₴</b>` : ''}:</p>
+      <div class="crypto-grid">
+        ${list.map(c => {
+          const amt = cryptoPreview(c.key);
+          const sub = amt ? `≈ ${amt} ${c.label.split(' ')[0]}`
+            : (!uah ? 'введите сумму' : (haveRates ? 'нет курса' : 'курс…'));
+          return `<div class="crypto-card" onclick="cryptoPick('${c.key}')">
+            <div class="cc-top">${cryptoIcon(c.key, 22)}<span>${c.label}</span></div>
+            <div class="cc-amt">${sub}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <p class="note" style="margin:10px 0 0">Точную сумму (с уникальным «хвостом» для распознавания платежа) увидите после «Создать счёт».</p>`;
+    if (!haveRates) loadRates(true).then(() => { if (tuMethod === 'crypto') renderTuBody(); });
   } else if (isCryptoKey(tuMethod)) {
     if (INV && INV.status === 0 && INV.currency === tuMethod) renderInvoice(b);
     else b.innerHTML = `
