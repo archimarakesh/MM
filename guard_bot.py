@@ -70,7 +70,7 @@ QUIZ_TIME = os.getenv("QUIZ_TIME", "18:00")               # старт по Ки
 QUIZ_QUESTIONS = int(os.getenv("QUIZ_QUESTIONS", "5") or 5)
 QUIZ_Q_PRIZE = int(os.getenv("QUIZ_Q_PRIZE", "20") or 20)    # за каждый правильный
 QUIZ_WIN_PRIZE = int(os.getenv("QUIZ_WIN_PRIZE", "50") or 50)  # лучшему по итогу
-QUIZ_POLL_SEC = int(os.getenv("QUIZ_POLL_SEC", str(20 * 60)) or 20 * 60)  # голосование за тему
+QUIZ_POLL_SEC = int(os.getenv("QUIZ_POLL_SEC", str(10 * 60)) or 10 * 60)  # голосование за тему
 QUIZ_Q_SEC = int(os.getenv("QUIZ_Q_SEC", "150") or 150)     # время на вопрос
 # ── недельная реферальная гонка ─────────────────────────────────────────────
 REF_RACE_PRIZE = int(os.getenv("REF_RACE_PRIZE", "1000") or 1000)
