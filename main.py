@@ -92,6 +92,8 @@ PROMO_POSTS = [
 WALLET_TOKEN = os.getenv("WALLET_TOKEN", "")
 CARD_MIN = 200               # пополнение картой — от 200 ₴, меньше только криптой
 CARD_LIMIT = 30000           # оплата картой — до 30 000 ₴, свыше только крипта
+# компенсация покупателю за каждые просроченные сутки отправки (заказ в работе без ТТН)
+DELAY_BONUS = int(os.getenv("DELAY_BONUS", "50") or 50)
 # сервисный сбор на авто-оплату картой (PayDome берёт 12% — часть перекладываем на юзера).
 # 5% сверху ≈ покрывает ~4.4 п.п. из 12% комиссии; остальное на нас. Меняется env CARD_FEE_PCT.
 CARD_FEE_PCT = float(os.getenv("CARD_FEE_PCT", "5") or 5)
@@ -472,6 +474,27 @@ async def promo_poster():
             await asyncio.sleep(300)
 
 
+async def delay_compensator():
+    """Раз в сутки в 00:01 Киева: за каждые просроченные сутки отправки заказа
+    (в работе без ТТН) начисляем покупателю DELAY_BONUS ₴ и уведомляем."""
+    await asyncio.sleep(25)
+    while True:
+        try:
+            now = datetime.now(KYIV)
+            nxt = (now + timedelta(days=1)).replace(hour=0, minute=1, second=0, microsecond=0)
+            await asyncio.sleep(max(30, (nxt - now).total_seconds()))
+            for r in await db.compensate_delayed_orders(DELAY_BONUS):
+                await notify(r["user_id"],
+                    f"⏳ Приносим извинения за задержку отправки заказа <b>{r['code']}</b>.\n"
+                    f"Начислили компенсацию <b>+{r['amount']} ₴</b> на баланс "
+                    f"({r['each']} ₴ за сутки × {r['new_days']}). "
+                    f"Всего задержка: <b>{r['total_days']}</b> сут. "
+                    f"Как только прикрепим ТТН — компенсация прекратится.")
+        except Exception:
+            log.exception("Ошибка компенсации за просрочку")
+            await asyncio.sleep(300)
+
+
 async def card_checker():
     """Страховка к вебхуку: раз в 30с опрашиваем неоплаченные card-платежи."""
     if not paydome.enabled():
@@ -695,6 +718,7 @@ async def lifespan(_: FastAPI):
     poster = asyncio.create_task(promo_poster())
     guard = asyncio.create_task(guard_bot.run(notify))  # бот-охранник чата, свой токен
     card_task = asyncio.create_task(card_checker())
+    delay_task = asyncio.create_task(delay_compensator())
     yield
     checker.cancel()
     tracker.cancel()
@@ -702,6 +726,7 @@ async def lifespan(_: FastAPI):
     poster.cancel()
     guard.cancel()
     card_task.cancel()
+    delay_task.cancel()
     if menu_task:
         menu_task.cancel()
     if task:
