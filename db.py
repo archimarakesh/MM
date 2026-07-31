@@ -2355,6 +2355,7 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             "name": (ref["name"] if ref else None),
             "username": (ref["username"] if ref else None),
             "ref_earned": int(ref["ref_earned"]) if ref else 0,
+            "device": ref_device, "ip": ref_ip,
         },
         "invitees": invitees,
     }
