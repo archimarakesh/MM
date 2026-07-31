@@ -81,7 +81,7 @@ async def init():
             ALTER TABLE users ADD COLUMN IF NOT EXISTS rules_accepted TIMESTAMPTZ;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS device_hash TEXT;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip TEXT;
-            -- locked: часть баланса (бонус), которую нельзя вывести, только потратить в магазине
+            -- locked: часть баланса (бонус), которую нельзя вывести — только потратить в магазине или отыграть в казино
             ALTER TABLE users ADD COLUMN IF NOT EXISTS locked BIGINT NOT NULL DEFAULT 0;
             -- серверный пин-код (хэш + соль), счётчик попыток и блокировка
             ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT;
@@ -602,7 +602,7 @@ def pop_ref_notify() -> list:
 
 
 # мгновенный бонус пригласившему за активацию друга (друг забрал welcome-бонус).
-# 0 — фича выключена. Начисляется в locked (только на покупки в магазине).
+# 0 — фича выключена. Начисляется в locked (нельзя вывести; тратится в магазине или отыгрывается в казино).
 REF_ACTIVATION_BONUS = int(os.getenv("REF_ACTIVATION_BONUS", "50") or 50)
 _ACTIVATION_NOTIFY: list = []
 
@@ -1343,7 +1343,7 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
     """Одноразовый бонус: раз на аккаунт и устройство. IP не проверяем —
     мобильные операторы сажают тысячи людей на один адрес (CGNAT), и честным
     прилетали ложные отказы; сам IP пишем в bonus_claims для разборов.
-    Зачисляется в locked (нельзя вывести, только потратить в магазине)."""
+    Зачисляется в locked (нельзя вывести; тратится в магазине или отыгрывается в казино)."""
     device, ip = device[:64], ip[:64]
     if device == "na":  # заглушка старого клиента, совпадала у всех — не сравниваем
         device = ""
@@ -2185,7 +2185,12 @@ async def wallet_balance(tg_id: int) -> dict:
 async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = None) -> dict:
     """Движение по кошельку: amount>0 — начисление, amount<0 — списание.
 
-    Списывать можно ТОЛЬКО выводимые средства — бонусы (locked) неприкосновенны.
+    Играть в казино можно на ВЕСЬ баланс, включая бонусы (locked): ставка
+    списывается сначала с выводимых средств, а бонус — в последнюю очередь.
+    Когда ставка залезает в бонусную часть, locked уменьшаем на ту же сумму —
+    так проигранный бонус не раздувает выводимый остаток. Выигрыш (amount>0)
+    попадает в обычный баланс и выводим (маржа казино — защита от слива бонусов).
+    Вывести бонусы напрямую по-прежнему нельзя: вывод считает balance-locked.
     Идемпотентно по op_id: повтор запроса вернёт прежний результат, а не спишет дважды."""
     op_id = str(op_id or "").strip()
     if not op_id or len(op_id) > 64:
@@ -2202,10 +2207,14 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
         if prev:
             return {"balance": prev["balance_after"], "duplicate": True}
         locked = u["locked"] or 0
-        if amount < 0 and u["balance"] - locked < -amount:
-            raise ValueError("Недостаточно средств — бонусные деньги в игре не участвуют")
+        if amount < 0 and u["balance"] < -amount:
+            raise ValueError("Недостаточно средств")
         new_balance = u["balance"] + amount
-        await c.execute("UPDATE users SET balance=$1 WHERE tg_id=$2", new_balance, tg_id)
+        # бонус тратится последним: при ставке locked не может превышать остаток,
+        # значит проигранная бонусная часть автоматически списывается из locked.
+        new_locked = min(locked, new_balance) if amount < 0 else locked
+        await c.execute("UPDATE users SET balance=$1, locked=$2 WHERE tg_id=$3",
+                        new_balance, new_locked, tg_id)
         # реферальные выплаты казино приходят сюда с ref='referral' —
         # учитываем их и в ref_earned, чтобы статистика была общей
         if amount > 0 and (str(ref) == "referral" or str(kind) == "referral"):
@@ -2216,14 +2225,14 @@ async def wallet_op(tg_id: int, amount: int, op_id: str, kind: str, ref: str = N
             INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
             VALUES($1,$2,$3,$4,$5,$6)
         """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), new_balance)
-        return {"balance": new_balance, "locked": locked,
-                "withdrawable": max(0, new_balance - locked), "duplicate": False}
+        return {"balance": new_balance, "locked": new_locked,
+                "withdrawable": max(0, new_balance - new_locked), "duplicate": False}
 
 
 async def wallet_bonus(tg_id: int, amount: int, op_id: str,
                        kind: str = "bonus", ref: str = None) -> dict:
-    """Начисление БОНУСА: идёт в locked (нельзя вывести, только тратить в
-    магазине). Используется рейкбеком из казино. Идемпотентно по op_id."""
+    """Начисление БОНУСА: идёт в locked (нельзя вывести; тратится в магазине
+    или отыгрывается в казино). Используется рейкбеком из казино. Идемпотентно по op_id."""
     op_id = str(op_id or "").strip()
     if not op_id or len(op_id) > 64:
         raise ValueError("Неверный op_id")

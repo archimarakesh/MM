@@ -662,7 +662,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-b
       <input class="mini-input" id="promoInput" placeholder="Введите промокод" autocapitalize="characters" style="flex:1">
       <button class="btn btn-gold" style="width:auto;padding:11px 20px" onclick="redeemPromo()">Применить</button>
     </div>
-    <p class="note" style="margin:6px 0 0">Начисленное промокодом можно потратить в магазине, но нельзя вывести.</p>
+    <p class="note" style="margin:6px 0 0">Начисленное промокодом можно потратить в магазине или отыграть в казино, но нельзя вывести.</p>
     <div class="section-head"><h2>История оплат</h2></div>
     <div id="payHistory"></div>
     <input type="file" id="tuFile" accept="image/*,application/pdf" style="display:none">
@@ -2216,7 +2216,7 @@ function renderWithdraw() {
   const w = S.withdrawable != null ? S.withdrawable : S.balance;
   const el = document.getElementById('wdAvail');
   if (el) el.textContent = `Доступно к выводу: ${fmt(w)} ₴` +
-    (w < S.balance ? ` (бонус ${fmt(S.balance - w)} ₴ — только на покупки)` : '');
+    (w < S.balance ? ` (бонус ${fmt(S.balance - w)} ₴ — на покупки и в казино)` : '');
 }
 function wdSel(k) { haptic('light'); wdMethod = k; renderWithdraw(); }
 async function submitWithdraw() {
