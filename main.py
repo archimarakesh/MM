@@ -32,6 +32,10 @@ log = logging.getLogger("mm")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0") or 0)
+# Универсальный бан: моментальный in-process гейт (наполняется из БД при старте,
+# мутируется баном/разбаном). Один процесс на сервисе — set виден всем корутинам
+# сразу; общая база делает флаг единым для маркета и казино.
+BANNED: set[int] = set()
 # публичный https-адрес: APP_URL или автоматический домен Railway
 _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 APP_URL = os.getenv("APP_URL", "") or (f"https://{_railway_domain}" if _railway_domain else "")
@@ -689,6 +693,11 @@ async def notify(chat_id: int, text: str):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await db.init()
+    try:
+        BANNED.update(await db.banned_ids())   # восстановить гейт бана после рестарта
+        log.info("Загружено забаненных: %s", len(BANNED))
+    except Exception:
+        log.exception("Не удалось загрузить список банов")
     task = menu_task = None
     if dp:
         log.info("APP_URL = %r, ADMIN_ID = %r", APP_URL, ADMIN_ID)
@@ -717,7 +726,9 @@ async def lifespan(_: FastAPI):
     tracker = asyncio.create_task(np_tracker())
     harvester = asyncio.create_task(grow_harvester())
     poster = asyncio.create_task(promo_poster())
-    guard = asyncio.create_task(guard_bot.run(notify))  # бот-охранник чата, свой токен
+    # guard-бот ловит ручной бан в чате/канале и зеркалит его в универсальный
+    # бан (флаг в БД + бан во всех остальных местах) — «где бы ни забанил, банится везде»
+    guard = asyncio.create_task(guard_bot.run(notify, on_ban=apply_ban, on_unban=apply_unban))
     card_task = asyncio.create_task(card_checker())
     delay_task = asyncio.create_task(delay_compensator())
     yield
@@ -742,6 +753,9 @@ def tg_user(request: Request) -> dict:
     user = auth.validate(request.headers.get("X-Init-Data", ""), BOT_TOKEN)
     if not user:
         raise HTTPException(401, "Невалидные данные Telegram")
+    if int(user["id"]) in BANNED and int(user["id"]) != ADMIN_ID:
+        # универсальный бан — закрывает весь маркет (каждый эндпоинт идёт через tg_user)
+        raise HTTPException(403, "Аккаунт заблокирован")
     return user
 
 
@@ -790,10 +804,68 @@ def client_device(request: Request) -> str:
 
 
 def admin_user(request: Request) -> dict:
-    u = tg_user(request)
-    if not ADMIN_ID or u["id"] != ADMIN_ID:
+    # admin_user не должен спотыкаться о собственный бан-гейт tg_user (владелец
+    # исключён там), но на всякий случай проверяем напрямую
+    user = auth.validate(request.headers.get("X-Init-Data", ""), BOT_TOKEN)
+    if not user:
+        raise HTTPException(401, "Невалидные данные Telegram")
+    if not ADMIN_ID or user["id"] != ADMIN_ID:
         raise HTTPException(403, "Доступ только для владельца")
-    return u
+    return user
+
+
+def _ban_targets() -> set[int]:
+    """Все чаты/каналы, где ставим Telegram-бан: чат правил, чат/канал бонуса,
+    промо-канал, канал статистики. Дубликаты и пустые отбрасываем."""
+    out: set[int] = set()
+    for v in (BONUS_CHAT_ID, BONUS_CHANNEL_ID, PROMO_CHANNEL_ID,
+              getattr(guard_bot, "RULES_CHAT_ID", ""),
+              getattr(guard_bot, "STATS_CHANNEL_ID", "")):
+        try:
+            if v:
+                out.add(int(v))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+async def _tg_ban(uid: int, unban: bool = False) -> None:
+    """Бан/разбан в Telegram по всем чатам и каналам. Пробуем guard-ботом
+    (он админ чата), затем основным (он админ канала) — что-нибудь да сработает."""
+    bots = [b for b in (getattr(guard_bot, "BOT", None), bot) if b]
+    if not bots:
+        return
+    for cid in _ban_targets():
+        for b in bots:
+            try:
+                if unban:
+                    await b.unban_chat_member(cid, uid, only_if_banned=True)
+                else:
+                    await b.ban_chat_member(cid, uid)
+                break                      # получилось — к следующему чату
+            except Exception as e:
+                log.debug("tg ban %s в %s не удалось: %s", uid, cid, e)
+
+
+async def apply_ban(uid: int, reason: str = "", source: str = "admin") -> None:
+    """Единая точка бана: флаг в общей БД (гейтит маркет и казино) + моментальный
+    in-process гейт + бан в Telegram (чат/группа/канал). Вызывается и из админки,
+    и из guard-бота при ручном бане в чате."""
+    uid = int(uid)
+    if uid == ADMIN_ID:
+        return
+    await db.set_ban(uid, True, reason)
+    BANNED.add(uid)
+    await _tg_ban(uid, unban=False)
+    log.info("Бан %s (источник: %s, причина: %s)", uid, source, reason or "—")
+
+
+async def apply_unban(uid: int, source: str = "admin") -> None:
+    uid = int(uid)
+    await db.set_ban(uid, False, "")
+    BANNED.discard(uid)
+    await _tg_ban(uid, unban=True)
+    log.info("Разбан %s (источник: %s)", uid, source)
 
 
 async def _snap(uid: int) -> dict:
@@ -948,7 +1020,12 @@ async def api_auth(request: Request):
         raise HTTPException(429, "Слишком часто — подождите минуту")
     name = " ".join(filter(None, [u.get("first_name"), u.get("last_name")]))
     await db.upsert_user(u["id"], name, u.get("username"))
-    await db.touch_device(u["id"], client_device(request), client_ip(request))
+    # платформа (iPhone/Android + модель на Android) из заголовка клиента;
+    # премиум и наличие фото — из подписанного initData (антиабьюз реф-гонки)
+    await db.touch_device(u["id"], client_device(request), client_ip(request),
+                          platform=request.headers.get("x-platform", "")[:48],
+                          premium=bool(u.get("is_premium")),
+                          has_photo=bool(u.get("photo_url")))
     snap = await _snap(u["id"])
     # пришли из казино с валидным токеном — пин там уже вводили, не спрашиваем
     sp = init_start_param(request)
@@ -1550,7 +1627,10 @@ async def api_wallet_balance(request: Request):
     b = await request.json()
     _wallet_auth(b, request)
     try:
-        return await db.wallet_balance(pint(b.get("user_id")))
+        uid = pint(b.get("user_id"))
+        r = await db.wallet_balance(uid)
+        r["banned"] = uid in BANNED           # казино покажет блокировку
+        return r
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -1575,6 +1655,10 @@ async def _wallet_move(request: Request, sign: int, kind_default: str):
 @app.post("/api/wallet/debit")
 async def api_wallet_debit(request: Request):
     """Списание (ставка). Только из выводимых средств."""
+    b = await request.json()
+    _wallet_auth(b, request)
+    if pint(b.get("user_id")) in BANNED:
+        raise HTTPException(403, "Аккаунт заблокирован")   # банан не делает ставок
     return await _wallet_move(request, -1, "bet")
 
 
@@ -1592,6 +1676,8 @@ async def api_wallet_bonus(request: Request):
     uid, amount = pint(b.get("user_id")), pint(b.get("amount"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
+    if uid in BANNED:
+        raise HTTPException(403, "Аккаунт заблокирован")
     if not 0 < amount <= 1_000_000:
         raise HTTPException(400, "Неверная сумма")
     if not rate_limit(f"wallet:{uid}", 120, 60):
@@ -1647,7 +1733,9 @@ async def api_wallet_pin_state(request: Request):
     uid = pint(b.get("user_id"))
     if uid <= 0:
         raise HTTPException(400, "Неверный пользователь")
-    return await db.pin_state(uid)
+    st = await db.pin_state(uid)
+    st["banned"] = uid in BANNED              # казино не пустит забаненного
+    return st
 
 
 @app.post("/api/wallet/pin_verify")
@@ -1798,6 +1886,25 @@ async def api_admin_referrals_detail(request: Request):
     d = await db.admin_ref_detail(pint(b.get("id")))
     await _enrich_ref_status(d.get("invitees", []))
     return d
+
+
+@app.post("/api/admin/ban")
+async def api_admin_ban(request: Request):
+    """Универсальный бан/разбан пользователя из админки: один флаг закрывает и
+    маркет, и казино, плюс Telegram-бан в чате/группе/канале — всё сразу."""
+    admin_user(request)
+    b = await request.json()
+    uid = pint(b.get("id"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    if uid == ADMIN_ID:
+        raise HTTPException(400, "Нельзя заблокировать владельца")
+    ban = bool(b.get("ban", True))
+    if ban:
+        await apply_ban(uid, str(b.get("reason") or "")[:200], "admin")
+    else:
+        await apply_unban(uid, "admin")
+    return {"ok": True, "id": uid, "banned": ban}
 
 
 @app.post("/api/referrals")

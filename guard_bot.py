@@ -185,9 +185,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")
 
 
-async def run(notify=None):
+BOT = None   # экземпляр guard-бота (админ чата) — им банит и основной модуль
+
+
+async def run(notify=None, on_ban=None, on_unban=None):
     """Запуск guard-бота (polling). No-op, если GUARD_BOT_TOKEN не задан.
-    notify — функция отправки личного сообщения через основной бот (для победителей)."""
+    notify — отправка личного сообщения через основной бот (для победителей).
+    on_ban/on_unban(uid, reason) — зеркалим ручной бан в чате в универсальный
+    бан (флаг в БД + бан в казино/маркете): «где бы ни забанил, банится везде»."""
     if not GUARD_BOT_TOKEN:
         log.info("GUARD_BOT_TOKEN не задан — guard-бот выключен")
         return
@@ -198,8 +203,24 @@ async def run(notify=None):
     from aiogram.types import (CallbackQuery, ChatPermissions, FSInputFile,
                                InlineKeyboardButton, InlineKeyboardMarkup, Message)
 
+    global BOT
     bot = Bot(GUARD_BOT_TOKEN)
+    BOT = bot                         # доступен основному модулю для Telegram-бана
     dp = Dispatcher()
+
+    async def _universal_ban(uid, reason=""):
+        if on_ban:
+            try:
+                await on_ban(int(uid), reason, "chat")
+            except Exception:
+                log.exception("Универсальный бан %s не прошёл", uid)
+
+    async def _universal_unban(uid):
+        if on_unban:
+            try:
+                await on_unban(int(uid), "chat")
+            except Exception:
+                log.exception("Универсальный разбан %s не прошёл", uid)
     MUTED = ChatPermissions(can_send_messages=False, can_send_media_messages=False,
                             can_send_polls=False, can_send_other_messages=False,
                             can_add_web_page_previews=False)
@@ -353,11 +374,16 @@ async def run(notify=None):
             was, now = _is_member(ev.old_chat_member), _is_member(ev.new_chat_member)
         except Exception:
             return
-        if was == now:
-            return                              # смена роли, не вход/выход
         u = ev.new_chat_member.user
         if getattr(u, "is_bot", False):
             return
+        # ручной бан в чате/канале (кем угодно — админом, Telegram-UI) → зеркалим
+        # в универсальный бан: флаг в БД + бан в казино/маркете и других чатах
+        new_status = getattr(ev.new_chat_member, "status", "")
+        if new_status == "kicked" and getattr(ev.old_chat_member, "status", "") != "kicked":
+            await _universal_ban(u.id, "бан в чате")
+        if was == now:
+            return                              # смена роли, не вход/выход
         direction = "join" if now else "leave"
         try:
             await db.record_member_event(ev.chat.id, u.id, direction, u.full_name)
@@ -404,6 +430,7 @@ async def run(notify=None):
             await bot.ban_chat_member(message.chat.id, uid)
         except Exception:
             return await message.reply("Не удалось забанить — проверьте права бота")
+        await _universal_ban(uid, reason or "бан командой /ban")   # везде сразу
         if message.reply_to_message:
             try:
                 await message.reply_to_message.delete()
@@ -487,6 +514,7 @@ async def run(notify=None):
             await bot.unban_chat_member(message.chat.id, uid, only_if_banned=True)
         except Exception:
             return await message.reply("Не удалось — проверьте права бота")
+        await _universal_unban(uid)          # разбан везде: казино/маркет и чаты
         await log_action("✅", "Разбан", message.chat, message.from_user.full_name, name, uid, reason)
         try:
             await message.delete()
@@ -600,6 +628,7 @@ async def run(notify=None):
                 done = "🚫 Забанен(а)"
             except Exception:
                 return await cb.answer("Не удалось — проверьте права бота", show_alert=True)
+            await _universal_ban(uid, "бан из журнала guard")   # везде сразу
         else:
             try:
                 await bot.restrict_chat_member(chat_id, uid, permissions=OPEN)
