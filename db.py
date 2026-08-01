@@ -2474,11 +2474,39 @@ async def admin_ref_stats() -> dict:
             ORDER BY COALESCE(pur.total, 0) DESC, inv.invited DESC
             LIMIT 30
         """)
+        # сколько приглашённых у реферера требуют внимания: то же подозрение, что
+        # и в детализации (устройство/IP как у реферера или дубль устройства среди
+        # приглашённых), но ещё НЕ забаненные — забанил, счётчик упал
+        flg = await c.fetch("""
+            WITH invd AS (
+                SELECT u.tg_id, u.ref_by AS r, u.banned,
+                       bc.device_hash AS device, bc.ip AS ip
+                FROM users u
+                LEFT JOIN bonus_claims bc ON bc.user_id = u.tg_id
+                WHERE u.ref_by IS NOT NULL),
+            refd AS (
+                SELECT bc.user_id AS r, bc.device_hash AS rdevice, bc.ip AS rip
+                FROM bonus_claims bc),
+            dup AS (
+                SELECT r, device FROM invd
+                WHERE device IS NOT NULL GROUP BY r, device HAVING COUNT(*) > 1)
+            SELECT i.r AS r, COUNT(*) FILTER (WHERE NOT i.banned AND (
+                     (i.device IS NOT NULL AND i.device = rd.rdevice)
+                  OR (i.ip     IS NOT NULL AND i.ip     = rd.rip)
+                  OR (i.device IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM dup d WHERE d.r = i.r AND d.device = i.device))
+                   )) AS flags
+            FROM invd i
+            LEFT JOIN refd rd ON rd.r = i.r
+            GROUP BY i.r
+        """)
+    flag_by_ref = {int(f["r"]): int(f["flags"] or 0) for f in flg}
     return {
         "total_invited": total_invited, "total_earned": total_earned,
         "buys_n": int(buys["n"] or 0), "buys_total": int(buys["total"] or 0),
         "buys_n30": int(buys["n30"] or 0), "buys_total30": int(buys["total30"] or 0),
-        "top": [{**dict(t), "pct": round(ref_percent(t["invited"]) * 100)} for t in top],
+        "top": [{**dict(t), "pct": round(ref_percent(t["invited"]) * 100),
+                 "flags": flag_by_ref.get(int(t["tg_id"]), 0)} for t in top],
     }
 
 
