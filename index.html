@@ -400,6 +400,12 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 .ref-flag{width:100%;margin-top:3px;font-size:11px;font-weight:700;color:var(--danger)}
 .ref-owner{padding:6px 4px 8px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line);margin-bottom:4px}
 .ref-owner b{color:var(--txt)}
+.ref-actions{width:100%;margin-top:6px;display:flex;justify-content:flex-end}
+.ref-ban{font-size:11px;font-weight:700;padding:5px 12px;border-radius:8px;border:1px solid var(--danger);background:transparent;color:var(--danger);cursor:pointer}
+.ref-ban.on{border-color:var(--muted-2);color:var(--muted)}
+.ref-ban:active{transform:scale(.96)}
+.ref-inv.banned{background:rgba(255,60,60,.1);border-left:3px solid #ff3b3b;padding-left:8px;border-radius:6px;opacity:.85}
+.ref-inv.banned .nm{color:#ff6b6b;text-decoration:line-through}
 .ref-link{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:16px;cursor:pointer;
   background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.16);
   font-size:12px;color:var(--muted);word-break:break-all;
@@ -1019,12 +1025,25 @@ async function deviceHash() {
   localStorage.setItem('mm_dev2', DEV);
   return DEV;
 }
+/* Платформа для антиабьюза: Telegram отдаёт ОС (android/ios/tdesktop…), а на
+   Android в userAgent видна и модель телефона (iOS модель скрывает). Пишем
+   «android:SM-A515F» / «ios» — админ видит iPhone-или-Android и модель. */
+const PLAT = (() => {
+  const p = (tg?.platform || 'unknown');
+  const ua = navigator.userAgent || '';
+  let model = '';
+  if (p === 'android') {
+    const m = ua.match(/;\s?([A-Za-z0-9][\w .+_-]+?)\s?(?:Build\/|\))/);
+    if (m) model = m[1].replace(/\s+/g, ' ').trim().slice(0, 40);
+  }
+  return model ? p + ':' + model : p;
+})();
 const API = {
   ok: false,
   async call(path, body) {
     const r = await fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Init-Data': tg?.initData || '', 'X-Device': DEV },
+      headers: { 'Content-Type': 'application/json', 'X-Init-Data': tg?.initData || '', 'X-Device': DEV, 'X-Platform': PLAT },
       body: JSON.stringify(body || {}),
     });
     if (!r.ok) {
@@ -1087,6 +1106,18 @@ function backToCasino() {
     setTimeout(() => tg.close(), 300);
   } else location.href = S.casinoLink;
 }
+function showBanned() {
+  if (document.getElementById('banned-veil')) return;
+  const v = document.createElement('div');
+  v.id = 'banned-veil';
+  v.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0b0b0f;display:flex;'
+    + 'flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px;gap:14px';
+  v.innerHTML = '<div style="font-size:52px">⛔</div>'
+    + '<div style="font-size:19px;font-weight:800;color:#fff">Доступ заблокирован</div>'
+    + '<div style="font-size:13px;color:#9a9aa5;max-width:280px;line-height:1.5">'
+    + 'Ваш аккаунт заблокирован администратором. Если это ошибка — свяжитесь с поддержкой.</div>';
+  document.body.appendChild(v);
+}
 async function serverSync() {
   if (!tg?.initData || location.protocol === 'file:') return;
   await deviceHash();
@@ -1094,7 +1125,10 @@ async function serverSync() {
     const d = await API.call('/api/auth');
     API.ok = true;
     applySnapshot(d);
-  } catch (e) { API.ok = false; /* сервера нет — остаёмся в демо-режиме */ }
+  } catch (e) {
+    API.ok = false; /* сервера нет — остаёмся в демо-режиме */
+    if (/заблокир/i.test(e.message || '')) return showBanned();   // универсальный бан
+  }
   configureLock();  // настроить экран блокировки по данным с сервера (или локально)
 }
 /* фоновое обновление: статусы заказов меняет админ, приложение должно их подхватывать само */
@@ -3329,21 +3363,64 @@ async function adminRefOpen(id) {
     box.dataset.loaded = '1';
     const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch]));
     const fd = iso => { if (!iso) return ''; try { return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: '2-digit' }); } catch (e) { return ''; } };
+    // платформа: «android:SM-A515F» → 📱 Android · SM-A515F; ios → 🍏 iPhone
+    const platLabel = p => {
+      if (!p) return '📱 —';
+      const [os, ...rest] = String(p).split(':');
+      const model = rest.join(':');
+      const os2 = { android: '🤖 Android', ios: '🍏 iPhone', tdesktop: '💻 Desktop',
+                    macos: '💻 macOS', weba: '🌐 Web', webk: '🌐 Web' }[os] || ('📱 ' + esc(os));
+      return os2 + (model ? ' · ' + esc(model) : '');
+    };
+    // качество телеграм-аккаунта: премиум + наличие фото (косвенно — «живой» аккаунт)
+    const qual = v => {
+      const parts = [];
+      if (v.premium) parts.push('⭐ Premium');
+      parts.push(v.photo === true ? '🖼 фото' : (v.photo === false ? '👤 без фото' : '👤 фото —'));
+      return parts.join(' · ');
+    };
+    const banBtn = v => `<button class="ref-ban${v.banned ? ' on' : ''}" onclick="banUser(${v.tg_id}, ${v.banned ? 'false' : 'true'})">${v.banned ? '♻ Разбанить' : '🚫 Забанить'}</button>`;
     const rf = d.referrer || {};
-    const refHead = `<div class="ref-owner">Реферер · <b>ID ${rf.tg_id}</b><br>
-      <span class="ref-tech" style="margin:0">📱 ${rf.device ? esc(String(rf.device).slice(0, 12)) : '—'} · 🌐 ${rf.ip ? esc(rf.ip) : '—'}</span></div>`;
+    const refHead = `<div class="ref-owner">Реферер · <b>ID ${rf.tg_id}</b>${rf.banned ? ' · <span style="color:#ff6b6b">ЗАБЛОКИРОВАН</span>' : ''}<br>
+      <span class="ref-tech" style="margin:0">${platLabel(rf.platform)} · ${qual(rf)}</span><br>
+      <span class="ref-tech" style="margin:0">📟 ${rf.device ? esc(String(rf.device).slice(0, 12)) : '—'} · 🌐 ${rf.ip ? esc(rf.ip) : '—'}</span></div>`;
     box.innerHTML = refHead + ((d.invitees || []).length ? d.invitees.map(v => `
-      <div class="ref-inv${v.flag ? ' flag' : ''}">
-        <span class="nm">${v.flag ? '🚩 ' : ''}${esc(v.name || 'Без имени')}${v.username ? ' · @' + esc(v.username) : ''}</span>
+      <div class="ref-inv${v.flag ? ' flag' : ''}${v.banned ? ' banned' : ''}" id="refinv-${v.tg_id}">
+        <span class="nm">${v.banned ? '⛔ ' : (v.flag ? '🚩 ' : '')}${esc(v.name || 'Без имени')}${v.username ? ' · @' + esc(v.username) : ''}</span>
         <span class="sp">${fmt(v.spent)} ₴</span>
         <small>${v.orders} зак.${v.joined ? ' · пришёл ' + fd(v.joined) : ''}${v.last_order ? ' · посл. ' + fd(v.last_order) : ''} · ID ${v.tg_id}</small>
         ${refStatusRow(v)}
-        <small class="ref-tech">📱 ${v.device ? esc(String(v.device).slice(0, 12)) : '—'} · 🌐 ${v.ip ? esc(v.ip) : '—'}</small>
+        <small class="ref-tech">${platLabel(v.platform)} · ${qual(v)}</small>
+        <small class="ref-tech">📟 ${v.device ? esc(String(v.device).slice(0, 12)) : '—'} · 🌐 ${v.ip ? esc(v.ip) : '—'}</small>
         ${v.flag ? `<small class="ref-flag">⚠ Подозрение: ${esc(v.flag_reason)}</small>` : ''}
+        <div class="ref-actions">${banBtn(v)}</div>
       </div>`).join('') : '<p class="note" style="margin:6px 0 10px 8px">приглашённых нет</p>');
   } catch (e) {
     box.innerHTML = '<p class="note" style="margin:6px 0 10px 8px">не удалось загрузить</p>';
   }
+}
+async function banUser(id, ban) {
+  const msg = ban
+    ? `Заблокировать ID ${id} ВЕЗДЕ?\n\nЧат, группа, канал, а также вход в Маркет и Казино — всё сразу.`
+    : `Снять блокировку с ID ${id} везде?`;
+  const go = async () => {
+    try {
+      await API.call('/api/admin/ban', { id, ban });
+    } catch (e) { return toast(e.message); }
+    haptic('medium'); toast(ban ? 'Заблокирован везде 🚫' : 'Разблокирован ♻');
+    const card = document.getElementById('refinv-' + id);
+    if (card) {                              // перерисуем карточку без полной перезагрузки
+      card.classList.toggle('banned', ban);
+      const btn = card.querySelector('.ref-ban');
+      if (btn) {
+        btn.classList.toggle('on', ban);
+        btn.textContent = ban ? '♻ Разбанить' : '🚫 Забанить';
+        btn.setAttribute('onclick', `banUser(${id}, ${ban ? 'false' : 'true'})`);
+      }
+    }
+  };
+  if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
+  else if (confirm(msg)) go();
 }
 async function genPromos() {
   const amount = parseInt(document.getElementById('promoAmount').value, 10);

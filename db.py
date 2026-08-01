@@ -98,6 +98,16 @@ async def init():
             ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_salt TEXT;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_fails INT NOT NULL DEFAULT 0;
             ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ;
+            -- универсальный бан: один флаг на общей базе — им гейтятся оба
+            -- приложения (маркет и казино), а Telegram-бан ставится отдельно
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT false;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT;
+            -- анти-абьюз реф-гонки: платформа (iPhone/Android + модель на Android),
+            -- премиум и наличие фото телеграм-аккаунта — сигналы качества аккаунта
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS platform TEXT;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS tg_premium BOOLEAN;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS tg_photo BOOLEAN;
             CREATE TABLE IF NOT EXISTS bonus_claims(
                 user_id     BIGINT PRIMARY KEY,
                 device_hash TEXT,
@@ -1380,14 +1390,46 @@ async def delete_account(tg_id: int):
         await c.execute("DELETE FROM users WHERE tg_id=$1", tg_id)
 
 
-async def touch_device(tg_id: int, device: str, ip: str):
-    """Запоминаем отпечаток устройства и IP пользователя (для антиабьюза)."""
+async def touch_device(tg_id: int, device: str, ip: str,
+                       platform: str = "", premium=None, has_photo=None):
+    """Запоминаем отпечаток устройства, IP и сигналы качества аккаунта
+    (платформа iPhone/Android, премиум, наличие фото) — для антиабьюза реф-гонки.
+    Пустые/None значения не затирают уже сохранённые."""
     async with _pool.acquire() as c:
         await c.execute("""
             UPDATE users SET device_hash = COALESCE(NULLIF($2, ''), device_hash),
-                             last_ip = COALESCE(NULLIF($3, ''), last_ip)
+                             last_ip     = COALESCE(NULLIF($3, ''), last_ip),
+                             platform    = COALESCE(NULLIF($4, ''), platform),
+                             tg_premium  = COALESCE($5, tg_premium),
+                             tg_photo    = COALESCE($6, tg_photo)
             WHERE tg_id=$1
-        """, tg_id, device[:64], ip[:64])
+        """, tg_id, device[:64], ip[:64], (platform or "")[:48], premium, has_photo)
+
+
+async def set_ban(tg_id: int, banned: bool, reason: str = "") -> None:
+    """Универсальный бан на общей базе. Аккаунта в магазине может ещё не быть
+    (человек только в казино/чате) — создаём заготовку, чтобы флаг не потерялся."""
+    async with _pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO users(tg_id, banned, banned_at, ban_reason)
+            VALUES($1, $2, CASE WHEN $2 THEN now() ELSE NULL END, $3)
+            ON CONFLICT (tg_id) DO UPDATE
+                SET banned = $2,
+                    banned_at = CASE WHEN $2 THEN COALESCE(users.banned_at, now()) ELSE NULL END,
+                    ban_reason = CASE WHEN $2 THEN $3 ELSE NULL END
+        """, int(tg_id), bool(banned), (reason or "")[:200] or None)
+
+
+async def banned_ids() -> list[int]:
+    """Все забаненные — для наполнения in-memory гейта при старте."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("SELECT tg_id FROM users WHERE banned")
+        return [int(r["tg_id"]) for r in rows]
+
+
+async def is_banned(tg_id: int) -> bool:
+    async with _pool.acquire() as c:
+        return bool(await c.fetchval("SELECT banned FROM users WHERE tg_id=$1", int(tg_id)))
 
 
 async def accept_rules(tg_id: int) -> None:
@@ -2447,12 +2489,14 @@ async def admin_ref_detail(referrer_id: int) -> dict:
     async with _pool.acquire() as c:
         ref = await c.fetchrow("""
             SELECT u.tg_id, u.name, u.username, u.ref_earned,
+                   u.platform, u.tg_premium, u.tg_photo, u.banned,
                    bc.device_hash AS device, bc.ip AS ip
             FROM users u LEFT JOIN bonus_claims bc ON bc.user_id = u.tg_id
             WHERE u.tg_id = $1
         """, referrer_id)
         rows = await c.fetch("""
             SELECT u.tg_id, u.name, u.username, u.created AS joined, u.bonus_claimed,
+                   u.platform, u.tg_premium, u.tg_photo, u.banned,
                    COUNT(o.id) FILTER (WHERE o.status >= 0)                    AS orders,
                    COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0)      AS spent,
                    MAX(o.created) FILTER (WHERE o.status >= 0)                 AS last_order,
@@ -2462,7 +2506,8 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             LEFT JOIN orders o        ON o.user_id = u.tg_id
             LEFT JOIN bonus_claims bc ON bc.user_id = u.tg_id
             WHERE u.ref_by = $1
-            GROUP BY u.tg_id, u.name, u.username, u.created, u.bonus_claimed
+            GROUP BY u.tg_id, u.name, u.username, u.created, u.bonus_claimed,
+                     u.platform, u.tg_premium, u.tg_photo, u.banned
             ORDER BY spent DESC, joined DESC
         """, referrer_id)
 
@@ -2493,6 +2538,8 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             "last_order": r["last_order"].isoformat() if r["last_order"] else None,
             "bonus": bool(r["bonus_claimed"]),
             "device": dev, "ip": ip,                 # только для админа
+            "platform": r["platform"], "premium": r["tg_premium"],
+            "photo": r["tg_photo"], "banned": bool(r["banned"]),
             "flag": bool(reasons), "flag_reason": "; ".join(reasons),
         })
     return {
@@ -2502,6 +2549,10 @@ async def admin_ref_detail(referrer_id: int) -> dict:
             "username": (ref["username"] if ref else None),
             "ref_earned": int(ref["ref_earned"]) if ref else 0,
             "device": ref_device, "ip": ref_ip,
+            "platform": (ref["platform"] if ref else None),
+            "premium": (ref["tg_premium"] if ref else None),
+            "photo": (ref["tg_photo"] if ref else None),
+            "banned": bool(ref["banned"]) if ref else False,
         },
         "invitees": invitees,
     }
