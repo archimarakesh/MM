@@ -1301,58 +1301,42 @@ function swipeGo(v, dir) {
   el.classList.add(dir < 0 ? 'slide-left' : 'slide-right');
   go(v);   // класс снимется потом, когда раздел скроется (см. go) — иначе перезапустится viewIn
 }
+/* Листаем разделы КАК В КАЗИНО — пассивно: решаем на touchend по итоговому
+   смещению, БЕЗ preventDefault и без перехвата в движении. Активный перехват
+   (touchmove + preventDefault, «забрать жест у вебвью») в fullscreen Telegram
+   конфликтует с нативным жестом — апп/меню уезжали по диагонали. Пассивный
+   подход жест не трогает, поэтому ничего не дёргается. */
 (function initSwipeNav() {
-  let sx = 0, sy = 0, lastX = 0, active = false, locked = null, scrollEl = null;
-  const nearestScrollableX = node => {      // ближайший горизонтально-прокручиваемый предок
+  let sx = 0, sy = 0, skip = true;
+  const onScrollerX = node => {             // жест начат на горизонтальной ленте?
     for (let n = node; n && n !== document.body; n = n.parentElement) {
       if (n.scrollWidth > n.clientWidth + 4) {
         const ox = getComputedStyle(n).overflowX;
-        if (ox === 'auto' || ox === 'scroll') return n;
+        if (ox === 'auto' || ox === 'scroll') return true;
       }
     }
-    return null;
+    return false;
   };
-  const start = (x, y, target) => {
-    active = false; locked = null;
-    if (document.querySelector('.sheet.open')) return;   // открыта шторка — не листаем
-    scrollEl = nearestScrollableX(target);
-    sx = lastX = x; sy = y; active = true;
-  };
-  const nav = dx => {
+  document.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) { skip = true; return; }
+    const t = e.touches[0];
+    sx = t.clientX; sy = t.clientY;
+    // не листаем: открыта шторка или свайп начат на горизонтальной ленте (фото/планы)
+    skip = !!document.querySelector('.sheet.open') || onScrollerX(e.target);
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (skip) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    // только уверенно-горизонтальный и достаточно длинный жест
+    if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     const cur = (document.querySelector('.view.active') || {}).id;
     const i = SWIPE_VIEWS.indexOf(cur ? cur.replace('view-', '') : '');
-    if (i < 0) return;                       // topup/admin — вне листания
-    const ni = dx < 0 ? i + 1 : i - 1;
+    if (i < 0) return;                       // topup/admin/referrals — вне листания
+    const ni = i + (dx < 0 ? 1 : -1);
     if (ni < 0 || ni >= SWIPE_VIEWS.length) return;
     swipeGo(SWIPE_VIEWS[ni], dx < 0 ? -1 : 1);
-  };
-  const move = (x, y, e) => {
-    if (!active) return;
-    const dx = x - sx, dy = y - sy;
-    if (locked === null) {
-      if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;   // решаем рано, до вердикта браузера
-      locked = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
-    }
-    if (locked !== 'h') return;                           // вертикаль — обычный скролл
-    if (e && e.cancelable) e.preventDefault();            // забираем жест у вебвью
-    if (scrollEl) {                 // жест начат на ленте фото — крутим её сами, страницы не листаем
-      scrollEl.scrollLeft -= x - lastX;                   // (touch-action:pan-y не даёт браузеру сделать это)
-      lastX = x;
-      return;
-    }
-    // листаем прямо в движении: Android присылает touchcancel вместо touchend,
-    // поэтому ждать конца жеста нельзя
-    if (Math.abs(dx) >= 45) { active = false; nav(dx); }
-  };
-  const end = () => { active = false; locked = null; };
-  document.addEventListener('touchstart', e => { if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY, e.target); }, { passive: true });
-  document.addEventListener('touchmove', e => { if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY, e); }, { passive: false });
-  document.addEventListener('touchend', end, { passive: true });
-  document.addEventListener('touchcancel', end, { passive: true });
-  let mdown = false;
-  document.addEventListener('mousedown', e => { mdown = true; start(e.clientX, e.clientY, e.target); }, { passive: true });
-  document.addEventListener('mousemove', e => { if (mdown) move(e.clientX, e.clientY, null); }, { passive: true });
-  document.addEventListener('mouseup', () => { mdown = false; end(); }, { passive: true });
+  }, { passive: true });
 })();
 
 /* ═══════════ Toast ═══════════ */
