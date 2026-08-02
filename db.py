@@ -1083,22 +1083,23 @@ async def mark_bonus_part(order_code: str, amount: int | None) -> dict:
 
 
 async def sales_stats() -> dict:
-    """Бухгалтерия продаж. Заказ считается проданным с момента ТТН (статус 2+):
-    посылка отправлена — деньги уже получены. Бонусные оплаты (промо, приветственные)
-    учитываются отдельно: это не живые деньги. Чистая прибыль = реальная выручка
-    минус комиссия на вывод и минус фикс-расход на каждую посылку."""
+    """Бухгалтерия продаж. Заказ считается проданным с момента, как его взяли
+    в работу (статус 1+): заказ оплачен ещё на статусе 0, а «в работе» — уже
+    подтверждённая продажа, ждать ТТН для учёта не нужно. Бонусные оплаты (промо,
+    приветственные) учитываются отдельно: это не живые деньги. Чистая прибыль =
+    реальная выручка минус комиссия на вывод и минус фикс-расход на каждую посылку."""
     async with _pool.acquire() as c:
         await _auto_deliver(c)
         tot = await c.fetchrow("""
             SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
                    COALESCE(SUM(grams),0) AS grams,
                    COALESCE(SUM(bonus_part),0) AS bonus
-            FROM orders WHERE status >= 2
+            FROM orders WHERE status >= 1
         """)
         by = await c.fetch("""
             SELECT product, COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
                    COALESCE(SUM(grams),0) AS grams
-            FROM orders WHERE status >= 2 GROUP BY product ORDER BY revenue DESC LIMIT 20
+            FROM orders WHERE status >= 1 GROUP BY product ORDER BY revenue DESC LIMIT 20
         """)
     revenue, bonus = int(tot["revenue"]), int(tot["bonus"])
     real = revenue - bonus
