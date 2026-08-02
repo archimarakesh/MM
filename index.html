@@ -515,8 +515,13 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 #lock.show{display:flex}
 
 /* ── нижняя навигация ── */
-nav{position:fixed;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom, env(safe-area-inset-bottom)));z-index:70;
-  max-width:448px;margin:0 auto}
+/* Обёртка прибита к ВЕРХУ вьюпорта (он стабилен) и имеет высоту = СТАБИЛЬНОЙ
+   высоте вьюпорта Telegram (--vph). Меню внутри — absolute от низа обёртки.
+   Так меню не привязано к нижней границе экрана, которую Telegram дёргает при
+   свайпе → меню больше не скачет. */
+#navwrap{position:fixed;left:0;right:0;top:0;height:var(--vph,100dvh);z-index:70;pointer-events:none}
+nav{position:absolute;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom, env(safe-area-inset-bottom)));
+  max-width:448px;margin:0 auto;pointer-events:auto}
 /* фон меню — НЕПРОЗРАЧНЫЙ, без backdrop-filter: фикс-элемент с blur вебвью на
    миг перекомпоновывал при свайп-анимации соседнего раздела, и меню дёргалось
    вниз/обратно. Сплошной фон убирает пересчёт бэкдропа — прыжок уходит.
@@ -717,6 +722,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom, en
 </div>
 
 <!-- нижняя навигация -->
+<div id="navwrap">
 <nav>
   <div class="nav-core">
     <div class="nav-item active" data-v="shop" onclick="go('shop')">
@@ -741,6 +747,7 @@ nav{position:fixed;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom, en
     </div>
   </div>
 </nav>
+</div>
 
 <!-- шторки -->
 <div class="sheet-veil" id="veil" onclick="veilClose()"></div>
@@ -999,6 +1006,20 @@ if (tg) {
   apply();
   window.addEventListener('orientationchange', settle);
   window.addEventListener('resize', settle);
+})();
+/* Стабильная высота вьюпорта для обёртки меню (#navwrap). В Telegram берём
+   viewportStableHeight — он НЕ меняется при свайпе/жестах, поэтому меню,
+   подвешенное к низу обёртки этой высоты, не дёргается. В браузере — innerHeight. */
+(function stableViewportHeight() {
+  const read = () => (tg && tg.viewportStableHeight) || window.innerHeight;
+  const set = () => { const h = Math.round(read()); if (h > 0) document.documentElement.style.setProperty('--vph', h + 'px'); };
+  set();
+  // viewportStableHeight по определению отражает устоявшееся состояние — обновляем на любое событие
+  if (tg && tg.onEvent) tg.onEvent('viewportChanged', set);
+  let t = null;
+  const settle = () => { clearTimeout(t); t = setTimeout(set, 250); };
+  window.addEventListener('resize', settle);
+  window.addEventListener('orientationchange', settle);
 })();
 const tgUser = tg?.initDataUnsafe?.user;
 // deep-link из казино: startapp=topup_<токен> → сразу на пополнение без пина
