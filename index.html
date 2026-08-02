@@ -515,7 +515,7 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 #lock.show{display:flex}
 
 /* ── нижняя навигация ── */
-nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:70;
+nav{position:fixed;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom, env(safe-area-inset-bottom)));z-index:70;
   max-width:448px;margin:0 auto}
 /* фон меню — НЕПРОЗРАЧНЫЙ, без backdrop-filter: фикс-элемент с blur вебвью на
    миг перекомпоновывал при свайп-анимации соседнего раздела, и меню дёргалось
@@ -980,6 +980,26 @@ if (tg) {
   tg.onEvent('fullscreenChanged', applyInsets);
   applyInsets();
 }
+/* Нижний инсет держим СТАБИЛЬНЫМ в пикселях. В fullscreen Telegram при свайпе
+   разделов env(safe-area-inset-bottom) на миг пересчитывается — и нижнее меню,
+   привязанное к нему, дёргается вниз/обратно. Замеряем значение через пробник и
+   применяем только УСТОЯВШЕЕСЯ (с задержкой), поэтому транзиентные скачки во
+   время свайпа меню не двигают; обновляемся при повороте экрана. */
+(function stableSafeBottom() {
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:env(safe-area-inset-bottom);'
+    + 'pointer-events:none;visibility:hidden';
+  document.body.appendChild(probe);
+  let last = -1, t = null;
+  const apply = () => {
+    const h = Math.round(probe.getBoundingClientRect().height);
+    if (h !== last) { last = h; document.documentElement.style.setProperty('--safe-bottom', h + 'px'); }
+  };
+  const settle = () => { clearTimeout(t); t = setTimeout(apply, 350); };   // ждём, пока вьюпорт устаканится
+  apply();
+  window.addEventListener('orientationchange', settle);
+  window.addEventListener('resize', settle);
+})();
 const tgUser = tg?.initDataUnsafe?.user;
 // deep-link из казино: startapp=topup_<токен> → сразу на пополнение без пина
 window._wantTopup = (tg?.initDataUnsafe?.start_param || '').startsWith('topup');
