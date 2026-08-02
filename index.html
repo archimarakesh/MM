@@ -142,8 +142,15 @@ h1.page-title em{font-style:normal;color:inherit}
 .btn[disabled]{opacity:.4;pointer-events:none}
 
 /* ── страницы ── */
-.view{display:none;animation:viewIn .45s var(--ease);touch-action:pan-y}
-.view.active{display:block}
+/* Все разделы лежат в ОДНОЙ ячейке грида (как пейджер в казино): высота
+   документа = высоте самого высокого раздела и НЕ меняется при переключении.
+   Поэтому нижнее меню (fixed) не пересчитывается вебвью и не дёргается при
+   свайпе. Скрытые разделы держим visibility:hidden — они занимают место (высота
+   стабильна), но не видны и не кликаются. */
+#views{display:grid}
+#views>.view{grid-area:1/1}
+.view{visibility:hidden;touch-action:pan-y;min-width:0}
+.view.active{visibility:visible;animation:viewIn .45s var(--ease)}
 @keyframes viewIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 .view.slide-left{animation:slideL .34s var(--ease)}
 .view.slide-right{animation:slideR .34s var(--ease)}
@@ -514,20 +521,11 @@ img.rev-ava{background:rgba(255,255,255,.06)}
   align-items:center;justify-content:flex-start;padding:calc(20vh + env(safe-area-inset-top)) 20px 30px;overflow-y:auto}
 #lock.show{display:flex}
 
-/* ── нижняя навигация ── */
-/* Обёртка прибита к ВЕРХУ вьюпорта (он стабилен) и имеет высоту = СТАБИЛЬНОЙ
-   высоте вьюпорта Telegram (--vph). Меню внутри — absolute от низа обёртки.
-   Так меню не привязано к нижней границе экрана, которую Telegram дёргает при
-   свайпе → меню больше не скачет. */
-#navwrap{position:fixed;left:0;right:0;top:0;height:var(--vph,100dvh);z-index:70;pointer-events:none}
-nav{position:absolute;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom, env(safe-area-inset-bottom)));
-  max-width:448px;margin:0 auto;pointer-events:auto}
-/* фон меню — НЕПРОЗРАЧНЫЙ, без backdrop-filter: фикс-элемент с blur вебвью на
-   миг перекомпоновывал при свайп-анимации соседнего раздела, и меню дёргалось
-   вниз/обратно. Сплошной фон убирает пересчёт бэкдропа — прыжок уходит.
-   Разница почти незаметна: фон и так был на 88% непрозрачным поверх тёмного. */
+/* ── нижняя навигация (один в один с казино: там не дёргается) ── */
+nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:70;
+  max-width:448px;margin:0 auto}
 .nav-core{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:7px;border-radius:999px;
-  background:#14110b;
+  background:rgba(14,12,8,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   border:1px solid var(--gold-line);
   box-shadow:0 18px 44px rgba(0,0,0,.55),inset 0 1px 1px rgba(255,255,255,.06)}
 .nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 4px;border-radius:999px;cursor:pointer;
@@ -581,6 +579,7 @@ nav{position:absolute;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom,
     </div>
   </header>
 
+  <div id="views">
   <!-- ══ МАГАЗИН ══ -->
   <section class="view active" id="view-shop">
     <!-- банер-переход в казино: общий баланс, играть можно сразу -->
@@ -719,10 +718,10 @@ nav{position:absolute;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom,
     <div class="section-head"><h2>Частые вопросы</h2><span>FAQ</span></div>
     <div id="faqList"></div>
   </section>
+  </div>
 </div>
 
 <!-- нижняя навигация -->
-<div id="navwrap">
 <nav>
   <div class="nav-core">
     <div class="nav-item active" data-v="shop" onclick="go('shop')">
@@ -747,7 +746,6 @@ nav{position:absolute;left:16px;right:16px;bottom:calc(16px + var(--safe-bottom,
     </div>
   </div>
 </nav>
-</div>
 
 <!-- шторки -->
 <div class="sheet-veil" id="veil" onclick="veilClose()"></div>
@@ -987,40 +985,6 @@ if (tg) {
   tg.onEvent('fullscreenChanged', applyInsets);
   applyInsets();
 }
-/* Нижний инсет держим СТАБИЛЬНЫМ в пикселях. В fullscreen Telegram при свайпе
-   разделов env(safe-area-inset-bottom) на миг пересчитывается — и нижнее меню,
-   привязанное к нему, дёргается вниз/обратно. Замеряем значение через пробник и
-   применяем только УСТОЯВШЕЕСЯ (с задержкой), поэтому транзиентные скачки во
-   время свайпа меню не двигают; обновляемся при повороте экрана. */
-(function stableSafeBottom() {
-  const probe = document.createElement('div');
-  probe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:env(safe-area-inset-bottom);'
-    + 'pointer-events:none;visibility:hidden';
-  document.body.appendChild(probe);
-  let last = -1, t = null;
-  const apply = () => {
-    const h = Math.round(probe.getBoundingClientRect().height);
-    if (h !== last) { last = h; document.documentElement.style.setProperty('--safe-bottom', h + 'px'); }
-  };
-  const settle = () => { clearTimeout(t); t = setTimeout(apply, 350); };   // ждём, пока вьюпорт устаканится
-  apply();
-  window.addEventListener('orientationchange', settle);
-  window.addEventListener('resize', settle);
-})();
-/* Стабильная высота вьюпорта для обёртки меню (#navwrap). В Telegram берём
-   viewportStableHeight — он НЕ меняется при свайпе/жестах, поэтому меню,
-   подвешенное к низу обёртки этой высоты, не дёргается. В браузере — innerHeight. */
-(function stableViewportHeight() {
-  const read = () => (tg && tg.viewportStableHeight) || window.innerHeight;
-  const set = () => { const h = Math.round(read()); if (h > 0) document.documentElement.style.setProperty('--vph', h + 'px'); };
-  set();
-  // viewportStableHeight по определению отражает устоявшееся состояние — обновляем на любое событие
-  if (tg && tg.onEvent) tg.onEvent('viewportChanged', set);
-  let t = null;
-  const settle = () => { clearTimeout(t); t = setTimeout(set, 250); };
-  window.addEventListener('resize', settle);
-  window.addEventListener('orientationchange', settle);
-})();
 const tgUser = tg?.initDataUnsafe?.user;
 // deep-link из казино: startapp=topup_<токен> → сразу на пополнение без пина
 window._wantTopup = (tg?.initDataUnsafe?.start_param || '').startsWith('topup');
