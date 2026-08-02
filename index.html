@@ -503,7 +503,11 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 
 /* ── нижняя навигация ── */
 nav{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:70;
-  max-width:448px;margin:0 auto}
+  max-width:448px;margin:0 auto;
+  /* держим меню на своём слое: иначе при свайпе разделов (transform-анимация
+     соседа) вебвью на миг перекомпоновывает fixed-элемент с backdrop-filter —
+     меню дёргается вниз и возвращается */
+  transform:translateZ(0);will-change:transform;backface-visibility:hidden}
 .nav-core{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:7px;border-radius:999px;
   background:rgba(14,12,8,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   border:1px solid var(--gold-line);
