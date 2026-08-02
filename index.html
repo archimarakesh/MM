@@ -970,10 +970,11 @@ const tg = window.Telegram?.WebApp;
 if (tg) {
   tg.ready(); tg.expand();
   tg.setHeaderColor('#050505'); tg.setBackgroundColor('#050505');
-  /* полноэкранный режим (Bot API 8.0+) */
-  if (parseFloat(tg.version) >= 8 && tg.requestFullscreen) {
-    try { tg.requestFullscreen(); } catch (e) {}
-  }
+  /* Fullscreen (Bot API 8.0) НЕ включаем: в нём горизонтальный свайп по
+     страничному контенту будит нативный жест выхода из fullscreen — апп/меню
+     «росли и уезжали по диагонали» при листании. Обычный expand() этим не
+     страдает. Казино переживает fullscreen, т.к. его страницы не листаются
+     на уровне body (внутренние скроллеры), а у маркета длинные списки. */
   tg.disableVerticalSwipes?.();
   /* отступ под системные панели в fullscreen */
   const applyInsets = () => {
