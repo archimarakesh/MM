@@ -9,9 +9,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Cinzel:wght@600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Cinzel:wght@600;700&display=swap" rel="stylesheet"></noscript>
-<style>html{font-size:clamp(14.5px, calc(11px + 1.3vw), 20px)}
-/* размеры интерфейса заданы в rem и тянутся от корневого шрифта выше —
-   плавное масштабирование под ширину экрана без эффекта «лупы» (зума) */
+<style>/* Размеры интерфейса заданы в rem и тянутся от корневого шрифта.
+   Телефоны: до нативных 16px (мелкие — компактнее, но не крупнее натива).
+   Широкие экраны — см. @media в конце стилей (компактнее + шире). */
+html{font-size:clamp(14px, calc(12px + 1.02vw), 16px)}
 
 :root{
   --bg:#050505;
@@ -549,6 +550,18 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 #toast.show{transform:translate(-50%,0);opacity:1;visibility:visible}
 .hr{height:0.0625rem;background:var(--line);margin:1.125rem 0}
 .note{font-size:0.71875rem;color:var(--muted-2);line-height:1.6;margin-top:0.625rem}
+
+/* ── широкие экраны (планшеты/большие/десктоп): интерфейс МИНИАТЮРНЕЕ и ШИРЕ —
+   мельче шрифт (плотнее) + шире контейнер, чтобы заполнял ширину, а не раздувался.
+   В конце стилей, чтобы перебить max-width из базовых правил ── */
+@media (min-width:500px){
+  html{font-size:14px}
+  #app,.sheet,nav{max-width:44rem}
+}
+@media (min-width:720px){
+  html{font-size:13px}
+  #app,.sheet,nav{max-width:50rem}
+}
 </style>
 </head>
 <body>
