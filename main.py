@@ -2049,9 +2049,14 @@ async def api_admin_order_delete(request: Request):
     admin_user(request)
     b = await request.json()
     try:
-        await db.delete_order(str(b.get("order", "")))
+        res = await db.delete_order(str(b.get("order", "")))
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if res.get("refunded"):
+        await notify(res["user_id"],
+                     f"↩️ Ваш заказ отменён магазином — <b>{res['refunded']} ₴</b> "
+                     f"возвращены на баланс.")
+        await ws_push(res["user_id"])          # обновить баланс в приложении сразу
     return {"orders": await db.admin_orders(), "sales": await db.sales_stats()}
 
 
