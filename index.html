@@ -986,6 +986,20 @@ if (tg) {
   tg.onEvent('fullscreenChanged', applyInsets);
   applyInsets();
 }
+/* Масштаб интерфейса под ширину экрана. Дизайн рассчитан на ~390px; зумируем
+   корень, чтобы на узких телефонах всё (кнопки, карточки, иконки, картинки, текст)
+   пропорционально ужималось, а на широких — увеличивалось и заполняло экран.
+   zoom, в отличие от transform, не ломает фиксированное меню и скролл. */
+function fitScale() {
+  const el = document.documentElement;
+  el.style.zoom = '';                                 // сброс для честного замера ширины
+  const w = el.clientWidth || window.innerWidth || 390;
+  const z = Math.min(1.5, Math.max(0.75, w / 390));   // рамки, чтобы не было крайностей
+  el.style.zoom = Math.abs(z - 1) < 0.01 ? '' : z.toFixed(4);
+}
+fitScale();
+window.addEventListener('resize', fitScale);
+window.addEventListener('orientationchange', () => setTimeout(fitScale, 200));
 const tgUser = tg?.initDataUnsafe?.user;
 // deep-link из казино: startapp=topup_<токен> → сразу на пополнение без пина
 window._wantTopup = (tg?.initDataUnsafe?.start_param || '').startsWith('topup');
