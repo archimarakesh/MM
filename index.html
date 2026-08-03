@@ -555,11 +555,9 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
    мельче шрифт (плотнее) + шире контейнер, чтобы заполнял ширину, а не раздувался.
    В конце стилей, чтобы перебить max-width из базовых правил ── */
 @media (min-width:500px){
-  html{font-size:14px}
   #app,.sheet,nav{max-width:44rem}
 }
 @media (min-width:720px){
-  html{font-size:13px}
   #app,.sheet,nav{max-width:50rem}
 }
 </style>
@@ -1002,6 +1000,25 @@ if (tg) {
   tg.onEvent('fullscreenChanged', applyInsets);
   applyInsets();
 }
+/* Корневой размер шрифта = масштаб всего интерфейса (всё в rem). Учитываем И
+   ширину, И ВЫСОТУ экрана: по одной ширине 4.7" (375×667) не отличить от 6.1"
+   (390×844), а маленький короткий экран должен ужиматься сильнее, чтобы всё
+   помещалось. Широкие экраны — компактный фикс. Считаем в JS (не vh в CSS),
+   чтобы шрифт не «прыгал» при временных изменениях вьюпорта (клавиатура/жесты);
+   пересчёт только при повороте и когда вьюпорт Telegram устаканился. */
+function fitFont() {
+  const el = document.documentElement;
+  const w = el.clientWidth || window.innerWidth || 390;
+  const h = el.clientHeight || window.innerHeight || 800;
+  let fs;
+  if (w >= 720) fs = 13;                 // планшеты/большие — компактнее
+  else if (w >= 500) fs = 14;            // широкие/большие телефоны — компактнее
+  else fs = Math.max(13, Math.min(16, 4 + 0.77 * w / 100 + 1.06 * h / 100));
+  el.style.fontSize = fs.toFixed(2) + 'px';   // 4.7" (375×667)→~14, 6.1" (390×844)→16
+}
+fitFont();
+window.addEventListener('orientationchange', () => setTimeout(fitFont, 300));
+if (tg && tg.onEvent) tg.onEvent('viewportChanged', e => { if (!e || e.isStateStable !== false) fitFont(); });
 const tgUser = tg?.initDataUnsafe?.user;
 // deep-link из казино: startapp=topup_<токен> → сразу на пополнение без пина
 window._wantTopup = (tg?.initDataUnsafe?.start_param || '').startsWith('topup');
