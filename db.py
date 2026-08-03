@@ -781,17 +781,41 @@ async def order_decide(order_code: str, approve: bool) -> dict:
         return {"user_id": o["user_id"], "code": order_code, "approved": approve}
 
 
-async def delete_order(order_code: str) -> None:
-    """Жёсткое удаление заказа админом (без авто-возврата средств)."""
+async def delete_order(order_code: str) -> dict:
+    """Удаление заказа админом с ВОЗВРАТОМ средств и товара, если заказ был
+    активен (оплачен / в работе / в пути) и ещё не получен. Возвращает инфо для
+    уведомления покупателя."""
     try:
         oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
     except (IndexError, ValueError):
         raise ValueError("Неверный номер заказа")
     async with _pool.acquire() as c, c.transaction():
-        tag = await c.execute("DELETE FROM orders WHERE id=$1", oid)
-        if tag == "DELETE 0":
+        o = await c.fetchrow("SELECT * FROM orders WHERE id=$1 FOR UPDATE", oid)
+        if not o:
             raise ValueError("Заказ не найден")
+        st = int(o["status"])
+        total = int(o["total"] or 0)
+        refunded = 0
+        if st in (0, 1, 2):                 # оплачен / в работе / в пути — вернуть деньги и товар
+            bonus_part = int(o["bonus_part"] or 0)
+            if o["pay"] == "balance":
+                # зеркально оплате с баланса: возвращаем сумму и бонусную часть в locked
+                await c.execute(
+                    "UPDATE users SET balance=balance+$1, locked=locked+$2 WHERE tg_id=$3",
+                    total, bonus_part, o["user_id"])
+            else:
+                # оплата картой/криптой (извне) — возвращаем как баланс магазина
+                await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                                total, o["user_id"])
+            await _restock(c, o["product_id"], o["grams"])
+            refunded = total
+        elif st == -1:                      # не оплачен — денег не брали, вернуть только товар
+            await _restock(c, o["product_id"], o["grams"])
+        await c.execute("DELETE FROM invoices WHERE order_id=$1", oid)   # снять привязанные счета
+        await c.execute("DELETE FROM orders WHERE id=$1", oid)
         await c.execute("DELETE FROM ratings WHERE order_id=$1", oid)
+    return {"user_id": int(o["user_id"]), "refunded": refunded,
+            "total": total, "status": st}
 
 
 REVIEW_MAX = 600      # максимальная длина текста отзыва
