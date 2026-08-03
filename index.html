@@ -986,24 +986,6 @@ if (tg) {
   tg.onEvent('fullscreenChanged', applyInsets);
   applyInsets();
 }
-/* Масштаб интерфейса под ширину экрана — КУСОЧНО, чтобы обычные телефоны
-   выглядели «как есть», без раздувания:
-     • ширина 390–560 (весь диапазон телефонов, включая большие) — 1:1, без зума;
-     • уже 390 (маленькие телефоны) — плавно ужимаем до 0.80, чтобы всё влезало;
-     • шире 560 (планшеты/большие экраны) — увеличиваем до 1.35, чтобы заполнить.
-   zoom, в отличие от transform, не ломает фиксированное меню и скролл. */
-function fitScale() {
-  const el = document.documentElement;
-  el.style.zoom = '';                                 // сброс для честного замера ширины
-  const w = el.clientWidth || window.innerWidth || 390;
-  let z = 1;
-  if (w < 390) z = Math.max(0.80, w / 390);           // маленькие — ужимаем
-  else if (w > 560) z = Math.min(1.35, w / 560);      // планшеты — увеличиваем
-  el.style.zoom = Math.abs(z - 1) < 0.005 ? '' : z.toFixed(4);
-}
-fitScale();
-window.addEventListener('resize', fitScale);
-window.addEventListener('orientationchange', () => setTimeout(fitScale, 200));
 const tgUser = tg?.initDataUnsafe?.user;
 // deep-link из казино: startapp=topup_<токен> → сразу на пополнение без пина
 window._wantTopup = (tg?.initDataUnsafe?.start_param || '').startsWith('topup');
