@@ -562,6 +562,93 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 @media (min-width:720px){
   #app,.sheet,nav{max-width:50rem}
 }
+
+/* ══════════ Рулетка (лотерея) ══════════ */
+.prof-row{display:flex;align-items:center;gap:12px;background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:16px;padding:14px;cursor:pointer}
+.prof-row-ic{flex:none;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;color:var(--gold-soft);background:rgba(212,175,55,.1);border:1px solid var(--line)}
+.prof-row-ic svg{width:20px;height:20px}
+.prof-row-tx{flex:1}
+.prof-row-tx b{display:block;font-size:14px;font-weight:700}
+.prof-row-tx span{font-size:11.5px;color:var(--muted)}
+.prof-row-arr{color:var(--muted);font-size:20px}
+
+.lot-top{display:flex;align-items:center;gap:12px;margin:8px 0 12px}
+.lot-title{flex:1;font-family:'Cinzel',serif;font-weight:800;font-size:20px;letter-spacing:.04em;background:linear-gradient(180deg,#fff6dc,var(--gold-soft) 50%,#b8891f);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lot-timer{font-size:12px;font-weight:800;color:#fff5da;background:linear-gradient(120deg,rgba(212,175,55,.18),rgba(184,137,31,.06));border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.lot-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:5px;margin-bottom:14px}
+.lot-tab{position:relative;text-align:center;padding:9px 6px;border-radius:10px;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;transition:.2s}
+.lot-tab.active{color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d)}
+.lot-badge{position:absolute;top:2px;right:6px;min-width:15px;height:15px;padding:0 4px;border-radius:99px;background:#e07a5f;color:#fff;font-size:9px;font-weight:800;display:none;place-items:center}
+.lot-sec{display:none;animation:lotIn .35s var(--ease)}
+.lot-sec.active{display:block}
+@keyframes lotIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.lot-card{background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:20px;padding:16px;margin-bottom:12px;position:relative;overflow:hidden}
+.lot-eyebrow{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:10px}
+.lot-podium{display:flex;justify-content:center;align-items:flex-end;gap:10px;margin-top:6px}
+.lot-pz{flex:1;max-width:120px;text-align:center}
+.lot-pz .disc{position:relative;margin:0 auto;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 42% 34%,#2a2013,#0e0b07);border:2px dashed rgba(212,175,55,.5);box-shadow:0 10px 22px rgba(0,0,0,.5),inset 0 0 18px rgba(0,0,0,.6)}
+.lot-pz.p1 .disc{width:104px;height:104px;border:2px solid var(--gold-soft);background:radial-gradient(circle at 42% 34%,#3b2c16,#120d07);box-shadow:0 14px 28px rgba(212,175,55,.3),0 0 0 7px rgba(212,175,55,.08),inset 0 0 18px rgba(0,0,0,.55)}
+.lot-pz.p2 .disc,.lot-pz.p3 .disc{width:86px;height:86px}
+.lot-pz .amt{font-family:'Cinzel',serif;font-weight:800;line-height:1;background:linear-gradient(180deg,#fff6dc,#b8891f);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lot-pz.p1 .amt{font-size:22px}.lot-pz.p2 .amt,.lot-pz.p3 .amt{font-size:17px}
+.lot-pz .cur{font-size:10px;color:var(--muted);margin-top:2px}
+.lot-pz .plc{margin-top:8px;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--gold-soft)}
+.lot-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.lot-st{background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:16px;padding:13px;text-align:center}
+.lot-st b{display:block;font-size:24px;font-weight:800;color:#fff5da;font-variant-numeric:tabular-nums;line-height:1}
+.lot-st span{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.lot-nums{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
+.lot-num{font-family:'Cinzel',serif;font-weight:800;font-size:18px;letter-spacing:.1em;padding:8px 14px;border-radius:12px;color:#120d05;background:linear-gradient(135deg,#fbe9ab,#b8891f);box-shadow:0 8px 16px rgba(184,137,31,.4)}
+.lot-num::before{content:"№";font-family:'Manrope';font-size:9px;opacity:.6;margin-right:2px;vertical-align:2px}
+.lot-bar{height:8px;border-radius:99px;background:rgba(255,255,255,.06);overflow:hidden;margin-top:14px}
+.lot-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#b8891f,var(--gold-soft))}
+.lot-hint{margin-top:8px;text-align:center;font-size:12.5px;color:var(--muted)}
+.lot-hint b{color:var(--gold-soft)}
+.lot-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:14px;border:none;border-radius:99px;font-family:'Manrope';font-weight:800;font-size:14.5px;color:#120d05;background:linear-gradient(135deg,#fbe9ab,#b8891f);cursor:pointer;box-shadow:0 10px 22px rgba(184,137,31,.32)}
+.lot-btn:active{transform:scale(.98)}
+.lot-btn.ghost{background:transparent;color:var(--gold-soft);border:1px solid var(--line);box-shadow:none}
+.lot-steps{display:flex;flex-direction:column;gap:10px}
+.lot-step{display:flex;gap:12px;align-items:flex-start;background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:16px;padding:13px}
+.lot-step .n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;color:#120d05;background:linear-gradient(135deg,var(--gold-soft),#b8891f)}
+.lot-step .tx{font-size:13.5px;line-height:1.4}
+.lot-step .tx b{color:var(--gold-soft)}
+.lot-step .tx span{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.lot-reflist{display:flex;flex-direction:column;gap:8px}
+.lot-ref{display:flex;align-items:center;gap:11px;background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:14px;padding:11px}
+.lot-ref .av{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:rgba(212,175,55,.12);color:var(--gold-soft);font-size:14px}
+.lot-ref .nm{flex:1;min-width:0}
+.lot-ref .nm b{display:block;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lot-ref .nm span{font-size:11.5px;color:var(--muted)}
+.lot-pill{flex:none;font-size:11px;font-weight:800;padding:5px 10px;border-radius:99px;white-space:nowrap}
+.lot-pill.ok{background:rgba(127,212,138,.14);color:#7fd48a}
+.lot-pill.mid{background:rgba(230,187,84,.14);color:#e6bb54}
+.lot-links{display:flex;flex-direction:column;gap:9px}
+.lot-lnk{display:flex;align-items:center;gap:13px;background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:14px;padding:14px;text-decoration:none;color:var(--txt)}
+.lot-lnk .ic{flex:none;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:18px;background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(184,137,31,.1));border:1px solid var(--line)}
+.lot-lnk .tx{flex:1}.lot-lnk .tx b{display:block;font-size:14px}.lot-lnk .tx span{font-size:12px;color:var(--muted)}
+.lot-lnk .arr{color:var(--muted);font-size:18px}
+.lot-empty{text-align:center;color:var(--muted);font-size:12.5px;padding:20px 8px;line-height:1.5}
+.lot-winbanner{margin-top:12px;padding:13px;border-radius:14px;text-align:center;background:linear-gradient(135deg,rgba(212,175,55,.16),rgba(184,137,31,.06));border:1px solid var(--gold-soft)}
+.lot-winbanner b{color:var(--gold-soft)}
+#lotOverlay{position:fixed;inset:0;z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;padding:32px 22px;text-align:center;background:radial-gradient(120% 80% at 50% 20%,rgba(30,22,8,.98),rgba(4,4,4,.99))}
+#lotOverlay.on{display:flex}
+.lot-draw-eye{font-family:'Cinzel',serif;font-weight:800;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);font-size:11px}
+.lot-draw-title{font-family:'Cinzel',serif;font-weight:800;font-size:26px;margin-top:6px;background:linear-gradient(180deg,#fff6dc,var(--gold-soft));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lot-reel{margin:28px 0 18px}
+.lot-reel .pb{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-soft);margin-bottom:12px}
+.lot-digits{display:flex;justify-content:center;gap:7px}
+.lot-dg{width:46px;height:62px;border-radius:12px;overflow:hidden;position:relative;background:linear-gradient(180deg,#1c1710,#0d0a07);border:1px solid var(--line);box-shadow:inset 0 6px 12px rgba(0,0,0,.6),inset 0 -6px 12px rgba(0,0,0,.6)}
+.lot-dg .col{position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;font-family:'Cinzel',serif;font-weight:800;font-size:33px;color:#fff5da}
+.lot-dg .col div{height:62px;display:grid;place-items:center;width:100%}
+.lot-reveal{margin-top:20px;opacity:0;transform:translateY(8px);transition:.5s var(--ease)}
+.lot-reveal.show{opacity:1;transform:none}
+.lot-reveal .who{font-size:18px;font-weight:800;color:#fff5da}
+.lot-reveal .prize{font-family:'Cinzel',serif;font-weight:800;font-size:24px;margin-top:4px;background:linear-gradient(180deg,#fff6dc,#b8891f);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lot-reveal .me{margin-top:6px;display:inline-block;font-size:12px;font-weight:800;color:#120d05;background:linear-gradient(135deg,var(--gold-soft),#b8891f);padding:4px 11px;border-radius:99px}
+#lotClose{margin-top:28px;opacity:0;transition:.4s;max-width:260px}
+#lotClose.show{opacity:1}
+#lotConfetti{position:fixed;inset:0;z-index:201;pointer-events:none;display:none}
+#lotConfetti.on{display:block}
 </style>
 </head>
 <body>
@@ -625,10 +712,36 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 
   <!-- ══ ИСТОРИЯ ══ -->
   <section class="view" id="view-history">
-    <div class="eyebrow">Ваши заказы</div>
+    <div style="display:flex;align-items:center;gap:12px;margin:8px 0 6px">
+      <div class="icon-btn" onclick="go('profile')" aria-label="Назад">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </div>
+      <div class="eyebrow" style="margin:0">Ваши заказы</div>
+    </div>
     <h1 class="page-title">История <em>покупок</em></h1>
     <p class="page-sub">Статусы заказов и трек-номера Новой Почты.</p>
     <div id="ordersList"></div>
+  </section>
+
+  <!-- ══ РУЛЕТКА (лотерея) ══ -->
+  <section class="view" id="view-lottery">
+    <div class="lot-top">
+      <div class="icon-btn" onclick="go('shop')" aria-label="Назад">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </div>
+      <div class="lot-title">Рулетка</div>
+      <div class="lot-timer" id="lotTimerChip"><span id="lotTimerText">—</span></div>
+    </div>
+    <div class="lot-tabs">
+      <div class="lot-tab active" data-lt="draw" onclick="lotGo('draw')">Розыгрыш</div>
+      <div class="lot-tab" data-lt="tasks" onclick="lotGo('tasks')">Задания<i class="lot-badge" id="lotTasksBadge"></i></div>
+      <div class="lot-tab" data-lt="help" onclick="lotGo('help')">Помощь</div>
+    </div>
+    <div class="lot-body">
+      <div class="lot-sec active" id="lot-draw"></div>
+      <div class="lot-sec" id="lot-tasks"></div>
+      <div class="lot-sec" id="lot-help"></div>
+    </div>
   </section>
 
   <!-- ══ МОИ РЕФЕРАЛЫ ══ -->
@@ -686,6 +799,15 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
           <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
         </button>
       </div>
+    </div>
+
+    <div class="section-head" style="margin-top:12px"><h2>Мои покупки</h2></div>
+    <div class="prof-row" onclick="go('history')">
+      <div class="prof-row-ic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      </div>
+      <div class="prof-row-tx"><b>История заказов</b><span>Статусы и трек-номера Новой Почты</span></div>
+      <div class="prof-row-arr">›</div>
     </div>
   </section>
 
@@ -749,9 +871,9 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4-3.2-7-8-7 0 4.5 3.2 7 8 7z"/><path d="M12 14c0-5 3.2-8 8-8 0 5.5-3.2 8-8 8z"/></svg>
       <span>E-Grow</span>
     </div>
-    <div class="nav-item" data-v="history" onclick="go('history')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      <span>История</span>
+    <div class="nav-item" data-v="lottery" onclick="go('lottery')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.4"/><path d="M12 3v3.2M12 17.8V21M3 12h3.2M17.8 12H21M5.6 5.6l2.3 2.3M16.1 16.1l2.3 2.3M18.4 5.6l-2.3 2.3M7.9 16.1l-2.3 2.3"/></svg>
+      <span>Рулетка</span>
     </div>
     <div class="nav-item" data-v="profile" onclick="go('profile')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>
@@ -980,6 +1102,23 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 </div>
 
 <div id="toast"></div>
+
+<!-- оверлей жеребьёвки рулетки -->
+<div id="lotOverlay">
+  <div class="lot-draw-eye">Magic Market</div>
+  <div class="lot-draw-title">Розыгрыш призов</div>
+  <div class="lot-reel">
+    <div class="pb" id="lotReelPlace"></div>
+    <div class="lot-digits" id="lotReelDigits"></div>
+  </div>
+  <div class="lot-reveal" id="lotReveal">
+    <div class="who" id="lotRevWho"></div>
+    <div class="prize" id="lotRevPrize"></div>
+    <div class="me" id="lotRevMe" style="display:none">Это вы 🎉</div>
+  </div>
+  <button class="lot-btn" id="lotClose">Забрать и закрыть</button>
+</div>
+<canvas id="lotConfetti"></canvas>
 
 <script>
 /* ═══════════ Telegram ═══════════ */
@@ -1230,7 +1369,10 @@ function connectWS() {
     clearInterval(wsPing);
     wsPing = setInterval(() => { try { sock.send('p'); } catch (e) {} }, 25000);  // держим канал живым
   };
-  sock.onmessage = () => { softSync(true); adminSync(); };
+  sock.onmessage = (ev) => {
+    softSync(true); adminSync();
+    try { const d = JSON.parse(ev.data); if (d && d.t === 'lottery_draw') loadLottery(); } catch (e) {}
+  };
   sock.onclose = () => { if (ws === sock) ws = null; clearInterval(wsPing); scheduleWS(); };
   sock.onerror = () => { try { sock.close(); } catch (e) {} };
 }
@@ -1267,9 +1409,207 @@ function go(v) {
   if (v === 'topup') renderTopup();
   if (v === 'egrow') renderEgrow();
   if (v === 'referrals') renderReferrals();
+  if (v === 'lottery') loadLottery();
   const sc = document.getElementById('views'); if (sc) sc.scrollTop = 0;   // скроллер, не окно
   revealNow(el);   // синхронно — иначе кадр с opacity:0 успевает отрисоваться и раздел мигает
 }
+
+/* ═══════════ Рулетка (лотерея) ═══════════ */
+let LOT = null, lotDeadline = null, lotTimerInt = null, lotTab = 'draw';
+const lotPad5 = n => String(n).padStart(5, '0');
+const LOT_SEEN = 'mm_lottery_seen_round';
+
+function lotGo(t) {
+  haptic('light'); lotTab = t;
+  document.querySelectorAll('.lot-sec').forEach(x => x.classList.remove('active'));
+  document.getElementById('lot-' + t).classList.add('active');
+  document.querySelectorAll('.lot-tab').forEach(x => x.classList.toggle('active', x.dataset.lt === t));
+}
+async function loadLottery() {
+  if (!lotTimerInt) lotTimerInt = setInterval(lotTick, 1000);
+  try { LOT = await API.call('/api/lottery/state', {}); renderLottery(); maybeLotAnimate(); }
+  catch (e) { document.getElementById('lot-draw').innerHTML = `<div class="lot-empty">${esc(e.message || 'Розыгрыш недоступен')}</div>`; }
+}
+function lotTick() {
+  if (!lotDeadline) return;
+  const el = document.getElementById('lotTimerText'); if (!el) return;
+  const ms = lotDeadline - Date.now();
+  if (ms <= 0) { el.textContent = 'идёт розыгрыш'; return; }
+  const d = Math.floor(ms / 864e5), h = Math.floor(ms % 864e5 / 36e5), m = Math.floor(ms % 36e5 / 6e4), s = Math.floor(ms % 6e4 / 1e3);
+  el.textContent = (d ? d + 'д ' : '') + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+function renderLottery() {
+  if (!LOT) return;
+  lotDeadline = LOT.round.deadline ? new Date(LOT.round.deadline).getTime() : null;
+  renderLotDraw(); renderLotTasks(); renderLotHelp(); lotTick();
+}
+function lotPodium(prizes) {
+  const order = [1, 0, 2], places = ['2 место', '1 место', '3 место'], cls = ['p2', 'p1', 'p3'];
+  return `<div class="lot-podium">` + order.map((idx, i) => {
+    if (prizes[idx] == null) return '';
+    return `<div class="lot-pz ${cls[i]}"><div class="disc"><div><div class="amt">${fmt(prizes[idx])}</div><div class="cur">₴</div></div></div><div class="plc">${places[i]}</div></div>`;
+  }).join('') + `</div>`;
+}
+function renderLotDraw() {
+  const me = LOT.me, st = LOT.stats, need = me.need || 3;
+  let my;
+  if (me.numbers.length) {
+    my = `<div class="lot-nums">${me.numbers.map(n => `<div class="lot-num">${lotPad5(n)}</div>`).join('')}</div>` + lotProgress(me);
+  } else {
+    let msg = me.eligible
+      ? `Приглашай друзей: до первого числа осталось <b>${need - (me.confirmed % need || 0)}</b> из ${need}.`
+      : `Сначала <b>подпишись на канал и чат</b> — это условие участия.`;
+    my = `<div class="lot-hint">${msg}</div>` + lotProgress(me) +
+      `<button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Выполнить задания →</button>`;
+  }
+  let result = '';
+  const last = LOT.last_result;
+  if (last && last.winners.length) {
+    const mine = last.winners.filter(w => w.is_me);
+    let banner = '';
+    if (mine.length) { const sum = mine.reduce((a, w) => a + w.prize, 0); banner = `<div class="lot-winbanner">🎉 Вы выиграли <b>${fmt(sum)} ₴</b> в прошлом розыгрыше! Приз на балансе.</div>`; }
+    const rows = last.winners.map(w => `<div class="lot-ref" style="margin-top:8px"><div class="av">${w.place}</div><div class="nm"><b>${w.is_me ? 'Вы' : esc(w.name)}</b><span>число №${lotPad5(w.number)}</span></div><div class="lot-pill ok">${fmt(w.prize)} ₴</div></div>`).join('');
+    result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${banner}${rows}</div>`;
+  }
+  document.getElementById('lot-draw').innerHTML =
+    `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
+    `<div class="lot-stats"><div class="lot-st"><b>${fmt(st.participants)}</b><span>участников</span></div><div class="lot-st"><b>${fmt(st.tickets)}</b><span>чисел в игре</span></div></div>` +
+    `<div class="lot-card" style="margin-top:12px"><div class="lot-eyebrow">Мои числа в розыгрыше</div>${my}</div>` + result;
+}
+function lotProgress(me) {
+  const need = me.need || 3, inGroup = me.pending % need, left = need - inGroup;
+  return `<div class="lot-bar"><i style="width:${me.numbers.length ? 100 : Math.round(inGroup / need * 100)}%"></i></div>` +
+    `<div class="lot-hint">Подтверждено друзей: <b>${me.confirmed}</b> · до следующего числа ещё <b>${left === need && !me.pending ? need : left}</b></div>`;
+}
+function renderLotTasks() {
+  const me = LOT.me, L = LOT.links;
+  const subRow = (ok, label, url) => `<a class="lot-lnk" href="${url}" target="_blank" rel="noopener"><div class="ic">${ok ? '✅' : '📣'}</div><div class="tx"><b>${label}</b><span>${ok ? 'Вы подписаны' : 'Подпишитесь, чтобы участвовать'}</span></div><div class="lot-pill ${ok ? 'ok' : 'mid'}">${ok ? 'готово' : 'подписаться'}</div></a>`;
+  const steps = [
+    ['Подпишись на канал и чат', 'Обязательное условие участия'],
+    ['Пригласи 3 друзей', 'Каждый друг тоже подписывается на канал и чат'],
+    ['Получи число в розыгрыше', 'За каждые 3 друга — ещё одно число. Больше чисел — больше шансов'],
+    ['Жди розыгрыш', 'По таймеру случайное число определит победителей'],
+  ].map((s, i) => `<div class="lot-step"><div class="n">${i + 1}</div><div class="tx"><b>${s[0]}</b><span>${s[1]}</span></div></div>`).join('');
+  const refs = LOT.referrals;
+  const pend = refs.filter(r => r.status === 'pending').length;
+  const badge = document.getElementById('lotTasksBadge');
+  if (pend) { badge.style.display = 'grid'; badge.textContent = pend; } else badge.style.display = 'none';
+  let refHtml;
+  if (!refs.length) refHtml = `<div class="lot-empty">Пока никого. Пригласи друзей — и они появятся здесь со статусом.</div>`;
+  else refHtml = refs.map(r => {
+    const nm = r.name || 'друг', ini = (nm.trim()[0] || '?').toUpperCase();
+    let pill, note;
+    if (r.status === 'ticketed') { pill = `<div class="lot-pill ok">✓ в числе</div>`; note = 'засчитан, вошёл в число'; }
+    else if (r.status === 'counted') { pill = `<div class="lot-pill ok">✓ засчитан</div>`; note = 'все условия выполнены'; }
+    else { const ch = r.sub_channel === 'yes', cht = r.sub_chat === 'yes'; note = (!ch && !cht) ? 'нет подписки на канал и чат' : (!ch ? 'нет подписки на канал' : 'нет подписки на чат'); pill = `<div class="lot-pill mid">ждём</div>`; }
+    return `<div class="lot-ref"><div class="av">${esc(ini)}</div><div class="nm"><b>${esc(nm)}</b><span>${note}</span></div>${pill}</div>`;
+  }).join('');
+  document.getElementById('lot-tasks').innerHTML =
+    `<div class="lot-card"><div class="lot-eyebrow">Как участвовать</div><div class="lot-steps">${steps}</div></div>` +
+    `<div class="lot-card"><div class="lot-eyebrow">Подписки — условие участия</div>${subRow(me.sub_channel === 'yes', 'Канал магазина', L.channel)}<div style="height:8px"></div>${subRow(me.sub_chat === 'yes', 'Чат магазина', L.chat)}</div>` +
+    `<div class="lot-card"><div class="lot-eyebrow">Приглашай друзей</div><div class="lot-hint" style="margin-top:0">За каждые <b>${me.need}</b> друзей — <b>+1 число</b>. Друг заходит в маркет, забирает бонус и подписывается.</div><button class="lot-btn" style="margin-top:12px" onclick="lotShareRef()">🔗 Пригласить друга</button><button class="lot-btn ghost" style="margin-top:9px" onclick="lotCopyRef()">Скопировать ссылку</button></div>` +
+    `<div class="lot-card"><div class="lot-eyebrow">Мои приглашённые</div><div class="lot-hint" style="margin-top:0;font-size:11.5px">Зелёный — прошёл все условия и засчитан. Жёлтый — пригласил, ждём подписку.</div><div class="lot-reflist" style="margin-top:10px">${refHtml}</div><button class="lot-btn ghost" style="margin-top:12px" onclick="loadLottery()">↻ Обновить статусы</button></div>`;
+}
+function renderLotHelp() {
+  const L = LOT.links;
+  const items = [
+    ['🛟', 'Тех. поддержка', 'Написать оператору', L.support],
+    ['🛍', 'Magic Market', 'Магазин', L.market],
+    ['🎰', 'Magic Casino', 'Казино', L.casino],
+    ['💬', 'Чат', 'Общий чат сообщества', L.chat],
+    ['📣', 'Канал', 'Новости и акции', L.channel],
+  ].filter(x => x[3]);
+  document.getElementById('lot-help').innerHTML =
+    `<div class="lot-card"><div class="lot-eyebrow">Кто считается рефералом</div><p style="font-size:13px;line-height:1.6;color:var(--muted)">Реферал — друг, который перешёл <b style="color:var(--gold-soft)">по твоей ссылке</b> и подписался на <b style="color:var(--gold-soft)">канал и чат</b> магазина. Каждого человека можно засчитать <b style="color:var(--gold-soft)">только один раз</b>: в следующем розыгрыше нужны новые друзья.</p></div>` +
+    `<div class="lot-card"><div class="lot-eyebrow">Ссылки</div><div class="lot-links">` +
+    items.map(([ic, t, s, u]) => `<a class="lot-lnk" href="${u}" target="_blank" rel="noopener"><div class="ic">${ic}</div><div class="tx"><b>${t}</b><span>${s}</span></div><div class="arr">›</div></a>`).join('') +
+    `</div></div>`;
+}
+function lotShareRef() {
+  haptic('medium'); const url = LOT?.ref_link || ''; if (!url) return;
+  const text = '🎰 Розыгрыш в Magic Market! Забери 100 ₴ приветственный бонус и участвуй в лотерее — призы до 5000 ₴ на баланс.';
+  const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+  if (tg?.openTelegramLink) tg.openTelegramLink(share); else window.open(share, '_blank');
+}
+async function lotCopyRef() {
+  const url = LOT?.ref_link || ''; if (!url) return;
+  try { await navigator.clipboard.writeText(url); } catch (e) { const t = document.createElement('textarea'); t.value = url; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast('Ссылка скопирована'); haptic();
+}
+
+/* анимация жеребьёвки */
+const LOT_CELL = 62;
+function maybeLotAnimate() {
+  const last = LOT?.last_result; if (!last || !last.winners.length) return;
+  if (!document.getElementById('view-lottery').classList.contains('active')) return;
+  const seen = Number(localStorage.getItem(LOT_SEEN) || 0);
+  if (last.round > seen) playLotDraw(last);
+}
+function lotDigitCols(finalStr) {
+  const wrap = document.getElementById('lotReelDigits'); wrap.innerHTML = '';
+  const cells = [];
+  for (const ch of finalStr) {
+    const dg = document.createElement('div'); dg.className = 'lot-dg';
+    const col = document.createElement('div'); col.className = 'col';
+    let seq = ''; for (let i = 0; i < 26; i++) seq += Math.floor(Math.random() * 10);
+    seq += ch;
+    col.innerHTML = [...seq].map(d => `<div>${d}</div>`).join('');
+    dg.appendChild(col); wrap.appendChild(dg); cells.push({ col, len: seq.length });
+  }
+  return cells;
+}
+function spinLotReel(finalNum) {
+  return new Promise(res => {
+    const cells = lotDigitCols(lotPad5(finalNum));
+    cells.forEach((c, i) => {
+      c.col.style.transition = 'none'; c.col.style.transform = 'translateY(0)';
+      const targetY = -(c.len - 1) * LOT_CELL;
+      requestAnimationFrame(() => {
+        c.col.style.transition = `transform ${1.5 + i * 0.28}s cubic-bezier(.15,.85,.2,1)`;
+        c.col.style.transform = `translateY(${targetY}px)`;
+      });
+    });
+    setTimeout(res, 1500 + cells.length * 280 + 250);
+  });
+}
+async function playLotDraw(last) {
+  const ov = document.getElementById('lotOverlay'); ov.classList.add('on');
+  const rev = document.getElementById('lotReveal'); rev.classList.remove('show');
+  document.getElementById('lotClose').classList.remove('show'); document.getElementById('lotRevMe').style.display = 'none';
+  const winners = [...last.winners].sort((a, b) => b.place - a.place);
+  const pn = { 1: '1 место', 2: '2 место', 3: '3 место' };
+  for (const w of winners) {
+    document.getElementById('lotReelPlace').textContent = pn[w.place] || (w.place + ' место');
+    rev.classList.remove('show'); document.getElementById('lotRevMe').style.display = 'none';
+    haptic('light');
+    await spinLotReel(w.number);
+    haptic('heavy');
+    document.getElementById('lotRevWho').textContent = w.is_me ? 'Вы 🎉' : w.name;
+    document.getElementById('lotRevPrize').textContent = fmt(w.prize) + ' ₴';
+    document.getElementById('lotRevMe').style.display = w.is_me ? 'inline-block' : 'none';
+    rev.classList.add('show');
+    if (w.place === 1) lotBurst();
+    await new Promise(r => setTimeout(r, w.place === 1 ? 1500 : 1100));
+  }
+  document.getElementById('lotClose').classList.add('show');
+}
+function lotBurst() {
+  const cv = document.getElementById('lotConfetti'); cv.classList.add('on');
+  const ctx = cv.getContext('2d'), W = cv.width = innerWidth, H = cv.height = innerHeight;
+  const cols = ['#f3d27a', '#d4af37', '#b8891f', '#fff5da', '#e8c96a'], P = [];
+  for (let i = 0; i < 130; i++) P.push({ x: W / 2 + (Math.random() - .5) * W * .3, y: H * .28, vx: (Math.random() - .5) * 9, vy: Math.random() * -11 - 4, g: .32 + Math.random() * .18, s: 5 + Math.random() * 7, c: cols[i % cols.length], r: Math.random() * 6.28, vr: (Math.random() - .5) * .3, a: 1 });
+  let t = 0;
+  (function loop() {
+    ctx.clearRect(0, 0, W, H); t++;
+    P.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += p.g; p.r += p.vr; if (t > 60) p.a -= .012; ctx.save(); ctx.globalAlpha = Math.max(0, p.a); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c; ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * .6); ctx.restore(); });
+    if (t < 170) requestAnimationFrame(loop); else ctx.clearRect(0, 0, W, H);
+  })();
+}
+document.getElementById('lotClose').onclick = () => {
+  if (LOT?.last_result) localStorage.setItem(LOT_SEEN, LOT.last_result.round);
+  document.getElementById('lotOverlay').classList.remove('on'); document.getElementById('lotConfetti').classList.remove('on');
+  haptic(); renderLottery();
+};
 
 /* ═══════════ Шторки ═══════════ */
 function openSheet(name) {
