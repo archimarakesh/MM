@@ -576,6 +576,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 .lot-title{flex:1;font-family:'Cinzel',serif;font-weight:800;font-size:20px;letter-spacing:.04em;background:linear-gradient(180deg,#fff6dc,var(--gold-soft) 50%,#b8891f);-webkit-background-clip:text;background-clip:text;color:transparent}
 .lot-timer{font-size:12px;font-weight:800;color:#fff5da;background:linear-gradient(120deg,rgba(212,175,55,.18),rgba(184,137,31,.06));border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .lot-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:5px;margin-bottom:14px}
+.lot-tabs-2{grid-template-columns:repeat(2,1fr)}
 .lot-tab{position:relative;text-align:center;padding:9px 6px;border-radius:10px;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;transition:.2s}
 .lot-tab.active{color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d)}
 .lot-badge{position:absolute;top:2px;right:6px;min-width:15px;height:15px;padding:0 4px;border-radius:99px;background:#e07a5f;color:#fff;font-size:9px;font-weight:800;display:none;place-items:center}
@@ -732,15 +733,13 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
       <div class="lot-title">Рулетка</div>
       <div class="lot-timer" id="lotTimerChip"><span id="lotTimerText">—</span></div>
     </div>
-    <div class="lot-tabs">
+    <div class="lot-tabs lot-tabs-2">
       <div class="lot-tab active" data-lt="draw" onclick="lotGo('draw')">Розыгрыш</div>
       <div class="lot-tab" data-lt="tasks" onclick="lotGo('tasks')">Задания<i class="lot-badge" id="lotTasksBadge"></i></div>
-      <div class="lot-tab" data-lt="help" onclick="lotGo('help')">Помощь</div>
     </div>
     <div class="lot-body">
       <div class="lot-sec active" id="lot-draw"></div>
       <div class="lot-sec" id="lot-tasks"></div>
-      <div class="lot-sec" id="lot-help"></div>
     </div>
   </section>
 
@@ -1371,7 +1370,7 @@ function connectWS() {
   };
   sock.onmessage = (ev) => {
     softSync(true); adminSync();
-    try { const d = JSON.parse(ev.data); if (d && d.t === 'lottery_draw') loadLottery(); } catch (e) {}
+    try { const d = JSON.parse(ev.data); if (d && (d.t === 'lottery_draw' || d.t === 'lottery_start')) loadLottery(); } catch (e) {}
   };
   sock.onclose = () => { if (ws === sock) ws = null; clearInterval(wsPing); scheduleWS(); };
   sock.onerror = () => { try { sock.close(); } catch (e) {} };
@@ -1431,8 +1430,9 @@ async function loadLottery() {
   catch (e) { document.getElementById('lot-draw').innerHTML = `<div class="lot-empty">${esc(e.message || 'Розыгрыш недоступен')}</div>`; }
 }
 function lotTick() {
-  if (!lotDeadline) return;
   const el = document.getElementById('lotTimerText'); if (!el) return;
+  if (!LOT || !LOT.running) { el.textContent = 'не запущен'; return; }
+  if (!lotDeadline) { el.textContent = '—'; return; }
   const ms = lotDeadline - Date.now();
   if (ms <= 0) { el.textContent = 'идёт розыгрыш'; return; }
   const d = Math.floor(ms / 864e5), h = Math.floor(ms % 864e5 / 36e5), m = Math.floor(ms % 36e5 / 6e4), s = Math.floor(ms % 6e4 / 1e3);
@@ -1441,7 +1441,7 @@ function lotTick() {
 function renderLottery() {
   if (!LOT) return;
   lotDeadline = LOT.round.deadline ? new Date(LOT.round.deadline).getTime() : null;
-  renderLotDraw(); renderLotTasks(); renderLotHelp(); lotTick();
+  renderLotDraw(); renderLotTasks(); lotTick();
 }
 function lotPodium(prizes) {
   const order = [1, 0, 2], places = ['2 место', '1 место', '3 место'], cls = ['p2', 'p1', 'p3'];
@@ -1452,6 +1452,20 @@ function lotPodium(prizes) {
 }
 function renderLotDraw() {
   const me = LOT.me, st = LOT.stats, need = me.need || 3;
+  // розыгрыш ещё не запущен — показываем анонс с призами и без счётчиков
+  if (!LOT.running) {
+    let result = '';
+    const last = LOT.last_result;
+    if (last && last.winners.length) {
+      const rows = last.winners.map(w => `<div class="lot-ref" style="margin-top:8px"><div class="av">${w.place}</div><div class="nm"><b>${w.is_me ? 'Вы' : esc(w.name)}</b><span>число №${lotPad5(w.number)}</span></div><div class="lot-pill ok">${fmt(w.prize)} ₴</div></div>`).join('');
+      result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${rows}</div>`;
+    }
+    document.getElementById('lot-draw').innerHTML =
+      `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
+      `<div class="lot-card" style="text-align:center"><div class="lot-eyebrow">Розыгрыш скоро</div><div class="lot-hint" style="margin-top:0">Старт объявим отдельно. Уже сейчас можно <b>подписаться на канал и чат</b> и <b>пригласить друзей</b> — как только отсчёт запустится, они пойдут в зачёт.</div><button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Подготовиться →</button></div>` +
+      result;
+    return;
+  }
   let my;
   if (me.numbers.length) {
     my = `<div class="lot-nums">${me.numbers.map(n => `<div class="lot-num">${lotPad5(n)}</div>`).join('')}</div>` + lotProgress(me);
@@ -1508,22 +1522,8 @@ function renderLotTasks() {
     `<div class="lot-card"><div class="lot-eyebrow">Как участвовать</div><div class="lot-steps">${steps}</div></div>` +
     `<div class="lot-card"><div class="lot-eyebrow">Подписки — условие участия</div>${subRow(me.sub_channel === 'yes', 'Канал магазина', L.channel)}<div style="height:8px"></div>${subRow(me.sub_chat === 'yes', 'Чат магазина', L.chat)}</div>` +
     `<div class="lot-card"><div class="lot-eyebrow">Приглашай друзей</div><div class="lot-hint" style="margin-top:0">За каждые <b>${me.need}</b> друзей — <b>+1 число</b>. Друг заходит в маркет, забирает бонус и подписывается.</div><button class="lot-btn" style="margin-top:12px" onclick="lotShareRef()">🔗 Пригласить друга</button><button class="lot-btn ghost" style="margin-top:9px" onclick="lotCopyRef()">Скопировать ссылку</button></div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Мои приглашённые</div><div class="lot-hint" style="margin-top:0;font-size:11.5px">Зелёный — прошёл все условия и засчитан. Жёлтый — пригласил, ждём подписку.</div><div class="lot-reflist" style="margin-top:10px">${refHtml}</div><button class="lot-btn ghost" style="margin-top:12px" onclick="loadLottery()">↻ Обновить статусы</button></div>`;
-}
-function renderLotHelp() {
-  const L = LOT.links;
-  const items = [
-    ['🛟', 'Тех. поддержка', 'Написать оператору', L.support],
-    ['🛍', 'Magic Market', 'Магазин', L.market],
-    ['🎰', 'Magic Casino', 'Казино', L.casino],
-    ['💬', 'Чат', 'Общий чат сообщества', L.chat],
-    ['📣', 'Канал', 'Новости и акции', L.channel],
-  ].filter(x => x[3]);
-  document.getElementById('lot-help').innerHTML =
-    `<div class="lot-card"><div class="lot-eyebrow">Кто считается рефералом</div><p style="font-size:13px;line-height:1.6;color:var(--muted)">Реферал — друг, который перешёл <b style="color:var(--gold-soft)">по твоей ссылке</b> и подписался на <b style="color:var(--gold-soft)">канал и чат</b> магазина. Каждого человека можно засчитать <b style="color:var(--gold-soft)">только один раз</b>: в следующем розыгрыше нужны новые друзья.</p></div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Ссылки</div><div class="lot-links">` +
-    items.map(([ic, t, s, u]) => `<a class="lot-lnk" href="${u}" target="_blank" rel="noopener"><div class="ic">${ic}</div><div class="tx"><b>${t}</b><span>${s}</span></div><div class="arr">›</div></a>`).join('') +
-    `</div></div>`;
+    `<div class="lot-card"><div class="lot-eyebrow">Мои приглашённые</div><div class="lot-hint" style="margin-top:0;font-size:11.5px">Зелёный — прошёл все условия и засчитан. Жёлтый — пригласил, ждём подписку.</div><div class="lot-reflist" style="margin-top:10px">${refHtml}</div><button class="lot-btn ghost" style="margin-top:12px" onclick="loadLottery()">↻ Обновить статусы</button></div>` +
+    `<div class="lot-card"><div class="lot-eyebrow">Кто считается рефералом</div><p style="font-size:12.5px;line-height:1.6;color:var(--muted);margin:0">Реферал — друг, который перешёл <b style="color:var(--gold-soft)">по твоей ссылке</b> и подписался на <b style="color:var(--gold-soft)">канал и чат</b> магазина. Каждого можно засчитать <b style="color:var(--gold-soft)">только один раз</b>: в следующем розыгрыше нужны новые друзья.</p></div>`;
 }
 function lotShareRef() {
   haptic('medium'); const url = LOT?.ref_link || ''; if (!url) return;
@@ -1669,7 +1669,7 @@ document.querySelectorAll('.sheet').forEach(sh => {
 });
 
 /* свайп влево/вправо — листание основных разделов */
-const SWIPE_VIEWS = ['shop', 'egrow', 'history', 'profile', 'support'];
+const SWIPE_VIEWS = ['shop', 'egrow', 'lottery', 'profile', 'support'];
 function swipeGo(v, dir) {
   // раздел сейчас скрыт — менять классы безопасно, анимация не запустится раньше времени
   const el = document.getElementById('view-' + v);
@@ -3076,7 +3076,7 @@ function renderAdmin(tab) {
     ['orders', 'Заказы' + (ordersTodo ? ` · ${ordersTodo}${dot}` : '')],
     ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}${dot}` : '')],
     ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}${dot}` : '')],
-    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['reviews', 'Отзывы'], ['pay', 'Оплата'],
+    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['lottery', 'Рулетка'], ['reviews', 'Отзывы'], ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
     `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
@@ -3247,6 +3247,9 @@ function renderAdmin(tab) {
       if (adminTab !== 'reviews') return;
       renderAdminReviews(d.reviews || []);
     }).catch(() => { if (adminTab === 'reviews') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
+  } else if (tab === 'lottery') {
+    b.innerHTML = '<p class="note">Загрузка…</p>';
+    renderAdminLottery();
   } else if (tab === 'refs') {
     b.innerHTML = '<p class="note">Загрузка…</p>';
     API.call('/api/admin/referrals').then(d => {
@@ -3287,6 +3290,68 @@ function renderAdmin(tab) {
       <button class="btn btn-gold" onclick="savePay()">Сохранить реквизиты</button>
       <p class="note" style="margin-top:8px">ETH и BNB зачисляются автоматически только при заданном ключе Etherscan (env ETHERSCAN_API_KEY). Без него — оставьте эти поля пустыми.</p>`;
   }
+}
+async function renderAdminLottery() {
+  const b = document.getElementById('adminBody');
+  let d;
+  try { d = await API.call('/api/admin/lottery'); }
+  catch (e) { if (adminTab === 'lottery') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; return; }
+  if (adminTab !== 'lottery') return;
+  const dt = s => s ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+  const def = d.defaults || { days: 14, prizes: [5000, 2500, 1000], per_ticket: 3 };
+  let last = '';
+  if (d.last && d.last.winners && d.last.winners.length) {
+    last = `<div class="section-head" style="margin-top:14px"><h2>Прошлый розыгрыш</h2><span>${dt(d.last.drawn_at)}</span></div>` +
+      d.last.winners.map(w => `<div class="set-row"><div><h3>${w.place} место · ${fmt(w.prize)} ₴</h3><p>${esc(w.name)} · число №${String(w.number).padStart(5, '0')}</p></div></div>`).join('');
+  }
+  if (d.running) {
+    const r = d.round;
+    b.innerHTML = `
+      <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
+        <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:15px">Розыгрыш идёт</h2><span>до ${dt(r.deadline)}</span></div>
+        <div class="admin-stats">
+          <div><b>${fmt(d.stats.participants)}</b><span>участников</span></div>
+          <div><b>${fmt(d.stats.tickets)}</b><span>чисел в игре</span></div>
+          <div><b style="color:var(--gold-soft)">${(r.prizes || []).map(p => fmt(p)).join(' · ')} ₴</b><span>призы (1-2-3 место)</span></div>
+        </div>
+      </div></div>
+      <p class="note" style="margin:0 0 10px">Отсчёт идёт, рефералы засчитываются. Можно провести розыгрыш прямо сейчас (иначе он пройдёт сам в момент дедлайна) или отменить круг без розыгрыша.</p>
+      <button class="btn btn-gold" onclick="lotAdminDraw()">🎲 Провести розыгрыш сейчас</button>
+      <button class="btn btn-ghost" style="margin-top:10px" onclick="lotAdminCancel()">Отменить круг (без розыгрыша)</button>
+      ${last}`;
+  } else {
+    b.innerHTML = `
+      <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Задайте срок и призы и нажмите «Запустить».</p>
+      <div class="field"><label>Длительность, дней</label><input id="lotDays" inputmode="numeric" value="${def.days}"></div>
+      <div class="field"><label>Призы через запятую (1-е, 2-е, 3-е…), ₴</label><input id="lotPrizes" value="${(def.prizes || []).join(',')}"></div>
+      <p class="note" style="margin:2px 0 10px">Одно число даётся за каждые ${def.per_ticket} приглашённых. Приз — за каждое выигравшее число.</p>
+      <button class="btn btn-gold" onclick="lotAdminStart()">🚀 Запустить розыгрыш</button>
+      ${last}`;
+  }
+}
+function lotConfirm(msg, cb) {
+  if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) cb(); });
+  else if (window.confirm(msg)) cb();
+}
+async function lotAdminStart() {
+  const days = parseInt(document.getElementById('lotDays').value, 10) || 14;
+  const prizes = (document.getElementById('lotPrizes').value || '').trim();
+  lotConfirm(`Запустить розыгрыш на ${days} дн.? Отсчёт и зачёт рефералов начнутся сразу.`, async () => {
+    try { await API.call('/api/admin/lottery/start', { days, prizes }); toast('Розыгрыш запущен'); haptic('medium'); renderAdminLottery(); }
+    catch (e) { toast(e.message || 'Ошибка'); }
+  });
+}
+async function lotAdminDraw() {
+  lotConfirm('Провести розыгрыш сейчас? Победители определятся случайно, призы зачислятся на баланс.', async () => {
+    try { await API.call('/api/admin/lottery/draw'); toast('Розыгрыш проведён'); haptic('heavy'); renderAdminLottery(); }
+    catch (e) { toast(e.message || 'Ошибка'); }
+  });
+}
+async function lotAdminCancel() {
+  lotConfirm('Отменить круг без розыгрыша? Призы не начислятся.', async () => {
+    try { await API.call('/api/admin/lottery/cancel'); toast('Круг отменён'); renderAdminLottery(); }
+    catch (e) { toast(e.message || 'Ошибка'); }
+  });
 }
 function renderAdminReviews(list) {
   const b = document.getElementById('adminBody');

@@ -2744,9 +2744,21 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
 
 
 # ── Розыгрыш (лотерея) ────────────────────────────────────────────────────────
-async def lottery_ensure_round(days: int, prizes: str) -> dict:
-    """Текущий открытый круг; если открытого нет — создаём со сроком now()+days."""
+async def lottery_open_round() -> dict | None:
+    """Текущий открытый (запущенный) круг или None. НЕ создаёт круг сам —
+    розыгрыш запускается вручную из админки."""
     async with _pool.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT * FROM lottery_rounds WHERE status='open' ORDER BY id DESC LIMIT 1")
+        return dict(row) if row else None
+
+
+async def lottery_start(days: int, prizes: str) -> dict:
+    """Запустить круг вручную: создаёт открытый круг со сроком now()+days, если
+    открытого ещё нет (иначе возвращает текущий). С этого момента идёт отсчёт и
+    засчитываются рефералы."""
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("SELECT pg_advisory_xact_lock(hashtext($1))", "lotstart")
         row = await c.fetchrow(
             "SELECT * FROM lottery_rounds WHERE status='open' ORDER BY id DESC LIMIT 1")
         if not row:
@@ -2755,6 +2767,14 @@ async def lottery_ensure_round(days: int, prizes: str) -> dict:
                 "VALUES('open', now() + make_interval(days => $1), $2) RETURNING *",
                 int(days), str(prizes))
         return dict(row)
+
+
+async def lottery_cancel(round_id: int) -> None:
+    """Отменить запущенный круг без розыгрыша (закрыть без победителей)."""
+    async with _pool.acquire() as c:
+        await c.execute(
+            "UPDATE lottery_rounds SET status='finished', drawn_at=now() "
+            "WHERE id=$1 AND status='open'", round_id)
 
 
 async def lottery_last_finished() -> dict | None:
