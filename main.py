@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, Response
 import auth
 import db
 import guard_bot
+import lottery
 import paydome
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +47,13 @@ MAX_RECEIPT_LEN = 6_000_000  # ~4.5 МБ файла в base64
 BONUS_CHANNEL_ID = os.getenv("BONUS_CHANNEL_ID", "")
 BONUS_CHAT_ID = os.getenv("BONUS_CHAT_ID", "")
 BONUS_AMOUNT = int(os.getenv("BONUS_AMOUNT", "100") or 100)
+
+# Розыгрыш (лотерея) — раздел ВНУТРИ маркета (вкладка «Рулетка»). Подписку
+# проверяем по тем же каналу/чату, что и бонус; приглашаем через маркет-бота.
+# Ссылки для вкладки «Помощь» берём из промо-переменных + маркет и поддержка.
+LOTTERY_ENABLED = os.getenv("LOTTERY_ENABLED", "1") != "0"
+SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/magicmarket_boss")
+MARKET_BOT = os.getenv("MARKET_BOT", "Magic_Marketplace_bot")
 
 # автопостинг промо в канал (по умолчанию — в бонусный канал)
 KYIV = ZoneInfo("Europe/Kyiv")
@@ -668,6 +676,16 @@ async def ws_push(user_id: int):
             WS_CLIENTS.get(user_id, set()).discard(ws)
 
 
+async def ws_broadcast(payload: dict):
+    """Разослать событие всем открытым приложениям (например, старт розыгрыша)."""
+    for uid, conns in list(WS_CLIENTS.items()):
+        for ws in list(conns):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                conns.discard(ws)
+
+
 async def _drain_ref_notify():
     """Разослать рефереру уведомление о начислении с покупки приглашённого."""
     for r in db.pop_ref_notify():
@@ -689,10 +707,72 @@ async def notify(chat_id: int, text: str):
         log.warning("Не удалось отправить уведомление %s", chat_id)
 
 
+# ── розыгрыш (лотерея): выплаты и авто-жеребьёвка по таймеру ──────────────────
+async def _lottery_pay(round_id: int, place: int, uid: int, prize: int) -> None:
+    """Идемпотентное начисление приза победителю (op_id уникален по кругу/месту)."""
+    try:
+        await db.wallet_op(int(uid), int(prize), f"lot:{round_id}:{place}",
+                           "lottery", f"Розыгрыш · {place} место")
+        await db.lottery_mark_paid(round_id, place)
+    except Exception:
+        log.exception("Лотерея: не удалось начислить приз %s/%s", round_id, place)
+
+
+async def _lottery_reconcile() -> None:
+    """Докатить призы, которые не успели начислиться (после сбоя/рестарта)."""
+    try:
+        for w in await db.lottery_unpaid_winners():
+            await _lottery_pay(w["round_id"], w["place"], w["user_id"], w["prize"])
+    except Exception:
+        log.exception("Лотерея: сверка выплат не удалась")
+
+
+async def _run_lottery_draw(rnd: dict) -> None:
+    """Провести розыгрыш круга: тянем победителей, начисляем, уведомляем, вещаем."""
+    prizes = lottery._parse_prizes(rnd.get("prizes")) or lottery.PRIZES
+    winners = await db.lottery_draw(rnd["id"], prizes)
+    if winners is None:
+        return                                   # уже проведён кем-то другим
+    # следующий круг сразу открыт — таймер продолжается
+    await db.lottery_ensure_round(lottery.DAYS, lottery.PRIZES_STR)
+    for w in winners:
+        await _lottery_pay(rnd["id"], w["place"], w["user_id"], w["prize"])
+        await notify(w["user_id"],
+                     f"🎉 <b>Розыгрыш Magic Market!</b>\n"
+                     f"Ваше число <b>{w['number']:05d}</b> взяло <b>{w['place']} место</b> — "
+                     f"приз <b>{w['prize']} ₴</b> зачислен на баланс.")
+    await ws_broadcast({"t": "lottery_draw", "round": rnd["id"]})
+    if ADMIN_ID:
+        top = " · ".join(f"{w['place']}м {w['prize']}₴" for w in winners) or "нет участников"
+        await notify(ADMIN_ID, f"🎰 Розыгрыш #{rnd['id']} проведён: {top}")
+    log.info("Лотерея: круг #%s разыгран, победителей %s", rnd["id"], len(winners))
+
+
+async def lottery_ticker():
+    """Каждые 30с: держим открытый круг и, если дедлайн прошёл, проводим розыгрыш."""
+    await asyncio.sleep(5)
+    while True:
+        try:
+            if LOTTERY_ENABLED:
+                rnd = await db.lottery_ensure_round(lottery.DAYS, lottery.PRIZES_STR)
+                dl = rnd.get("deadline")
+                if dl and dl <= datetime.now(dl.tzinfo):
+                    await _run_lottery_draw(rnd)
+        except Exception:
+            log.exception("lottery_ticker")
+        await asyncio.sleep(30)
+
+
 # ── приложение ───────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await db.init()
+    if LOTTERY_ENABLED:
+        try:
+            await db.lottery_ensure_round(lottery.DAYS, lottery.PRIZES_STR)
+            await _lottery_reconcile()
+        except Exception:
+            log.exception("Лотерея: инициализация не удалась")
     try:
         BANNED.update(await db.banned_ids())   # восстановить гейт бана после рестарта
         log.info("Загружено забаненных: %s", len(BANNED))
@@ -731,6 +811,7 @@ async def lifespan(_: FastAPI):
     guard = asyncio.create_task(guard_bot.run(notify, on_ban=apply_ban, on_unban=apply_unban))
     card_task = asyncio.create_task(card_checker())
     delay_task = asyncio.create_task(delay_compensator())
+    lottery_task = asyncio.create_task(lottery_ticker()) if LOTTERY_ENABLED else None
     yield
     checker.cancel()
     tracker.cancel()
@@ -739,6 +820,8 @@ async def lifespan(_: FastAPI):
     guard.cancel()
     card_task.cancel()
     delay_task.cancel()
+    if lottery_task:
+        lottery_task.cancel()
     if menu_task:
         menu_task.cancel()
     if task:
@@ -1423,6 +1506,112 @@ async def api_bonus_claim(request: Request):
                      "Ваш приглашённый активировался — забрал приветственный бонус. "
                      "Начислено на баланс магазина.")
     return await _snap(u["id"])
+
+
+def _lottery_links() -> dict:
+    return {"channel": PROMO_CHANNEL_URL, "chat": PROMO_CHAT_URL,
+            "casino": PROMO_CASINO_URL, "market": PROMO_BUTTON_URL,
+            "support": SUPPORT_URL}
+
+
+async def _lottery_state(uid: int) -> dict:
+    rnd = await db.lottery_ensure_round(lottery.DAYS, lottery.PRIZES_STR)
+    rid = rnd["id"]
+    subs_on = bool(bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID)
+    # 1) моя подписка на канал и чат
+    if subs_on:
+        my_ch = await _member_state_cached(BONUS_CHANNEL_ID, uid)
+        my_cht = await _member_state_cached(BONUS_CHAT_ID, uid)
+    else:
+        my_ch = my_cht = "err"
+    eligible = (my_ch == "yes" and my_cht == "yes")
+    # 2) новые приглашённые → проверить подписку → подтвердить (одноразово, навсегда)
+    if subs_on:
+        cands = await db.lottery_new_candidates(uid)
+        if cands:
+            confirmed: list[int] = []
+            sem = asyncio.Semaphore(8)
+
+            async def _chk(cid):
+                async with sem:
+                    a = await _member_state_cached(BONUS_CHANNEL_ID, cid)
+                    b = await _member_state_cached(BONUS_CHAT_ID, cid)
+                if a == "yes" and b == "yes":
+                    confirmed.append(cid)
+
+            await asyncio.gather(*[_chk(x) for x in cands[:150]])
+            if confirmed:
+                await db.lottery_confirm_refs(uid, confirmed, rid)
+    # 3) выдать билеты (числа) за подтверждённых рефералов
+    grant = await db.lottery_grant_tickets(uid, rid, eligible, lottery.PER_TICKET)
+    # 4) статистика круга + мои рефералы со статусами
+    stats = await db.lottery_stats(rid)
+    refs = await db.lottery_my_referrals(uid)
+    pend = [r for r in refs if not r["counted"]]
+    if subs_on and pend:
+        sem = asyncio.Semaphore(8)
+
+        async def _en(r):
+            async with sem:
+                r["sub_channel"] = await _member_state_cached(BONUS_CHANNEL_ID, r["tg_id"])
+                r["sub_chat"] = await _member_state_cached(BONUS_CHAT_ID, r["tg_id"])
+
+        await asyncio.gather(*[_en(r) for r in pend])
+    ref_out = []
+    for r in refs:
+        status = "ticketed" if r["ticketed"] else ("counted" if r["counted"] else "pending")
+        ref_out.append({
+            "name": r.get("name") or "друг",
+            "status": status,
+            "sub_channel": r.get("sub_channel", "yes" if r["counted"] else "err"),
+            "sub_chat": r.get("sub_chat", "yes" if r["counted"] else "err"),
+        })
+    # 5) последний завершённый круг — для анимации результата и итогов
+    last = await db.lottery_last_finished()
+    last_out = None
+    if last:
+        wl = await db.lottery_winners(last["id"])
+        last_out = {
+            "round": last["id"],
+            "drawn_at": last["drawn_at"].isoformat() if last.get("drawn_at") else None,
+            "winners": [{
+                "place": w["place"], "number": w["number"], "prize": w["prize"],
+                "name": w.get("name") or "участник",
+                "is_me": int(w["user_id"]) == int(uid),
+            } for w in wl],
+        }
+    return {
+        "enabled": True,
+        "subs_configured": subs_on,
+        "round": {
+            "id": rid,
+            "deadline": rnd["deadline"].isoformat() if rnd.get("deadline") else None,
+            "prizes": lottery._parse_prizes(rnd.get("prizes")) or lottery.PRIZES,
+            "per_ticket": lottery.PER_TICKET,
+            "days": lottery.DAYS,
+        },
+        "me": {
+            "id": uid, "eligible": eligible,
+            "sub_channel": my_ch, "sub_chat": my_cht,
+            "numbers": grant["numbers"], "confirmed": grant["confirmed"],
+            "pending": grant["pending"], "need": lottery.PER_TICKET,
+        },
+        "stats": stats,
+        "referrals": ref_out,
+        "last_result": last_out,
+        "links": _lottery_links(),
+        # приглашаем через МАРКЕТ-бота: друг заходит в маркет, забирает
+        # приветственный бонус и подписывается — там же учитывается рефералка
+        "ref_link": f"https://t.me/{MARKET_BOT}?start=ref_{uid}",
+    }
+
+
+@app.post("/api/lottery/state")
+async def api_lottery_state(request: Request):
+    u = tg_user(request)
+    if not LOTTERY_ENABLED:
+        raise HTTPException(400, "Розыгрыш временно недоступен")
+    return await _lottery_state(u["id"])
 
 
 @app.post("/api/pin/verify")

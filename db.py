@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import os
+import random
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -359,6 +360,43 @@ async def init():
                 cnt        INT    NOT NULL,
                 amount     BIGINT NOT NULL,
                 created    TIMESTAMPTZ NOT NULL DEFAULT now());
+            -- ── Розыгрыш (лотерея) ───────────────────────────────────────────
+            -- круг розыгрыша: открыт до дедлайна, потом разыгрывается и закрывается
+            CREATE TABLE IF NOT EXISTS lottery_rounds(
+                id       SERIAL PRIMARY KEY,
+                status   TEXT NOT NULL DEFAULT 'open',   -- open | finished
+                deadline TIMESTAMPTZ NOT NULL,
+                prizes   TEXT NOT NULL DEFAULT '5000,2500,1000',
+                drawn_at TIMESTAMPTZ,
+                created  TIMESTAMPTZ NOT NULL DEFAULT now());
+            -- подтверждённые рефералы: пара уникальна ГЛОБАЛЬНО — одного человека
+            -- нельзя переиспользовать в следующем круге. ticketed=true — уже в билете.
+            CREATE TABLE IF NOT EXISTS lottery_refs(
+                referrer BIGINT NOT NULL,
+                referral BIGINT NOT NULL,
+                round_id INT    NOT NULL,
+                ticketed BOOLEAN NOT NULL DEFAULT false,
+                counted  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY(referrer, referral));
+            CREATE INDEX IF NOT EXISTS lottery_refs_owner ON lottery_refs(referrer, ticketed);
+            -- билеты (числа) в круге: одно число — одна строка
+            CREATE TABLE IF NOT EXISTS lottery_tickets(
+                round_id INT    NOT NULL,
+                number   INT    NOT NULL,
+                user_id  BIGINT NOT NULL,
+                created  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY(round_id, number));
+            CREATE INDEX IF NOT EXISTS lottery_tickets_user ON lottery_tickets(round_id, user_id);
+            -- победители круга (место → пользователь/число/приз)
+            CREATE TABLE IF NOT EXISTS lottery_winners(
+                round_id INT    NOT NULL,
+                place    INT    NOT NULL,
+                user_id  BIGINT NOT NULL,
+                number   INT    NOT NULL,
+                prize    BIGINT NOT NULL,
+                name     TEXT,
+                paid     BOOLEAN NOT NULL DEFAULT false,
+                PRIMARY KEY(round_id, place));
         """)
         if await c.fetchval("SELECT COUNT(*) FROM products") == 0:
             for i, (name, sub, emoji, tag, base) in enumerate(SEED_PRODUCTS):
@@ -2703,3 +2741,177 @@ async def transfer_redeem(code: str, new_id: int) -> dict:
         await c.execute("DELETE FROM users WHERE tg_id=$1", old_id)
         await c.execute("DELETE FROM transfers WHERE user_id=$1", old_id)
         return await snapshot(new_id, c)
+
+
+# ── Розыгрыш (лотерея) ────────────────────────────────────────────────────────
+async def lottery_ensure_round(days: int, prizes: str) -> dict:
+    """Текущий открытый круг; если открытого нет — создаём со сроком now()+days."""
+    async with _pool.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT * FROM lottery_rounds WHERE status='open' ORDER BY id DESC LIMIT 1")
+        if not row:
+            row = await c.fetchrow(
+                "INSERT INTO lottery_rounds(status, deadline, prizes) "
+                "VALUES('open', now() + make_interval(days => $1), $2) RETURNING *",
+                int(days), str(prizes))
+        return dict(row)
+
+
+async def lottery_last_finished() -> dict | None:
+    """Последний завершённый круг (для показа результатов/анимации)."""
+    async with _pool.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT * FROM lottery_rounds WHERE status='finished' "
+            "ORDER BY drawn_at DESC NULLS LAST, id DESC LIMIT 1")
+        return dict(row) if row else None
+
+
+async def lottery_new_candidates(referrer: int) -> list[int]:
+    """Приглашённые данным человеком, ещё НЕ учтённые в лотерее (нет в lottery_refs).
+    Их надо проверить на подписку в main и подтверждённых записать."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT u.tg_id FROM users u WHERE u.ref_by=$1 AND u.tg_id <> $1 "
+            "AND NOT EXISTS(SELECT 1 FROM lottery_refs r WHERE r.referral=u.tg_id)",
+            referrer)
+        return [r["tg_id"] for r in rows]
+
+
+async def lottery_confirm_refs(referrer: int, referral_ids: list[int], round_id: int) -> int:
+    """Записать подтверждённых (подписавшихся) рефералов. Пара уникальна глобально —
+    повтор игнорируется. Возвращает сколько реально добавлено."""
+    if not referral_ids:
+        return 0
+    async with _pool.acquire() as c:
+        n = 0
+        for rid in referral_ids:
+            if int(rid) == int(referrer):
+                continue
+            res = await c.execute(
+                "INSERT INTO lottery_refs(referrer, referral, round_id) VALUES($1,$2,$3) "
+                "ON CONFLICT(referrer, referral) DO NOTHING", referrer, int(rid), round_id)
+            if res.endswith(" 1"):
+                n += 1
+        return n
+
+
+async def lottery_grant_tickets(user_id: int, round_id: int, eligible: bool,
+                                per_ticket: int) -> dict:
+    """Выдать участнику билеты (числа) за неиспользованные подтверждённые рефералы.
+    eligible — сам подписан на канал и чат. Каждые per_ticket непотраченных
+    рефералов → одно число. Атомарно, под advisory-lock на (круг, пользователь)."""
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("SELECT pg_advisory_xact_lock(hashtext($1))",
+                        f"lotgrant:{round_id}:{user_id}")
+        added = []
+        if eligible and per_ticket > 0:
+            avail = await c.fetchval(
+                "SELECT count(*) FROM lottery_refs WHERE referrer=$1 AND ticketed=false",
+                user_id) or 0
+            want = avail // per_ticket
+            for _ in range(int(want)):
+                num = None
+                for _try in range(30):
+                    cand = random.randint(10000, 99999)
+                    if not await c.fetchval(
+                            "SELECT 1 FROM lottery_tickets WHERE round_id=$1 AND number=$2",
+                            round_id, cand):
+                        num = cand
+                        break
+                if num is None:
+                    break
+                await c.execute(
+                    "INSERT INTO lottery_tickets(round_id, number, user_id) VALUES($1,$2,$3)",
+                    round_id, num, user_id)
+                added.append(num)
+                # пометить per_ticket рефералов потраченными (самые старые)
+                await c.execute(
+                    "UPDATE lottery_refs SET ticketed=true WHERE ctid IN ("
+                    "  SELECT ctid FROM lottery_refs WHERE referrer=$1 AND ticketed=false "
+                    "  ORDER BY counted LIMIT $2)", user_id, int(per_ticket))
+        numbers = [r["number"] for r in await c.fetch(
+            "SELECT number FROM lottery_tickets WHERE round_id=$1 AND user_id=$2 ORDER BY number",
+            round_id, user_id)]
+        pending = await c.fetchval(
+            "SELECT count(*) FROM lottery_refs WHERE referrer=$1 AND ticketed=false",
+            user_id) or 0
+        confirmed = await c.fetchval(
+            "SELECT count(*) FROM lottery_refs WHERE referrer=$1", user_id) or 0
+        return {"added": added, "numbers": numbers,
+                "pending": int(pending), "confirmed": int(confirmed)}
+
+
+async def lottery_stats(round_id: int) -> dict:
+    async with _pool.acquire() as c:
+        parts = await c.fetchval(
+            "SELECT count(DISTINCT user_id) FROM lottery_tickets WHERE round_id=$1", round_id)
+        tix = await c.fetchval(
+            "SELECT count(*) FROM lottery_tickets WHERE round_id=$1", round_id)
+        return {"participants": int(parts or 0), "tickets": int(tix or 0)}
+
+
+async def lottery_my_referrals(referrer: int) -> list[dict]:
+    """Все приглашённые + флаги: counted (подтверждён в лотерее) и ticketed
+    (уже вошёл в число). Для не-counted статус подписки добавит main."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT u.tg_id, u.name, u.username, u.created,
+                   (r.referrer IS NOT NULL)          AS counted,
+                   COALESCE(r.ticketed, false)       AS ticketed
+            FROM users u
+            LEFT JOIN lottery_refs r ON r.referral = u.tg_id
+            WHERE u.ref_by=$1 AND u.tg_id <> $1
+            ORDER BY u.created DESC""", referrer)
+        return [dict(x) for x in rows]
+
+
+async def lottery_winners(round_id: int) -> list[dict]:
+    async with _pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT place, user_id, number, prize, name FROM lottery_winners "
+            "WHERE round_id=$1 ORDER BY place", round_id)
+        return [dict(r) for r in rows]
+
+
+async def lottery_draw(round_id: int, prizes: list[int]) -> list[dict] | None:
+    """Провести розыгрыш под advisory-lock: если круг ещё open — тянем случайные
+    выигрышные числа, фиксируем победителей (paid=false), закрываем круг.
+    Начисление призов делает main (идемпотентно). None — если уже проведён."""
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"lotdraw:{round_id}")
+        rnd = await c.fetchrow(
+            "SELECT status FROM lottery_rounds WHERE id=$1 FOR UPDATE", round_id)
+        if not rnd or rnd["status"] != "open":
+            return None
+        pool = [dict(r) for r in await c.fetch(
+            "SELECT number, user_id FROM lottery_tickets WHERE round_id=$1", round_id)]
+        random.shuffle(pool)
+        winners = []
+        for i in range(min(len(prizes), len(pool))):
+            t = pool[i]
+            name = await c.fetchval("SELECT name FROM users WHERE tg_id=$1", t["user_id"])
+            w = {"place": i + 1, "user_id": t["user_id"], "number": t["number"],
+                 "prize": int(prizes[i]), "name": name}
+            winners.append(w)
+            await c.execute(
+                "INSERT INTO lottery_winners(round_id, place, user_id, number, prize, name) "
+                "VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
+                round_id, w["place"], w["user_id"], w["number"], w["prize"], name)
+        await c.execute(
+            "UPDATE lottery_rounds SET status='finished', drawn_at=now() WHERE id=$1", round_id)
+        return winners
+
+
+async def lottery_unpaid_winners() -> list[dict]:
+    """Победители, которым приз ещё не начислен (для докатки после сбоя)."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT round_id, place, user_id, prize FROM lottery_winners WHERE paid=false")
+        return [dict(r) for r in rows]
+
+
+async def lottery_mark_paid(round_id: int, place: int) -> None:
+    async with _pool.acquire() as c:
+        await c.execute(
+            "UPDATE lottery_winners SET paid=true WHERE round_id=$1 AND place=$2",
+            round_id, place)
