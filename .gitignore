@@ -27,3 +27,4 @@ promo/*
 .vscode/
 Thumbs.db
 .DS_Store
+!promo/roulette.png
