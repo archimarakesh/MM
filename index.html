@@ -79,12 +79,10 @@ header{flex:none;display:flex;align-items:center;justify-content:space-between;g
   background:rgba(255,255,255,.05);border:0.0625rem solid var(--line);
   transition:transform .5s var(--ease),background .5s var(--ease)}
 .balance-chip:active{transform:scale(.96)}
-.balance-chip .coin{width:1.3rem;height:1.3rem;border-radius:50%;flex:none;position:relative;
-  background:radial-gradient(circle at 36% 30%,#ffe9a8,#d8a63a 55%,#9c7418);
-  box-shadow:inset 0 0 0 0.09rem #fff3c8,inset 0 -0.12rem 0.18rem rgba(0,0,0,.35),0 0.06rem 0.16rem rgba(0,0,0,.4)}
-.balance-chip .coin::after{content:"";position:absolute;inset:16%;
-  background:url("/logo.webp") center/contain no-repeat;
-  filter:brightness(.55) drop-shadow(0 0.03rem 0 rgba(255,247,200,.55))}
+.balance-chip .coin{width:1.3rem;height:1.3rem;border-radius:50%;flex:none;display:grid;place-items:center;
+  font-size:1rem;font-weight:800;line-height:1;color:#1b1405;
+  background:linear-gradient(135deg,#f0d27a,#c9992e);
+  box-shadow:0 0.18rem 0.45rem rgba(0,0,0,.4),inset 0 0.0625rem 0 rgba(255,255,255,.5)}
 .balance-chip b{font-size:0.84375rem;font-weight:700;color:var(--txt);white-space:nowrap}
 .icon-btn{width:2.375rem;height:2.375rem;border-radius:50%;display:grid;place-items:center;cursor:pointer;border:0.0625rem solid var(--line);
   background:rgba(255,255,255,.04);color:var(--muted);
@@ -700,7 +698,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     </div>
     <div class="hdr-right">
       <div class="balance-chip" onclick="go('topup')">
-        <div class="coin"></div><b id="hdrBalance">0 ₴</b>
+        <div class="coin">＋</div><b id="hdrBalance">0 ₴</b>
       </div>
       <div class="icon-btn" onclick="openSheet('settings')" aria-label="Настройки">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -832,7 +830,6 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </div>
       <div class="lot-title">Кошелёк</div>
-      <div class="lot-timer"><span id="walletBal">0</span> ₴</div>
     </div>
     <div class="lot-tabs lot-tabs-2">
       <div class="lot-tab active" data-wt="topup" onclick="walletTab('topup')">Пополнить</div>
