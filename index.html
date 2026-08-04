@@ -1462,7 +1462,7 @@ function renderLotDraw() {
     }
     document.getElementById('lot-draw').innerHTML =
       `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
-      `<div class="lot-card" style="text-align:center"><div class="lot-eyebrow">Розыгрыш скоро</div><div class="lot-hint" style="margin-top:0">Старт объявим отдельно. Уже сейчас можно <b>подписаться на канал и чат</b> и <b>пригласить друзей</b> — как только отсчёт запустится, они пойдут в зачёт.</div><button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Подготовиться →</button></div>` +
+      `<div class="lot-card" style="text-align:center"><div class="lot-eyebrow">Розыгрыш скоро</div><div class="lot-hint" style="margin-top:0">Старт объявим отдельно. Заранее <b>подпишись на канал и чат</b>. Друзей зови <b>во время розыгрыша</b> — засчитываются только приглашённые в период розыгрыша.</div><button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Подготовиться →</button></div>` +
       result;
     return;
   }
@@ -1500,7 +1500,7 @@ function renderLotTasks() {
   const subRow = (ok, label, url) => `<a class="lot-lnk" href="${url}" target="_blank" rel="noopener"><div class="ic">${ok ? '✅' : '📣'}</div><div class="tx"><b>${label}</b><span>${ok ? 'Вы подписаны' : 'Подпишитесь, чтобы участвовать'}</span></div><div class="lot-pill ${ok ? 'ok' : 'mid'}">${ok ? 'готово' : 'подписаться'}</div></a>`;
   const steps = [
     ['Подпишись на канал и чат', 'Обязательное условие участия'],
-    ['Пригласи 3 друзей', 'Каждый друг тоже подписывается на канал и чат'],
+    ['Пригласи 3 друзей во время розыгрыша', 'В зачёт идут только приглашённые после старта — каждый тоже подписывается на канал и чат'],
     ['Получи число в розыгрыше', 'За каждые 3 друга — ещё одно число. Больше чисел — больше шансов'],
     ['Жди розыгрыш', 'По таймеру случайное число определит победителей'],
   ].map((s, i) => `<div class="lot-step"><div class="n">${i + 1}</div><div class="tx"><b>${s[0]}</b><span>${s[1]}</span></div></div>`).join('');
@@ -1509,7 +1509,9 @@ function renderLotTasks() {
   const badge = document.getElementById('lotTasksBadge');
   if (pend) { badge.style.display = 'grid'; badge.textContent = pend; } else badge.style.display = 'none';
   let refHtml;
-  if (!refs.length) refHtml = `<div class="lot-empty">Пока никого. Пригласи друзей — и они появятся здесь со статусом.</div>`;
+  if (!refs.length) refHtml = LOT.running
+    ? `<div class="lot-empty">Пока никого. Пригласи друзей — и они появятся здесь со статусом.</div>`
+    : `<div class="lot-empty">Список появится после старта розыгрыша: сюда попадут друзья, приглашённые во время розыгрыша.</div>`;
   else refHtml = refs.map(r => {
     const nm = r.name || 'друг', ini = (nm.trim()[0] || '?').toUpperCase();
     let pill, note;
@@ -1521,7 +1523,7 @@ function renderLotTasks() {
   document.getElementById('lot-tasks').innerHTML =
     `<div class="lot-card"><div class="lot-eyebrow">Как участвовать</div><div class="lot-steps">${steps}</div></div>` +
     `<div class="lot-card"><div class="lot-eyebrow">Подписки — условие участия</div>${subRow(me.sub_channel === 'yes', 'Канал магазина', L.channel)}<div style="height:8px"></div>${subRow(me.sub_chat === 'yes', 'Чат магазина', L.chat)}</div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Приглашай друзей</div><div class="lot-hint" style="margin-top:0">За каждые <b>${me.need}</b> друзей — <b>+1 число</b>. Друг заходит в маркет, забирает бонус и подписывается.</div><button class="lot-btn" style="margin-top:12px" onclick="lotShareRef()">🔗 Пригласить друга</button><button class="lot-btn ghost" style="margin-top:9px" onclick="lotCopyRef()">Скопировать ссылку</button></div>` +
+    `<div class="lot-card"><div class="lot-eyebrow">Приглашай друзей</div><div class="lot-hint" style="margin-top:0">За каждые <b>${me.need}</b> друзей — <b>+1 число</b>. Друг заходит в маркет, забирает бонус и подписывается. Засчитываются только приглашённые <b>во время розыгрыша</b>.</div><button class="lot-btn" style="margin-top:12px" onclick="lotShareRef()">🔗 Пригласить друга</button><button class="lot-btn ghost" style="margin-top:9px" onclick="lotCopyRef()">Скопировать ссылку</button></div>` +
     `<div class="lot-card"><div class="lot-eyebrow">Мои приглашённые</div><div class="lot-hint" style="margin-top:0;font-size:11.5px">Зелёный — прошёл все условия и засчитан. Жёлтый — пригласил, ждём подписку.</div><div class="lot-reflist" style="margin-top:10px">${refHtml}</div><button class="lot-btn ghost" style="margin-top:12px" onclick="loadLottery()">↻ Обновить статусы</button></div>` +
     `<div class="lot-card"><div class="lot-eyebrow">Кто считается рефералом</div><p style="font-size:12.5px;line-height:1.6;color:var(--muted);margin:0">Реферал — друг, который перешёл <b style="color:var(--gold-soft)">по твоей ссылке</b> и подписался на <b style="color:var(--gold-soft)">канал и чат</b> магазина. Каждого можно засчитать <b style="color:var(--gold-soft)">только один раз</b>: в следующем розыгрыше нужны новые друзья.</p></div>`;
 }
