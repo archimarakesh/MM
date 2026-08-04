@@ -79,9 +79,12 @@ header{flex:none;display:flex;align-items:center;justify-content:space-between;g
   background:rgba(255,255,255,.05);border:0.0625rem solid var(--line);
   transition:transform .5s var(--ease),background .5s var(--ease)}
 .balance-chip:active{transform:scale(.96)}
-.balance-chip .coin{width:1rem;height:1rem;border-radius:50%;
-  background:radial-gradient(circle at 35% 30%,#ffe9a8,#c69320);
-  box-shadow:inset 0 -0.0625rem 0.125rem rgba(0,0,0,.35)}
+.balance-chip .coin{width:1.3rem;height:1.3rem;border-radius:50%;flex:none;position:relative;
+  background:radial-gradient(circle at 36% 30%,#ffe9a8,#d8a63a 55%,#9c7418);
+  box-shadow:inset 0 0 0 0.09rem #fff3c8,inset 0 -0.12rem 0.18rem rgba(0,0,0,.35),0 0.06rem 0.16rem rgba(0,0,0,.4)}
+.balance-chip .coin::after{content:"";position:absolute;inset:16%;
+  background:url("/logo.webp") center/contain no-repeat;
+  filter:brightness(.55) drop-shadow(0 0.03rem 0 rgba(255,247,200,.55))}
 .balance-chip b{font-size:0.84375rem;font-weight:700;color:var(--txt);white-space:nowrap}
 .icon-btn{width:2.375rem;height:2.375rem;border-radius:50%;display:grid;place-items:center;cursor:pointer;border:0.0625rem solid var(--line);
   background:rgba(255,255,255,.04);color:var(--muted);
@@ -577,6 +580,8 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 .lot-timer{font-size:12px;font-weight:800;color:#fff5da;background:linear-gradient(120deg,rgba(212,175,55,.18),rgba(184,137,31,.06));border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .lot-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:5px;margin-bottom:14px}
 .lot-tabs-2{grid-template-columns:repeat(2,1fr)}
+.wallet-sec{display:none}
+.wallet-sec.active{display:block;animation:lotIn .3s var(--ease)}
 .lot-tab{position:relative;text-align:center;padding:9px 6px;border-radius:10px;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;transition:.2s}
 .lot-tab.active{color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d)}
 .lot-badge{position:absolute;top:2px;right:6px;min-width:15px;height:15px;padding:0 4px;border-radius:99px;background:#e07a5f;color:#fff;font-size:9px;font-weight:800;display:none;place-items:center}
@@ -766,19 +771,13 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
       </div>
     </div>
 
-    <div class="bezel gold balance-hero reveal">
-      <div class="bezel-core">
-        <div class="b-label">Баланс кошелька</div>
-        <div class="b-sum"><span id="profBalance">0</span> <small>₴</small></div>
-        <div class="balance-actions" style="grid-template-columns:1fr 1fr">
-          <button class="btn btn-gold" onclick="go('topup')">Пополнить
-            <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
-          </button>
-          <button class="btn btn-ghost" onclick="openSheet('withdraw')">Вывести
-            <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
-          </button>
-        </div>
+    <div class="section-head" style="margin-top:4px"><h2>Мои покупки</h2></div>
+    <div class="prof-row" onclick="go('history')">
+      <div class="prof-row-ic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
       </div>
+      <div class="prof-row-tx"><b>История заказов</b><span>Статусы и трек-номера Новой Почты</span></div>
+      <div class="prof-row-arr">›</div>
     </div>
 
     <div class="section-head" style="margin-top:12px"><h2>Реферальная программа</h2></div>
@@ -799,40 +798,51 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
         </button>
       </div>
     </div>
-
-    <div class="section-head" style="margin-top:12px"><h2>Мои покупки</h2></div>
-    <div class="prof-row" onclick="go('history')">
-      <div class="prof-row-ic">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      </div>
-      <div class="prof-row-tx"><b>История заказов</b><span>Статусы и трек-номера Новой Почты</span></div>
-      <div class="prof-row-arr">›</div>
-    </div>
   </section>
 
   <!-- ══ ПОПОЛНЕНИЕ ══ -->
   <section class="view" id="view-topup">
-    <div style="display:flex;align-items:center;gap:12px;margin:8px 0 16px">
+    <div class="lot-top">
       <div class="icon-btn" onclick="go('profile')" aria-label="Назад">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </div>
-      <h1 class="page-title" style="margin:0;font-size:22px">Пополнение баланса</h1>
+      <div class="lot-title">Кошелёк</div>
+      <div class="lot-timer"><span id="walletBal">0</span> ₴</div>
     </div>
-    <button class="btn btn-ghost" id="casinoBack" style="display:none;margin-bottom:14px"
-      onclick="backToCasino()">
-      🎰 Вернуться в казино</button>
-    <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="200"></div>
-    <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
-    <div id="tuBody"></div>
-    <div class="section-head"><h2>Промокод</h2><span>🎟</span></div>
-    <div style="display:flex;gap:8px">
-      <input class="mini-input" id="promoInput" placeholder="Введите промокод" autocapitalize="characters" style="flex:1">
-      <button class="btn btn-gold" style="width:auto;padding:11px 20px" onclick="redeemPromo()">Применить</button>
+    <div class="lot-tabs lot-tabs-2">
+      <div class="lot-tab active" data-wt="topup" onclick="walletTab('topup')">Пополнить</div>
+      <div class="lot-tab" data-wt="withdraw" onclick="walletTab('withdraw')">Вывести</div>
     </div>
-    <p class="note" style="margin:6px 0 0">Начисленное промокодом можно потратить в магазине или отыграть в казино, но нельзя вывести.</p>
-    <div class="section-head"><h2>История оплат</h2></div>
-    <div id="payHistory"></div>
-    <input type="file" id="tuFile" accept="image/*,application/pdf" style="display:none">
+
+    <div class="wallet-sec active" id="wsec-topup">
+      <button class="btn btn-ghost" id="casinoBack" style="display:none;margin-bottom:14px"
+        onclick="backToCasino()">
+        🎰 Вернуться в казино</button>
+      <div class="field"><label>Сумма, ₴</label><input id="tuSum" inputmode="numeric" placeholder="200"></div>
+      <div class="field"><label>Способ оплаты</label><div class="weight-chips" id="tuMethods" style="margin:0"></div></div>
+      <div id="tuBody"></div>
+      <div class="section-head"><h2>Промокод</h2><span>🎟</span></div>
+      <div style="display:flex;gap:8px">
+        <input class="mini-input" id="promoInput" placeholder="Введите промокод" autocapitalize="characters" style="flex:1">
+        <button class="btn btn-gold" style="width:auto;padding:11px 20px" onclick="redeemPromo()">Применить</button>
+      </div>
+      <p class="note" style="margin:6px 0 0">Начисленное промокодом можно потратить в магазине или отыграть в казино, но нельзя вывести.</p>
+      <div class="section-head"><h2>История оплат</h2></div>
+      <div id="payHistory"></div>
+      <input type="file" id="tuFile" accept="image/*,application/pdf" style="display:none">
+    </div>
+
+    <div class="wallet-sec" id="wsec-withdraw">
+      <p class="page-sub" style="margin:0 0 12px">Укажите сумму и свои реквизиты — выплатим вручную и пришлём уведомление. Минимум 100 ₴.</p>
+      <p class="note" id="wdAvail" style="margin:0 0 12px;color:var(--gold-soft)"></p>
+      <div class="field"><label>Сумма, ₴</label><input id="wdSum" inputmode="numeric" placeholder="500"></div>
+      <div class="field"><label>Куда вывести</label><div class="weight-chips" id="wdMethods" style="margin:0"></div></div>
+      <div class="field"><label id="wdReqLabel">Реквизиты</label><input id="wdReq" placeholder="Номер вашей карты"></div>
+      <button class="btn btn-gold" onclick="submitWithdraw()">Отправить заявку
+        <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+      </button>
+      <p class="note">Сумма резервируется сразу. Если заявку отклонят — средства вернутся на баланс.</p>
+    </div>
   </section>
 
   <!-- ══ АДМИНКА ══ -->
@@ -933,20 +943,6 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
   </button>
   <p class="note" style="text-align:center">Подписку проверяем автоматически — жмите после вступления.</p>
-</div>
-
-<div class="sheet" id="sheet-withdraw">
-  <div class="sheet-grip"></div>
-  <h2>Вывод баланса</h2>
-  <p class="sheet-sub">Укажите сумму и свои реквизиты — выплатим вручную и пришлём уведомление. Минимум 100 ₴.</p>
-  <p class="note" id="wdAvail" style="margin:0 0 12px;color:var(--gold-soft)"></p>
-  <div class="field"><label>Сумма, ₴</label><input id="wdSum" inputmode="numeric" placeholder="500"></div>
-  <div class="field"><label>Куда вывести</label><div class="weight-chips" id="wdMethods" style="margin:0"></div></div>
-  <div class="field"><label id="wdReqLabel">Реквизиты</label><input id="wdReq" placeholder="Номер вашей карты"></div>
-  <button class="btn btn-gold" onclick="submitWithdraw()">Отправить заявку
-    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
-  </button>
-  <p class="note">Сумма резервируется сразу. Если заявку отклонят — средства вернутся на баланс.</p>
 </div>
 
 <div class="sheet" id="sheet-invoice">
@@ -1405,7 +1401,7 @@ function go(v) {
   el.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.v === v));
   if (v === 'history') { renderOrders(); softSync(); }   // подтянуть свежие статусы заказов
-  if (v === 'topup') renderTopup();
+  if (v === 'topup') openWallet('topup');
   if (v === 'egrow') renderEgrow();
   if (v === 'referrals') renderReferrals();
   if (v === 'lottery') loadLottery();
@@ -2183,7 +2179,8 @@ const REF_LEVELS = [[0, 5], [10, 7], [50, 10]]; // [приглашено от, %
 function refPct(n) { return n >= 50 ? 10 : n >= 10 ? 7 : 5; }
 function syncBalance() {
   document.getElementById('hdrBalance').textContent = fmt(S.balance) + ' ₴';
-  document.getElementById('profBalance').textContent = fmt(S.balance);
+  const wb = document.getElementById('walletBal'); if (wb) wb.textContent = fmt(S.balance);
+  const pb = document.getElementById('profBalance'); if (pb) pb.textContent = fmt(S.balance);
   document.getElementById('refCount').textContent = S.refCount;
   document.getElementById('refEarned').textContent = fmt(S.refEarned) + ' ₴';
   const n = S.refCount || 0;
@@ -2654,6 +2651,18 @@ function renderWithdraw() {
     el.textContent = t;
     el.style.whiteSpace = 'pre-line';
   }
+}
+/* Кошелёк: пополнение и вывод в одном разделе (открывается тапом по балансу) */
+function openWallet(tab) {
+  const wb = document.getElementById('walletBal'); if (wb) wb.textContent = fmt(S.balance || 0);
+  walletTab(tab || 'topup');
+}
+function walletTab(t) {
+  haptic('light');
+  document.querySelectorAll('.wallet-sec').forEach(x => x.classList.remove('active'));
+  const sec = document.getElementById('wsec-' + t); if (sec) sec.classList.add('active');
+  document.querySelectorAll('.lot-tab[data-wt]').forEach(x => x.classList.toggle('active', x.dataset.wt === t));
+  if (t === 'withdraw') renderWithdraw(); else renderTopup();
 }
 function wdSel(k) { haptic('light'); wdMethod = k; renderWithdraw(); }
 async function submitWithdraw() {
