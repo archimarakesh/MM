@@ -1527,10 +1527,12 @@ async def _lottery_state(uid: int) -> dict:
     eligible = (my_ch == "yes" and my_cht == "yes")
     grant = {"numbers": [], "confirmed": 0, "pending": 0}
     stats = {"participants": 0, "tickets": 0}
-    # ЗАСЧИТЫВАНИЕ РЕФЕРАЛОВ И БИЛЕТЫ — только пока идёт запущенный круг
+    since = rnd.get("created") if running else None   # старт круга: считаем только новых
+    # ЗАСЧИТЫВАНИЕ РЕФЕРАЛОВ И БИЛЕТЫ — только пока идёт запущенный круг, и только
+    # для приглашённых ПОСЛЕ старта круга (пришедших во время розыгрыша)
     if running:
         if subs_on:
-            cands = await db.lottery_new_candidates(uid)
+            cands = await db.lottery_new_candidates(uid, since)
             if cands:
                 confirmed: list[int] = []
                 sem = asyncio.Semaphore(8)
@@ -1547,8 +1549,8 @@ async def _lottery_state(uid: int) -> dict:
                     await db.lottery_confirm_refs(uid, confirmed, rid)
         grant = await db.lottery_grant_tickets(uid, rid, eligible, lottery.PER_TICKET)
         stats = await db.lottery_stats(rid)
-    # мои рефералы со статусами (показываем всегда — чтобы видеть, кто готов)
-    refs = await db.lottery_my_referrals(uid)
+    # мои рефералы этого круга (только приглашённые во время розыгрыша); до старта — пусто
+    refs = await db.lottery_my_referrals(uid, since) if running else []
     pend = [r for r in refs if not r["counted"]]
     if subs_on and pend:
         sem = asyncio.Semaphore(8)

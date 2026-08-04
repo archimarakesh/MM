@@ -2786,14 +2786,22 @@ async def lottery_last_finished() -> dict | None:
         return dict(row) if row else None
 
 
-async def lottery_new_candidates(referrer: int) -> list[int]:
+async def lottery_new_candidates(referrer: int, since=None) -> list[int]:
     """Приглашённые данным человеком, ещё НЕ учтённые в лотерее (нет в lottery_refs).
-    Их надо проверить на подписку в main и подтверждённых записать."""
+    since — считаем ТОЛЬКО новых, пришедших после старта круга (u.created >= since):
+    в зачёт идут только приглашённые ВО ВРЕМЯ розыгрыша."""
     async with _pool.acquire() as c:
-        rows = await c.fetch(
-            "SELECT u.tg_id FROM users u WHERE u.ref_by=$1 AND u.tg_id <> $1 "
-            "AND NOT EXISTS(SELECT 1 FROM lottery_refs r WHERE r.referral=u.tg_id)",
-            referrer)
+        if since is not None:
+            rows = await c.fetch(
+                "SELECT u.tg_id FROM users u WHERE u.ref_by=$1 AND u.tg_id <> $1 "
+                "AND u.created >= $2 "
+                "AND NOT EXISTS(SELECT 1 FROM lottery_refs r WHERE r.referral=u.tg_id)",
+                referrer, since)
+        else:
+            rows = await c.fetch(
+                "SELECT u.tg_id FROM users u WHERE u.ref_by=$1 AND u.tg_id <> $1 "
+                "AND NOT EXISTS(SELECT 1 FROM lottery_refs r WHERE r.referral=u.tg_id)",
+                referrer)
         return [r["tg_id"] for r in rows]
 
 
@@ -2817,17 +2825,20 @@ async def lottery_confirm_refs(referrer: int, referral_ids: list[int], round_id:
 
 async def lottery_grant_tickets(user_id: int, round_id: int, eligible: bool,
                                 per_ticket: int) -> dict:
-    """Выдать участнику билеты (числа) за неиспользованные подтверждённые рефералы.
+    """Выдать участнику билеты (числа) за подтверждённых рефералов ЭТОГО круга.
     eligible — сам подписан на канал и чат. Каждые per_ticket непотраченных
-    рефералов → одно число. Атомарно, под advisory-lock на (круг, пользователь)."""
+    рефералов текущего круга → одно число. Рефералы прошлых кругов не участвуют
+    (в зачёт идут только приглашённые во время этого розыгрыша).
+    Атомарно, под advisory-lock на (круг, пользователь)."""
     async with _pool.acquire() as c, c.transaction():
         await c.execute("SELECT pg_advisory_xact_lock(hashtext($1))",
                         f"lotgrant:{round_id}:{user_id}")
         added = []
         if eligible and per_ticket > 0:
             avail = await c.fetchval(
-                "SELECT count(*) FROM lottery_refs WHERE referrer=$1 AND ticketed=false",
-                user_id) or 0
+                "SELECT count(*) FROM lottery_refs "
+                "WHERE referrer=$1 AND round_id=$2 AND ticketed=false",
+                user_id, round_id) or 0
             want = avail // per_ticket
             for _ in range(int(want)):
                 num = None
@@ -2844,19 +2855,21 @@ async def lottery_grant_tickets(user_id: int, round_id: int, eligible: bool,
                     "INSERT INTO lottery_tickets(round_id, number, user_id) VALUES($1,$2,$3)",
                     round_id, num, user_id)
                 added.append(num)
-                # пометить per_ticket рефералов потраченными (самые старые)
+                # пометить per_ticket рефералов этого круга потраченными (самые старые)
                 await c.execute(
                     "UPDATE lottery_refs SET ticketed=true WHERE ctid IN ("
-                    "  SELECT ctid FROM lottery_refs WHERE referrer=$1 AND ticketed=false "
-                    "  ORDER BY counted LIMIT $2)", user_id, int(per_ticket))
+                    "  SELECT ctid FROM lottery_refs "
+                    "  WHERE referrer=$1 AND round_id=$2 AND ticketed=false "
+                    "  ORDER BY counted LIMIT $3)", user_id, round_id, int(per_ticket))
         numbers = [r["number"] for r in await c.fetch(
             "SELECT number FROM lottery_tickets WHERE round_id=$1 AND user_id=$2 ORDER BY number",
             round_id, user_id)]
         pending = await c.fetchval(
-            "SELECT count(*) FROM lottery_refs WHERE referrer=$1 AND ticketed=false",
-            user_id) or 0
+            "SELECT count(*) FROM lottery_refs "
+            "WHERE referrer=$1 AND round_id=$2 AND ticketed=false", user_id, round_id) or 0
         confirmed = await c.fetchval(
-            "SELECT count(*) FROM lottery_refs WHERE referrer=$1", user_id) or 0
+            "SELECT count(*) FROM lottery_refs WHERE referrer=$1 AND round_id=$2",
+            user_id, round_id) or 0
         return {"added": added, "numbers": numbers,
                 "pending": int(pending), "confirmed": int(confirmed)}
 
@@ -2870,18 +2883,29 @@ async def lottery_stats(round_id: int) -> dict:
         return {"participants": int(parts or 0), "tickets": int(tix or 0)}
 
 
-async def lottery_my_referrals(referrer: int) -> list[dict]:
-    """Все приглашённые + флаги: counted (подтверждён в лотерее) и ticketed
-    (уже вошёл в число). Для не-counted статус подписки добавит main."""
+async def lottery_my_referrals(referrer: int, since=None) -> list[dict]:
+    """Приглашённые данного человека + флаги: counted (подтверждён в лотерее) и
+    ticketed (уже вошёл в число). since — показываем ТОЛЬКО пришедших после старта
+    круга (в зачёт идут только приглашённые во время розыгрыша)."""
     async with _pool.acquire() as c:
-        rows = await c.fetch("""
-            SELECT u.tg_id, u.name, u.username, u.created,
-                   (r.referrer IS NOT NULL)          AS counted,
-                   COALESCE(r.ticketed, false)       AS ticketed
-            FROM users u
-            LEFT JOIN lottery_refs r ON r.referral = u.tg_id
-            WHERE u.ref_by=$1 AND u.tg_id <> $1
-            ORDER BY u.created DESC""", referrer)
+        if since is not None:
+            rows = await c.fetch("""
+                SELECT u.tg_id, u.name, u.username, u.created,
+                       (r.referrer IS NOT NULL)          AS counted,
+                       COALESCE(r.ticketed, false)       AS ticketed
+                FROM users u
+                LEFT JOIN lottery_refs r ON r.referral = u.tg_id
+                WHERE u.ref_by=$1 AND u.tg_id <> $1 AND u.created >= $2
+                ORDER BY u.created DESC""", referrer, since)
+        else:
+            rows = await c.fetch("""
+                SELECT u.tg_id, u.name, u.username, u.created,
+                       (r.referrer IS NOT NULL)          AS counted,
+                       COALESCE(r.ticketed, false)       AS ticketed
+                FROM users u
+                LEFT JOIN lottery_refs r ON r.referral = u.tg_id
+                WHERE u.ref_by=$1 AND u.tg_id <> $1
+                ORDER BY u.created DESC""", referrer)
         return [dict(x) for x in rows]
 
 
