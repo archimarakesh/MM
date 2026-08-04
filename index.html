@@ -574,6 +574,25 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 .prof-row-tx b{display:block;font-size:14px;font-weight:700}
 .prof-row-tx span{font-size:11.5px;color:var(--muted)}
 .prof-row-arr{color:var(--muted);font-size:20px}
+.hist-card{display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:20px;cursor:pointer;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(184,137,31,.05) 55%,rgba(255,255,255,.02));
+  border:1px solid rgba(212,175,55,.26);box-shadow:0 12px 28px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.05);
+  transition:transform .1s var(--ease)}
+.hist-card:active{transform:scale(.985)}
+.hist-card::after{content:"";position:absolute;right:-2.2rem;top:-2.2rem;width:8rem;height:8rem;border-radius:50%;
+  background:radial-gradient(circle,rgba(212,175,55,.16),transparent 70%);pointer-events:none}
+.hist-ic{flex:none;width:2.9rem;height:2.9rem;border-radius:0.95rem;display:grid;place-items:center;color:#140f03;
+  background:linear-gradient(135deg,#f4dd8a,#c9971d);box-shadow:0 0.4rem 0.9rem rgba(184,137,31,.4),inset 0 1px 0 rgba(255,255,255,.5)}
+.hist-ic svg{width:1.45rem;height:1.45rem}
+.hist-tx{flex:1;min-width:0}
+.hist-tx b{display:block;font-size:0.97rem;font-weight:800;letter-spacing:-.01em}
+.hist-tx span{font-size:0.75rem;color:var(--muted);line-height:1.35}
+.hist-meta{flex:none;text-align:center;padding:0 0.7rem;position:relative}
+.hist-meta::before{content:"";position:absolute;left:0;top:15%;height:70%;width:1px;background:var(--line)}
+.hist-meta b{display:block;font-size:1.25rem;font-weight:800;color:var(--gold-soft);line-height:1;font-variant-numeric:tabular-nums}
+.hist-meta span{font-size:0.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2)}
+.hist-arr{flex:none;color:var(--gold-soft);opacity:.7}
+.hist-arr svg{width:1.15rem;height:1.15rem}
 
 .lot-top{display:flex;align-items:center;gap:12px;margin:8px 0 12px}
 .lot-title{flex:1;font-family:'Cinzel',serif;font-weight:800;font-size:20px;letter-spacing:.04em;background:linear-gradient(180deg,#fff6dc,var(--gold-soft) 50%,#b8891f);-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -772,12 +791,18 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     </div>
 
     <div class="section-head" style="margin-top:4px"><h2>Мои покупки</h2></div>
-    <div class="prof-row" onclick="go('history')">
-      <div class="prof-row-ic">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    <div class="hist-card" onclick="go('history')">
+      <div class="hist-ic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l3 3v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
       </div>
-      <div class="prof-row-tx"><b>История заказов</b><span>Статусы и трек-номера Новой Почты</span></div>
-      <div class="prof-row-arr">›</div>
+      <div class="hist-tx">
+        <b>История заказов</b>
+        <span>Статусы и трек-номера Новой Почты</span>
+      </div>
+      <div class="hist-meta"><b id="histCount">0</b><span>заказов</span></div>
+      <div class="hist-arr">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
     </div>
 
     <div class="section-head" style="margin-top:12px"><h2>Реферальная программа</h2></div>
@@ -2181,6 +2206,7 @@ function syncBalance() {
   document.getElementById('hdrBalance').textContent = fmt(S.balance) + ' ₴';
   const wb = document.getElementById('walletBal'); if (wb) wb.textContent = fmt(S.balance);
   const pb = document.getElementById('profBalance'); if (pb) pb.textContent = fmt(S.balance);
+  const hc = document.getElementById('histCount'); if (hc) hc.textContent = (S.orders || []).length;
   document.getElementById('refCount').textContent = S.refCount;
   document.getElementById('refEarned').textContent = fmt(S.refEarned) + ' ₴';
   const n = S.refCount || 0;
