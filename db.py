@@ -2959,12 +2959,21 @@ async def lottery_draw(round_id: int, prizes: list[int]) -> list[dict] | None:
         pool = [dict(r) for r in await c.fetch(
             "SELECT number, user_id FROM lottery_tickets WHERE round_id=$1", round_id)]
         random.shuffle(pool)
+        # ОДИН ПРИЗ НА ЧЕЛОВЕКА: все числа в пуле (больше чисел — выше шанс), но
+        # как только человек выиграл, его остальные числа пропускаем — каждое место
+        # достаётся РАЗНОМУ участнику.
         winners = []
-        for i in range(min(len(prizes), len(pool))):
-            t = pool[i]
+        seen = set()
+        for t in pool:
+            if len(winners) >= len(prizes):
+                break
+            if t["user_id"] in seen:
+                continue
+            seen.add(t["user_id"])
+            place = len(winners) + 1
             name = await c.fetchval("SELECT name FROM users WHERE tg_id=$1", t["user_id"])
-            w = {"place": i + 1, "user_id": t["user_id"], "number": t["number"],
-                 "prize": int(prizes[i]), "name": name}
+            w = {"place": place, "user_id": t["user_id"], "number": t["number"],
+                 "prize": int(prizes[place - 1]), "name": name}
             winners.append(w)
             await c.execute(
                 "INSERT INTO lottery_winners(round_id, place, user_id, number, prize, name) "
