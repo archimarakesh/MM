@@ -1613,18 +1613,40 @@ function lotDrumRoll(dur) {
     i++;
   }
 }
-function lotCrash() {
-  const a = lotAudio(); if (!a) return; const t = a.currentTime;
-  const src = a.createBufferSource(); src.buffer = lotNoise(a, 1.0);
-  const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 5000;
-  const g = a.createGain(); g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.32, t + 0.008);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
-  src.connect(hp); hp.connect(g); g.connect(a.destination); src.start(t); src.stop(t + 1.0);
-  const o = a.createOscillator(); o.type = 'sine';
-  o.frequency.setValueAtTime(190, t); o.frequency.exponentialRampToValueAtTime(60, t + 0.25);
-  const og = a.createGain(); og.gain.setValueAtTime(0.5, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
-  o.connect(og); og.connect(a.destination); o.start(t); o.stop(t + 0.32);
+function lotTone(a, freq, t, dur, type, gain) {
+  const o = a.createOscillator(); o.type = type || 'triangle'; o.frequency.setValueAtTime(freq, t);
+  const g = a.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain || 0.2, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + dur + 0.05);
+}
+// короткий позитивный «динь» для 2-3 места
+function lotWinChime() {
+  const a = lotAudio(); if (!a) return; if (a.state === 'suspended') a.resume().catch(() => {});
+  const t = a.currentTime;
+  [659.25, 783.99, 1046.5].forEach((f, i) => lotTone(a, f, t + i * 0.09, 0.24, 'triangle', 0.18));
+  lotTone(a, 1046.5, t + 0.2, 0.35, 'sine', 0.1);
+}
+// победная фанфара для 1 места: восходящий разгон + аккорд C-мажор + блеск
+function lotFanfare() {
+  const a = lotAudio(); if (!a) return; if (a.state === 'suspended') a.resume().catch(() => {});
+  const t = a.currentTime;
+  const N = { G4: 392, C5: 523.25, E5: 659.25, G5: 783.99, C6: 1046.5, E6: 1318.5, G6: 1568 };
+  [['G4', 0], ['C5', 0.13], ['E5', 0.26], ['G5', 0.39]].forEach(([n, dt]) => {
+    lotTone(a, N[n], t + dt, 0.15, 'triangle', 0.22);
+    lotTone(a, N[n] / 2, t + dt, 0.15, 'sine', 0.1);
+  });
+  const ct = t + 0.56, cd = 1.2;                          // держим аккорд
+  [N.C5, N.E5, N.G5, N.C6].forEach((f, i) => lotTone(a, f, ct, cd, 'triangle', 0.2 - i * 0.02));
+  lotTone(a, N.E6, ct + 0.06, 0.6, 'sine', 0.12);
+  lotTone(a, N.G6, ct + 0.14, 0.6, 'sine', 0.09);
+  // праздничный «шелест» сверху (не крэш)
+  const s = a.createBufferSource(); s.buffer = lotNoise(a, 0.7);
+  const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+  const g = a.createGain(); g.gain.setValueAtTime(0.0001, ct);
+  g.gain.exponentialRampToValueAtTime(0.1, ct + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, ct + 0.65);
+  s.connect(hp); hp.connect(g); g.connect(a.destination); s.start(ct); s.stop(ct + 0.7);
 }
 let lotHapticRoll = null;
 function startHapticRoll(dur) {
@@ -1698,7 +1720,8 @@ async function playLotDraw(last) {
     rev.classList.remove('show'); document.getElementById('lotRevMe').style.display = 'none';
     haptic('light');
     await spinLotReel(w.number);
-    stopHapticRoll(); lotCrash(); haptic('heavy');   // удар барабана + отдача на показе
+    stopHapticRoll(); haptic('heavy');
+    if (w.place === 1) lotFanfare(); else lotWinChime();   // фанфара на 1 месте, «динь» на 2-3
     document.getElementById('lotRevAv').innerHTML = lotAvatarHtml(w);
     document.getElementById('lotRevWho').textContent = w.is_me ? 'Вы 🎉' : w.name;
     document.getElementById('lotRevPrize').textContent = fmt(w.prize) + ' ₴';
