@@ -660,9 +660,23 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 .lot-reel{margin:28px 0 18px}
 .lot-reel .pb{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-soft);margin-bottom:12px}
 .lot-digits{display:flex;justify-content:center;gap:7px}
-.lot-dg{width:46px;height:62px;border-radius:12px;overflow:hidden;position:relative;background:linear-gradient(180deg,#1c1710,#0d0a07);border:1px solid var(--line);box-shadow:inset 0 6px 12px rgba(0,0,0,.6),inset 0 -6px 12px rgba(0,0,0,.6)}
-.lot-dg .col{position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;font-family:'Cinzel',serif;font-weight:800;font-size:33px;color:#fff5da}
+.lot-dg{width:46px;height:62px;border-radius:12px;overflow:hidden;position:relative;background:linear-gradient(180deg,#241d12,#0d0a07);border:1px solid rgba(212,175,55,.28);box-shadow:inset 0 8px 14px rgba(0,0,0,.7),inset 0 -8px 14px rgba(0,0,0,.7),0 2px 6px rgba(0,0,0,.5);
+  -webkit-mask-image:linear-gradient(transparent,#000 22%,#000 78%,transparent);mask-image:linear-gradient(transparent,#000 22%,#000 78%,transparent)}
+.lot-dg::after{content:"";position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:62%;pointer-events:none;
+  box-shadow:inset 0 0 0 1px rgba(255,240,196,.14);border-radius:6px}
+.lot-dg .col{position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;font-family:'Cinzel',serif;font-weight:800;font-size:33px;color:#fff5da;will-change:transform}
+.lot-dg .col.spinning{filter:blur(1.5px)}
 .lot-dg .col div{height:62px;display:grid;place-items:center;width:100%}
+.lot-rev-av{width:4rem;height:4rem;border-radius:50%;margin:0 auto 0.6rem;overflow:hidden;display:grid;place-items:center;
+  background:radial-gradient(circle at 40% 32%,#3b2c16,#120d07);border:2px solid var(--gold-soft);
+  box-shadow:0 0.5rem 1.2rem rgba(0,0,0,.55),0 0 0 0.35rem rgba(212,175,55,.1);
+  font-family:'Cinzel',serif;font-weight:800;font-size:1.6rem;color:var(--gold-soft)}
+.lot-rev-av img{width:100%;height:100%;object-fit:cover}
+.lot-row-av{position:relative;overflow:visible}
+.lot-row-av img{width:100%;height:100%;border-radius:50%;object-fit:cover}
+.lot-place-badge{position:absolute;right:-3px;bottom:-3px;min-width:15px;height:15px;padding:0 3px;border-radius:99px;
+  display:grid;place-items:center;font-family:'Manrope';font-size:9px;font-weight:800;font-style:normal;color:#120d05;
+  background:linear-gradient(135deg,var(--gold-soft),#b8891f);box-shadow:0 1px 3px rgba(0,0,0,.5)}
 .lot-reveal{margin-top:20px;opacity:0;transform:translateY(8px);transition:.5s var(--ease)}
 .lot-reveal.show{opacity:1;transform:none}
 .lot-reveal .who{font-size:18px;font-weight:800;color:#fff5da}
@@ -1129,6 +1143,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <div class="lot-digits" id="lotReelDigits"></div>
   </div>
   <div class="lot-reveal" id="lotReveal">
+    <div class="lot-rev-av" id="lotRevAv"></div>
     <div class="who" id="lotRevWho"></div>
     <div class="prize" id="lotRevPrize"></div>
     <div class="me" id="lotRevMe" style="display:none">Это вы 🎉</div>
@@ -1475,7 +1490,7 @@ function renderLotDraw() {
     let result = '';
     const last = LOT.last_result;
     if (last && last.winners.length) {
-      const rows = last.winners.map(w => `<div class="lot-ref" style="margin-top:8px"><div class="av">${w.place}</div><div class="nm"><b>${w.is_me ? 'Вы' : esc(w.name)}</b><span>число №${lotPad5(w.number)}</span></div><div class="lot-pill ok">${fmt(w.prize)} ₴</div></div>`).join('');
+      const rows = last.winners.map(w => `<div class="lot-ref" style="margin-top:8px">${lotRowAv(w)}<div class="nm"><b>${w.is_me ? 'Вы' : esc(w.name)}</b><span>число №${lotPad5(w.number)}</span></div><div class="lot-pill ok">${fmt(w.prize)} ₴</div></div>`).join('');
       result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${rows}</div>`;
     }
     document.getElementById('lot-draw').innerHTML =
@@ -1500,7 +1515,7 @@ function renderLotDraw() {
     const mine = last.winners.filter(w => w.is_me);
     let banner = '';
     if (mine.length) { const sum = mine.reduce((a, w) => a + w.prize, 0); banner = `<div class="lot-winbanner">🎉 Вы выиграли <b>${fmt(sum)} ₴</b> в прошлом розыгрыше! Приз на балансе.</div>`; }
-    const rows = last.winners.map(w => `<div class="lot-ref" style="margin-top:8px"><div class="av">${w.place}</div><div class="nm"><b>${w.is_me ? 'Вы' : esc(w.name)}</b><span>число №${lotPad5(w.number)}</span></div><div class="lot-pill ok">${fmt(w.prize)} ₴</div></div>`).join('');
+    const rows = last.winners.map(w => `<div class="lot-ref" style="margin-top:8px">${lotRowAv(w)}<div class="nm"><b>${w.is_me ? 'Вы' : esc(w.name)}</b><span>число №${lotPad5(w.number)}</span></div><div class="lot-pill ok">${fmt(w.prize)} ₴</div></div>`).join('');
     result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${banner}${rows}</div>`;
   }
   document.getElementById('lot-draw').innerHTML =
@@ -1571,9 +1586,12 @@ function lotDigitCols(finalStr) {
   for (const ch of finalStr) {
     const dg = document.createElement('div'); dg.className = 'lot-dg';
     const col = document.createElement('div'); col.className = 'col';
-    let seq = ''; for (let i = 0; i < 26; i++) seq += Math.floor(Math.random() * 10);
-    seq += ch;
-    col.innerHTML = [...seq].map(d => `<div>${d}</div>`).join('');
+    // длинная лента — несколько полных оборотов 0-9 (эффект барабана) + финальная цифра
+    const seq = [];
+    const cycles = 5 + Math.floor(Math.random() * 2);       // 5-6 оборотов
+    for (let c = 0; c < cycles; c++) for (let d = 0; d < 10; d++) seq.push(d);
+    seq.push(Number(ch));                                    // приземляемся на нужную
+    col.innerHTML = seq.map(d => `<div>${d}</div>`).join('');
     dg.appendChild(col); wrap.appendChild(dg); cells.push({ col, len: seq.length });
   }
   return cells;
@@ -1581,16 +1599,33 @@ function lotDigitCols(finalStr) {
 function spinLotReel(finalNum) {
   return new Promise(res => {
     const cells = lotDigitCols(lotPad5(finalNum));
+    let maxDur = 0;
     cells.forEach((c, i) => {
-      c.col.style.transition = 'none'; c.col.style.transform = 'translateY(0)';
       const targetY = -(c.len - 1) * LOT_CELL;
+      const dur = 2.5 + i * 0.4;                             // колонки тормозят слева направо
+      maxDur = Math.max(maxDur, dur);
+      c.col.style.transition = 'none';
+      c.col.style.transform = 'translateY(0)';
+      c.col.classList.add('spinning');                       // смаз во время кручения
+      void c.col.offsetHeight;                               // форс reflow, чтобы старт зафиксировался
       requestAnimationFrame(() => {
-        c.col.style.transition = `transform ${1.5 + i * 0.28}s cubic-bezier(.15,.85,.2,1)`;
+        // раскрутка → плавное торможение как у барабана
+        c.col.style.transition = `transform ${dur}s cubic-bezier(.1,.62,.12,1)`;
         c.col.style.transform = `translateY(${targetY}px)`;
+        setTimeout(() => c.col.classList.remove('spinning'), (dur - 0.55) * 1000);
       });
     });
-    setTimeout(res, 1500 + cells.length * 280 + 250);
+    setTimeout(res, maxDur * 1000 + 300);
   });
+}
+function lotAvatarHtml(w) {
+  if (w && w.avatar) return `<img src="${w.avatar}" alt="">`;
+  const nm = (w && w.name) || '?';
+  return (nm.trim()[0] || '?').toUpperCase();
+}
+function lotRowAv(w) {
+  const inner = w.avatar ? `<img src="${w.avatar}" alt="">` : esc((w.name || '?').trim()[0] || '?').toUpperCase();
+  return `<div class="av lot-row-av">${inner}<i class="lot-place-badge">${w.place}</i></div>`;
 }
 async function playLotDraw(last) {
   const ov = document.getElementById('lotOverlay'); ov.classList.add('on');
@@ -1604,6 +1639,7 @@ async function playLotDraw(last) {
     haptic('light');
     await spinLotReel(w.number);
     haptic('heavy');
+    document.getElementById('lotRevAv').innerHTML = lotAvatarHtml(w);
     document.getElementById('lotRevWho').textContent = w.is_me ? 'Вы 🎉' : w.name;
     document.getElementById('lotRevPrize').textContent = fmt(w.prize) + ' ₴';
     document.getElementById('lotRevMe').style.display = w.is_me ? 'inline-block' : 'none';

@@ -745,6 +745,11 @@ async def _run_lottery_draw(rnd: dict) -> None:
         return                                   # уже проведён кем-то другим
     for w in winners:
         await _lottery_pay(rnd["id"], w["place"], w["user_id"], w["prize"])
+        try:                                    # аватар победителя из Telegram — для красивого показа
+            av = await _avatar_data_uri(w["user_id"])
+            await db.lottery_set_avatar(rnd["id"], w["place"], av)
+        except Exception:
+            log.exception("Лотерея: аватар победителя не получен")
         await notify(w["user_id"],
                      f"🎉 <b>Розыгрыш Magic Market!</b>\n"
                      f"Ваше число <b>{w['number']:05d}</b> взяло <b>{w['place']} место</b> — "
@@ -1590,6 +1595,7 @@ async def _lottery_state(uid: int) -> dict:
             "winners": [{
                 "place": w["place"], "number": w["number"], "prize": w["prize"],
                 "name": w.get("name") or "участник",
+                "avatar": w.get("avatar"),
                 "is_me": int(w["user_id"]) == int(uid),
             } for w in wl],
         }
