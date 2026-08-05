@@ -3018,3 +3018,134 @@ async def lottery_pay_bonus(round_id: int, place: int, user_id: int, prize: int)
             "UPDATE lottery_winners SET paid=true WHERE round_id=$1 AND place=$2",
             round_id, place)
         return True
+
+
+async def admin_users_list(query: str = "", limit: int = 50) -> dict:
+    """Поиск пользователей для админки. query ищет по имени, юзернейму или id.
+    Возвращает {total, users:[{tg_id,name,username,balance,banned,created,orders}]}."""
+    q = (query or "").strip().lstrip("@")
+    async with _pool.acquire() as c:
+        if q:
+            like = f"%{q.lower()}%"
+            digits = q if q.isdigit() else None
+            rows = await c.fetch("""
+                SELECT u.tg_id, u.name, u.username, u.balance, u.banned, u.created,
+                       COUNT(o.id) FILTER (WHERE o.status >= 0) AS orders
+                FROM users u
+                LEFT JOIN orders o ON o.user_id = u.tg_id
+                WHERE lower(u.name) LIKE $1 OR lower(u.username) LIKE $1
+                      OR ($2::text IS NOT NULL AND u.tg_id = $2::bigint)
+                GROUP BY u.tg_id, u.name, u.username, u.balance, u.banned, u.created
+                ORDER BY u.created DESC LIMIT $3
+            """, like, digits, limit)
+            total = await c.fetchval("""
+                SELECT COUNT(*) FROM users u
+                WHERE lower(u.name) LIKE $1 OR lower(u.username) LIKE $1
+                      OR ($2::text IS NOT NULL AND u.tg_id = $2::bigint)
+            """, like, digits)
+        else:
+            rows = await c.fetch("""
+                SELECT u.tg_id, u.name, u.username, u.balance, u.banned, u.created,
+                       COUNT(o.id) FILTER (WHERE o.status >= 0) AS orders
+                FROM users u
+                LEFT JOIN orders o ON o.user_id = u.tg_id
+                GROUP BY u.tg_id, u.name, u.username, u.balance, u.banned, u.created
+                ORDER BY u.created DESC LIMIT $1
+            """, limit)
+            total = await c.fetchval("SELECT COUNT(*) FROM users")
+    return {
+        "total": int(total or 0),
+        "users": [{
+            "tg_id": r["tg_id"], "name": r["name"] or "?",
+            "username": r["username"], "balance": int(r["balance"] or 0),
+            "banned": bool(r["banned"]), "orders": int(r["orders"] or 0),
+            "created": r["created"].isoformat() if r["created"] else None,
+        } for r in rows],
+    }
+
+
+async def admin_user_detail(tg_id: int) -> dict:
+    """Полная карточка пользователя для админки: баланс, покупки, пополнения,
+    выводы, рефералы (и кто пригласил его самого)."""
+    async with _pool.acquire() as c:
+        await _expire_invoices(c)
+        u = await c.fetchrow("""
+            SELECT tg_id, name, username, balance, locked, wager_req, ref_by,
+                   ref_earned, banned, ban_reason, banned_at, created,
+                   platform, tg_premium, tg_photo
+            FROM users WHERE tg_id=$1
+        """, tg_id)
+        if not u:
+            raise ValueError("Пользователь не найден")
+        inviter = None
+        if u["ref_by"]:
+            inviter = await c.fetchrow(
+                "SELECT tg_id, name, username FROM users WHERE tg_id=$1", u["ref_by"])
+        orders = await c.fetch("""
+            SELECT id, product, grams, total, status, ttn, date, bonus_part, created
+            FROM orders WHERE user_id=$1 ORDER BY created DESC LIMIT 50
+        """, tg_id)
+        topups = await c.fetch("""
+            SELECT * FROM (
+                SELECT t.id, t.amount, 'receipt' AS kind,
+                       COALESCE(t.method,'') AS detail, t.status, t.created
+                FROM topups t WHERE t.user_id=$1
+                UNION ALL
+                SELECT i.id, i.amount_uah, 'crypto', i.currency, i.status, i.created
+                FROM invoices i WHERE i.user_id=$1 AND i.order_id IS NULL
+                UNION ALL
+                SELECT p.id, p.amount_uah, 'card',
+                       COALESCE('•'||right(p.card,4),''), p.status, p.created
+                FROM card_payments p WHERE p.user_id=$1
+            ) x ORDER BY created DESC LIMIT 50
+        """, tg_id)
+        withdrawals = await c.fetch("""
+            SELECT id, amount, method, requisites, status, created
+            FROM withdrawals WHERE user_id=$1 ORDER BY created DESC LIMIT 50
+        """, tg_id)
+        refs = await c.fetch("""
+            SELECT u.tg_id, u.name, u.username, u.created AS joined, u.banned,
+                   COUNT(o.id) FILTER (WHERE o.status >= 0)               AS orders,
+                   COALESCE(SUM(o.total) FILTER (WHERE o.status >= 0), 0) AS spent
+            FROM users u
+            LEFT JOIN orders o ON o.user_id = u.tg_id
+            WHERE u.ref_by=$1
+            GROUP BY u.tg_id, u.name, u.username, u.created, u.banned
+            ORDER BY spent DESC, joined DESC LIMIT 100
+        """, tg_id)
+    bal, locked = int(u["balance"] or 0), int(u["locked"] or 0)
+    return {
+        "user": {
+            "tg_id": u["tg_id"], "name": u["name"] or "?", "username": u["username"],
+            "balance": bal, "locked": locked, "withdrawable": max(0, bal - locked),
+            "wager_req": int(u["wager_req"] or 0),
+            "banned": bool(u["banned"]), "ban_reason": u["ban_reason"],
+            "ref_earned": int(u["ref_earned"] or 0),
+            "created": u["created"].isoformat() if u["created"] else None,
+            "platform": u["platform"], "premium": u["tg_premium"], "photo": u["tg_photo"],
+        },
+        "inviter": ({"tg_id": inviter["tg_id"], "name": inviter["name"] or "?",
+                     "username": inviter["username"]} if inviter else None),
+        "orders": [{
+            "id": r["id"], "product": r["product"], "grams": r["grams"],
+            "total": int(r["total"] or 0), "status": r["status"], "ttn": r["ttn"],
+            "date": r["date"], "bonus_part": int(r["bonus_part"] or 0),
+            "created": r["created"].isoformat() if r["created"] else None,
+        } for r in orders],
+        "topups": [{
+            "id": r["id"], "amount": int(r["amount"] or 0), "kind": r["kind"],
+            "detail": r["detail"], "status": r["status"],
+            "created": r["created"].isoformat() if r["created"] else None,
+        } for r in topups],
+        "withdrawals": [{
+            "id": r["id"], "amount": int(r["amount"] or 0), "method": r["method"],
+            "requisites": r["requisites"], "status": r["status"],
+            "created": r["created"].isoformat() if r["created"] else None,
+        } for r in withdrawals],
+        "referrals": [{
+            "tg_id": r["tg_id"], "name": r["name"] or "?", "username": r["username"],
+            "joined": r["joined"].isoformat() if r["joined"] else None,
+            "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
+            "banned": bool(r["banned"]),
+        } for r in refs],
+    }

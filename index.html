@@ -1401,6 +1401,8 @@ async function adminSync() {
   if ([...document.querySelectorAll('#adminBody input')].some(i => i.value.trim())) return;
   // раскрыт список приглашённых у реферера — не сбиваем его авто-перерисовкой
   if (document.querySelector('#adminBody .ref-detail:not(.hide)')) return;
+  // разделы с собственной загрузкой/состоянием (поиск, открытая карточка) — не трогаем
+  if (adminTab === 'users' || adminTab === 'lottery') return;
   adminSyncing = true;
   try {
     AD = await API.call('/api/admin/data');
@@ -3288,7 +3290,7 @@ function renderAdmin(tab) {
     ['orders', 'Заказы' + (ordersTodo ? ` · ${ordersTodo}${dot}` : '')],
     ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}${dot}` : '')],
     ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}${dot}` : '')],
-    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['lottery', 'Рулетка'], ['reviews', 'Отзывы'], ['pay', 'Оплата'],
+    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['users', 'Пользователи'], ['lottery', 'Рулетка'], ['reviews', 'Отзывы'], ['pay', 'Оплата'],
   ];
   document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
     `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
@@ -3459,6 +3461,8 @@ function renderAdmin(tab) {
       if (adminTab !== 'reviews') return;
       renderAdminReviews(d.reviews || []);
     }).catch(() => { if (adminTab === 'reviews') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
+  } else if (tab === 'users') {
+    renderAdminUsers();
   } else if (tab === 'lottery') {
     b.innerHTML = '<p class="note">Загрузка…</p>';
     renderAdminLottery();
@@ -4089,6 +4093,85 @@ async function banUser(id, ban) {
   };
   if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
   else if (confirm(msg)) go();
+}
+let auSearchTimer = null;
+function auEsc(s) { return String(s == null ? '' : s).replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch])); }
+function auDate(iso) { if (!iso) return ''; try { return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: '2-digit' }); } catch (e) { return ''; } }
+function renderAdminUsers() {
+  const b = document.getElementById('adminBody');
+  b.innerHTML = `
+    <div class="field" style="margin-bottom:10px">
+      <input id="auSearch" placeholder="Поиск по имени, @юзернейму или ID" autocomplete="off"
+             oninput="clearTimeout(auSearchTimer); auSearchTimer=setTimeout(()=>loadAdminUsers(this.value),300)">
+    </div>
+    <div id="auList"><p class="note">Загрузка…</p></div>`;
+  loadAdminUsers('');
+}
+async function loadAdminUsers(q) {
+  const list = document.getElementById('auList');
+  if (!list) return;
+  let d;
+  try { d = await API.call('/api/admin/users', { q: q || '' }); }
+  catch (e) { if (adminTab === 'users' && list) list.innerHTML = '<p class="note">Не удалось загрузить</p>'; return; }
+  if (adminTab !== 'users' || !document.getElementById('auList')) return;
+  const users = d.users || [];
+  const head = `<p class="note" style="margin:0 0 8px">${q ? `найдено: ${users.length}` : `всего пользователей: ${fmt(d.total || 0)}`}${d.total > users.length ? ` · показаны первые ${users.length}` : ''}</p>`;
+  list.innerHTML = head + (users.length ? users.map(u => `
+    <div class="set-row" style="cursor:pointer" onclick="adminUserOpen(${u.tg_id})">
+      <div><h3>${u.banned ? '⛔ ' : ''}${auEsc(u.name)}${u.username ? ' · @' + auEsc(u.username) : ''}</h3>
+      <p>${fmt(u.balance)} ₴ · ${u.orders} зак.${u.created ? ' · с ' + auDate(u.created) : ''} · ID ${u.tg_id}</p></div>
+      <b style="margin-left:auto;color:var(--muted)">›</b>
+    </div>`).join('') : '<p class="note">никого не нашли</p>');
+}
+const AU_ORDER_ST = { '-2': 'отменён', '-1': 'ждёт оплаты', '0': 'оплачен', '1': 'в работе', '2': 'отправлен', '3': 'получен' };
+const AU_PAY_ST = { '0': 'в обработке', '1': 'зачислено', '2': 'отклонено' };
+const AU_WD_ST = { '0': 'на проверке', '1': 'выплачено', '2': 'отклонено' };
+const AU_KIND = { receipt: 'квитанция', crypto: 'крипта', card: 'карта' };
+async function adminUserOpen(id) {
+  const b = document.getElementById('adminBody');
+  b.innerHTML = '<p class="note">Загрузка…</p>';
+  let d;
+  try { d = await API.call('/api/admin/user', { id }); }
+  catch (e) { b.innerHTML = `<button class="btn btn-line" onclick="renderAdmin('users')">← к списку</button><p class="note" style="margin-top:12px">${auEsc(e.message || 'Не удалось загрузить')}</p>`; return; }
+  if (adminTab !== 'users') return;
+  const u = d.user;
+  const sect = (title, n, inner) => `<div class="section-head" style="margin:16px 0 8px"><h2 style="font-size:15px">${title}</h2><span>${n}</span></div>${inner}`;
+  const orders = (d.orders || []).map(o => `
+    <div class="set-row"><div><h3>${auEsc(o.product || 'Заказ')}${o.grams ? ' · ' + o.grams + ' г' : ''}</h3>
+    <p>${fmt(o.total)} ₴${o.bonus_part ? ` (бонус ${fmt(o.bonus_part)} ₴)` : ''} · ${AU_ORDER_ST[o.status] || o.status}${o.date ? ' · ' + auEsc(o.date) : ''}${o.ttn ? ' · ТТН ' + auEsc(o.ttn) : ''}</p></div></div>`).join('') || '<p class="note">нет заказов</p>';
+  const topups = (d.topups || []).map(t => `
+    <div class="set-row"><div><h3>${fmt(t.amount)} ₴ · ${AU_KIND[t.kind] || t.kind}${t.detail ? ' ' + auEsc(t.detail) : ''}</h3>
+    <p>${AU_PAY_ST[t.status] || t.status}${t.created ? ' · ' + auDate(t.created) : ''}</p></div></div>`).join('') || '<p class="note">нет пополнений</p>';
+  const withdrawals = (d.withdrawals || []).map(w => `
+    <div class="set-row"><div><h3>${fmt(w.amount)} ₴${w.method ? ' · ' + auEsc(w.method) : ''}</h3>
+    <p>${AU_WD_ST[w.status] || w.status}${w.created ? ' · ' + auDate(w.created) : ''}${w.requisites ? ' · ' + auEsc(w.requisites) : ''}</p></div></div>`).join('') || '<p class="note">нет выводов</p>';
+  const refs = (d.referrals || []).map(r => `
+    <div class="set-row" style="cursor:pointer" onclick="adminUserOpen(${r.tg_id})"><div><h3>${r.banned ? '⛔ ' : ''}${auEsc(r.name)}${r.username ? ' · @' + auEsc(r.username) : ''}</h3>
+    <p>${r.orders} зак. на ${fmt(r.spent)} ₴${r.joined ? ' · пришёл ' + auDate(r.joined) : ''} · ID ${r.tg_id}</p></div>
+    <b style="margin-left:auto;color:var(--muted)">›</b></div>`).join('') || '<p class="note">никого не пригласил</p>';
+  const inviter = d.inviter
+    ? `<p class="note" style="margin:6px 0 0">Пригласил: <b style="cursor:pointer;color:var(--gold-soft)" onclick="adminUserOpen(${d.inviter.tg_id})">${auEsc(d.inviter.name)}${d.inviter.username ? ' · @' + auEsc(d.inviter.username) : ''}</b> · ID ${d.inviter.tg_id}</p>`
+    : '';
+  b.innerHTML = `
+    <button class="btn btn-line" onclick="renderAdmin('users')">← к списку</button>
+    <div class="bezel gold" style="margin:12px 0"><div class="bezel-core" style="padding:15px 16px">
+      <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:16px">${u.banned ? '⛔ ' : ''}${auEsc(u.name)}</h2><span>${u.username ? '@' + auEsc(u.username) : 'ID ' + u.tg_id}</span></div>
+      <div class="admin-stats">
+        <div><b>${fmt(u.balance)} ₴</b><span>баланс</span></div>
+        <div><b style="color:var(--gold-soft)">${fmt(u.withdrawable)} ₴</b><span>к выводу</span></div>
+        <div><b style="color:var(--warn)">${fmt(u.locked)} ₴</b><span>бонус (не выводится)</span></div>
+        <div><b>${fmt(u.wager_req)} ₴</b><span>вейджер остаток</span></div>
+        <div><b>${fmt(u.ref_earned)} ₴</b><span>заработал с рефералки</span></div>
+        <div><b>${(d.referrals || []).length}</b><span>приглашено</span></div>
+      </div>
+      <p class="note" style="margin:8px 0 0">ID ${u.tg_id}${u.created ? ' · с ' + auDate(u.created) : ''}${u.banned ? ` · <span style="color:#ff6b6b">ЗАБЛОКИРОВАН</span>${u.ban_reason ? ' (' + auEsc(u.ban_reason) + ')' : ''}` : ''}</p>
+      ${inviter}
+      <div style="margin-top:12px"><button class="ref-ban${u.banned ? ' on' : ''}" onclick="banUser(${u.tg_id}, ${u.banned ? 'false' : 'true'}); setTimeout(()=>adminUserOpen(${u.tg_id}), 400)">${u.banned ? '♻ Разбанить' : '🚫 Забанить'}</button></div>
+    </div></div>
+    ${sect('Покупки', (d.orders || []).length, orders)}
+    ${sect('Пополнения', (d.topups || []).length, topups)}
+    ${sect('Выводы', (d.withdrawals || []).length, withdrawals)}
+    ${sect('Рефералы', (d.referrals || []).length, refs)}`;
 }
 async function genPromos() {
   const amount = parseInt(document.getElementById('promoAmount').value, 10);
