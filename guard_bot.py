@@ -436,17 +436,29 @@ async def run(notify=None, on_ban=None, on_unban=None):
     # ── модерация (только админы чата или GUARD_ADMIN_ID) ──────────────────────
     @dp.message(Command("ban"))
     async def cmd_ban(message: Message, command: CommandObject):
-        if message.chat.type == "private" or not await is_admin(message.chat.id, message.from_user.id):
+        priv = message.chat.type == "private"
+        # в личке команду принимаем только от владельца (GUARD_ADMIN_ID)
+        if priv:
+            if message.from_user.id != GUARD_ADMIN_ID:
+                return
+        elif not await is_admin(message.chat.id, message.from_user.id):
             return
         uid, name, reason = await resolve_target(message, command)
         if not uid:
-            return await message.reply("Ответьте на сообщение или: /ban &lt;id&gt; &lt;причина&gt;",
-                                       parse_mode="HTML")
-        try:
-            await bot.ban_chat_member(message.chat.id, uid)
-        except Exception:
-            return await message.reply("Не удалось забанить — проверьте права бота")
+            return await message.reply(
+                "Кого банить? Пришлите: <code>/ban ID причина</code>" if priv
+                else "Ответьте на сообщение или: /ban &lt;id&gt; &lt;причина&gt;",
+                parse_mode="HTML")
+        if not priv:
+            try:
+                await bot.ban_chat_member(message.chat.id, uid)
+            except Exception:
+                return await message.reply("Не удалось забанить — проверьте права бота")
         await _universal_ban(uid, reason or "бан командой /ban")   # везде сразу
+        if priv:
+            return await message.answer(
+                f"🚫 <b>{_esc(name)}</b> забанен везде — казино, маркет и чаты.",
+                parse_mode="HTML")
         if message.reply_to_message:
             try:
                 await message.reply_to_message.delete()
@@ -521,16 +533,27 @@ async def run(notify=None, on_ban=None, on_unban=None):
 
     @dp.message(Command("unban"))
     async def cmd_unban(message: Message, command: CommandObject):
-        if message.chat.type == "private" or not await is_admin(message.chat.id, message.from_user.id):
+        priv = message.chat.type == "private"
+        if priv:
+            if message.from_user.id != GUARD_ADMIN_ID:
+                return
+        elif not await is_admin(message.chat.id, message.from_user.id):
             return
         uid, name, reason = await resolve_target(message, command)
         if not uid:
-            return await message.reply("Укажите: /unban &lt;id&gt;", parse_mode="HTML")
-        try:
-            await bot.unban_chat_member(message.chat.id, uid, only_if_banned=True)
-        except Exception:
-            return await message.reply("Не удалось — проверьте права бота")
+            return await message.reply(
+                "Кого разбанить? Пришлите: <code>/unban ID</code>" if priv
+                else "Укажите: /unban &lt;id&gt;", parse_mode="HTML")
+        if not priv:
+            try:
+                await bot.unban_chat_member(message.chat.id, uid, only_if_banned=True)
+            except Exception:
+                return await message.reply("Не удалось — проверьте права бота")
         await _universal_unban(uid)          # разбан везде: казино/маркет и чаты
+        if priv:
+            return await message.answer(
+                f"✅ <b>{_esc(name)}</b> разбанен везде — доступ вернулся.",
+                parse_mode="HTML")
         await log_action("✅", "Разбан", message.chat, message.from_user.full_name, name, uid, reason)
         try:
             await message.delete()
