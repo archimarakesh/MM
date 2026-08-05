@@ -1723,10 +1723,24 @@ function lotBurst() {
 }
 document.getElementById('lotClose').onclick = () => {
   stopHapticRoll();
-  if (LOT?.last_result) localStorage.setItem(LOT_SEEN, LOT.last_result.round);
   document.getElementById('lotOverlay').classList.remove('on'); document.getElementById('lotConfetti').classList.remove('on');
-  haptic(); renderLottery();
+  haptic();
+  if (window.__lotDemo) { window.__lotDemo = false; return; }   // демо — не трогаем реальный статус
+  if (LOT?.last_result) localStorage.setItem(LOT_SEEN, LOT.last_result.round);
+  renderLottery();
 };
+// демо-прогон анимации из админки: показывает жеребьёвку без сервера и начислений
+function lotDemoDraw() {
+  lotResumeAudio();
+  const r5 = () => Math.floor(10000 + Math.random() * 90000);
+  const demo = { round: 0, winners: [
+    { place: 1, number: r5(), prize: 5000, name: 'Вы', is_me: true, avatar: (tg?.initDataUnsafe?.user?.photo_url || null) },
+    { place: 2, number: r5(), prize: 2500, name: 'Игрок №2', is_me: false, avatar: null },
+    { place: 3, number: r5(), prize: 1000, name: 'Игрок №3', is_me: false, avatar: null },
+  ]};
+  window.__lotDemo = true;
+  playLotDraw(demo);
+}
 
 /* ═══════════ Шторки ═══════════ */
 function openSheet(name) {
@@ -3430,6 +3444,8 @@ async function renderAdminLottery() {
   if (adminTab !== 'lottery') return;
   const dt = s => s ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
   const def = d.defaults || { days: 14, prizes: [5000, 2500, 1000], per_ticket: 3 };
+  const testBtn = `<button class="btn btn-ghost" style="margin-top:10px" onclick="lotDemoDraw()">🎬 Тестовый прогон анимации</button>
+      <p class="note" style="margin:6px 0 0">Демо-жеребьёвка со звуком и аватаром — без начислений и без влияния на реальный розыгрыш.</p>`;
   let last = '';
   if (d.last && d.last.winners && d.last.winners.length) {
     last = `<div class="section-head" style="margin-top:14px"><h2>Прошлый розыгрыш</h2><span>${dt(d.last.drawn_at)}</span></div>` +
@@ -3449,7 +3465,7 @@ async function renderAdminLottery() {
       <p class="note" style="margin:0 0 10px">Отсчёт идёт, рефералы засчитываются. Можно провести розыгрыш прямо сейчас (иначе он пройдёт сам в момент дедлайна) или отменить круг без розыгрыша.</p>
       <button class="btn btn-gold" onclick="lotAdminDraw()">🎲 Провести розыгрыш сейчас</button>
       <button class="btn btn-ghost" style="margin-top:10px" onclick="lotAdminCancel()">Отменить круг (без розыгрыша)</button>
-      ${last}`;
+      ${testBtn}${last}`;
   } else {
     b.innerHTML = `
       <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Задайте срок и призы и нажмите «Запустить».</p>
@@ -3457,7 +3473,7 @@ async function renderAdminLottery() {
       <div class="field"><label>Призы через запятую (1-е, 2-е, 3-е…), ₴</label><input id="lotPrizes" value="${(def.prizes || []).join(',')}"></div>
       <p class="note" style="margin:2px 0 10px">Одно число даётся за каждые ${def.per_ticket} приглашённых. Приз — за каждое выигравшее число.</p>
       <button class="btn btn-gold" onclick="lotAdminStart()">🚀 Запустить розыгрыш</button>
-      ${last}`;
+      ${testBtn}${last}`;
   }
 }
 function lotConfirm(msg, cb) {
