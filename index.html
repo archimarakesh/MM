@@ -3535,7 +3535,7 @@ async function renderAdminLottery() {
       ${testBtn}${last}`;
   } else {
     b.innerHTML = `
-      <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Задайте срок и призы и нажмите «Запустить».</p>
+      <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Задайте срок и призы и нажмите «Запустить». Жеребьёвка пройдёт <b>в последний день в 22:00</b> (Киев), а участникам придёт напоминание за час.</p>
       <div class="field"><label>Длительность, дней</label><input id="lotDays" inputmode="numeric" value="${def.days}"></div>
       <div class="field"><label>Призы через запятую (1-е, 2-е, 3-е…), ₴</label><input id="lotPrizes" value="${(def.prizes || []).join(',')}"></div>
       <p class="note" style="margin:2px 0 10px">Одно число даётся за каждые ${def.per_ticket} приглашённых. Приз — за каждое выигравшее число.</p>
@@ -3550,7 +3550,7 @@ function lotConfirm(msg, cb) {
 async function lotAdminStart() {
   const days = parseInt(document.getElementById('lotDays').value, 10) || 14;
   const prizes = (document.getElementById('lotPrizes').value || '').trim();
-  lotConfirm(`Запустить розыгрыш на ${days} дн.? Отсчёт и зачёт рефералов начнутся сразу.`, async () => {
+  lotConfirm(`Запустить розыгрыш на ${days} дн.? Жеребьёвка — в последний день в 22:00. Отсчёт и зачёт рефералов начнутся сразу.`, async () => {
     try { await API.call('/api/admin/lottery/start', { days, prizes }); toast('Розыгрыш запущен'); haptic('medium'); renderAdminLottery(); }
     catch (e) { toast(e.message || 'Ошибка'); }
   });
