@@ -397,6 +397,7 @@ async def init():
                 name     TEXT,
                 paid     BOOLEAN NOT NULL DEFAULT false,
                 PRIMARY KEY(round_id, place));
+            ALTER TABLE lottery_winners ADD COLUMN IF NOT EXISTS avatar TEXT;
         """)
         if await c.fetchval("SELECT COUNT(*) FROM products") == 0:
             for i, (name, sub, emoji, tag, base) in enumerate(SEED_PRODUCTS):
@@ -2912,9 +2913,18 @@ async def lottery_my_referrals(referrer: int, since=None) -> list[dict]:
 async def lottery_winners(round_id: int) -> list[dict]:
     async with _pool.acquire() as c:
         rows = await c.fetch(
-            "SELECT place, user_id, number, prize, name FROM lottery_winners "
+            "SELECT place, user_id, number, prize, name, avatar FROM lottery_winners "
             "WHERE round_id=$1 ORDER BY place", round_id)
         return [dict(r) for r in rows]
+
+
+async def lottery_set_avatar(round_id: int, place: int, avatar: str | None) -> None:
+    if not avatar:
+        return
+    async with _pool.acquire() as c:
+        await c.execute(
+            "UPDATE lottery_winners SET avatar=$3 WHERE round_id=$1 AND place=$2",
+            round_id, place, avatar)
 
 
 async def lottery_draw(round_id: int, prizes: list[int]) -> list[dict] | None:
