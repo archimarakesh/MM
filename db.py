@@ -369,6 +369,8 @@ async def init():
                 prizes   TEXT NOT NULL DEFAULT '5000,2500,1000',
                 drawn_at TIMESTAMPTZ,
                 created  TIMESTAMPTZ NOT NULL DEFAULT now());
+            -- отправлено ли напоминание «за час до розыгрыша» по этому кругу
+            ALTER TABLE lottery_rounds ADD COLUMN IF NOT EXISTS pre_notified BOOLEAN NOT NULL DEFAULT false;
             -- подтверждённые рефералы: пара уникальна ГЛОБАЛЬНО — одного человека
             -- нельзя переиспользовать в следующем круге. ticketed=true — уже в билете.
             CREATE TABLE IF NOT EXISTS lottery_refs(
@@ -2754,9 +2756,9 @@ async def lottery_open_round() -> dict | None:
         return dict(row) if row else None
 
 
-async def lottery_start(days: int, prizes: str) -> dict:
-    """Запустить круг вручную: создаёт открытый круг со сроком now()+days, если
-    открытого ещё нет (иначе возвращает текущий). С этого момента идёт отсчёт и
+async def lottery_start(deadline, prizes: str) -> dict:
+    """Запустить круг вручную с ЯВНЫМ дедлайном (datetime): если открытого круга
+    ещё нет — создаём, иначе возвращаем текущий. С этого момента идёт отсчёт и
     засчитываются рефералы."""
     async with _pool.acquire() as c, c.transaction():
         await c.execute("SELECT pg_advisory_xact_lock(hashtext($1))", "lotstart")
@@ -2765,9 +2767,26 @@ async def lottery_start(days: int, prizes: str) -> dict:
         if not row:
             row = await c.fetchrow(
                 "INSERT INTO lottery_rounds(status, deadline, prizes) "
-                "VALUES('open', now() + make_interval(days => $1), $2) RETURNING *",
-                int(days), str(prizes))
+                "VALUES('open', $1, $2) RETURNING *", deadline, str(prizes))
         return dict(row)
+
+
+async def lottery_participant_ids(round_id: int) -> list[int]:
+    """tg_id всех участников круга (у кого есть числа) — для рассылки напоминания."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT DISTINCT user_id FROM lottery_tickets WHERE round_id=$1", round_id)
+        return [r["user_id"] for r in rows]
+
+
+async def lottery_mark_prenotified(round_id: int) -> bool:
+    """Помечает круг «напоминание отправлено». Возвращает True, если пометили
+    именно сейчас (для защиты от повторной рассылки тикером)."""
+    async with _pool.acquire() as c:
+        row = await c.fetchrow(
+            "UPDATE lottery_rounds SET pre_notified=true "
+            "WHERE id=$1 AND pre_notified=false RETURNING id", round_id)
+        return row is not None
 
 
 async def lottery_cancel(round_id: int) -> None:

@@ -761,17 +761,43 @@ async def _run_lottery_draw(rnd: dict) -> None:
     log.info("Лотерея: круг #%s разыгран, победителей %s", rnd["id"], len(winners))
 
 
+async def _lottery_prenotify(rnd: dict) -> None:
+    """Напоминание участникам «за час до розыгрыша». Помечаем круг первым — чтобы
+    тикер не разослал повторно."""
+    if not await db.lottery_mark_prenotified(rnd["id"]):
+        return
+    dl = rnd.get("deadline")
+    tstr = dl.astimezone(KYIV).strftime("%H:%M") if dl else "22:00"
+    prizes = lottery._parse_prizes(rnd.get("prizes")) or lottery.PRIZES
+    ptxt = " / ".join(str(p) for p in prizes)
+    text = ("⏰ <b>Через час — розыгрыш Magic Market!</b>\n"
+            f"Сегодня в <b>{tstr}</b> определим победителей. Призы на баланс: <b>{ptxt} ₴</b>.\n"
+            "Открой раздел «Рулетка» в приложении, чтобы посмотреть жеребьёвку вживую 🎰")
+    ids = await db.lottery_participant_ids(rnd["id"])
+    for uid in ids:
+        await notify(uid, text)
+        await asyncio.sleep(0.05)               # мягкий троттлинг, чтобы не упереться в лимиты
+    if ADMIN_ID:
+        await notify(ADMIN_ID, f"⏰ Напоминание о розыгрыше #{rnd['id']} разослано: {len(ids)} участникам.")
+    log.info("Лотерея: разослано напоминание по кругу #%s (%s чел.)", rnd["id"], len(ids))
+
+
 async def lottery_ticker():
-    """Каждые 30с: если запущенный круг дошёл до дедлайна — проводим розыгрыш.
-    Сам круг не создаём — его запускают вручную из админки."""
+    """Каждые 30с: за час до дедлайна — напоминание участникам; по дедлайну —
+    розыгрыш. Сам круг не создаём — его запускают вручную из админки."""
     await asyncio.sleep(5)
     while True:
         try:
             if LOTTERY_ENABLED:
                 rnd = await db.lottery_open_round()
                 dl = rnd.get("deadline") if rnd else None
-                if dl and dl <= datetime.now(dl.tzinfo):
-                    await _run_lottery_draw(rnd)
+                if dl:
+                    now = datetime.now(dl.tzinfo)
+                    secs = (dl - now).total_seconds()
+                    if 0 < secs <= 3600 and not rnd.get("pre_notified"):
+                        await _lottery_prenotify(rnd)
+                    if dl <= now:
+                        await _run_lottery_draw(rnd)
         except Exception:
             log.exception("lottery_ticker")
         await asyncio.sleep(30)
@@ -1680,10 +1706,13 @@ async def api_admin_lottery_start(request: Request):
     days = max(1, min(days, 120))
     prizes = lottery._parse_prizes(str(b.get("prizes") or "")) or lottery.PRIZES
     prizes = [max(0, int(p)) for p in prizes][:10]
-    await db.lottery_start(days, ",".join(map(str, prizes)))
+    # дедлайн ВСЕГДА в последний день в 22:00 по Киеву — во сколько бы ни запустили
+    deadline = (datetime.now(KYIV) + timedelta(days=days)).replace(
+        hour=22, minute=0, second=0, microsecond=0)
+    await db.lottery_start(deadline, ",".join(map(str, prizes)))
     if ADMIN_ID:
-        await notify(ADMIN_ID, f"🎰 Розыгрыш запущен на {days} дн. Призы: "
-                     + " · ".join(f"{p} ₴" for p in prizes))
+        await notify(ADMIN_ID, f"🎰 Розыгрыш запущен. Жеребьёвка {deadline.strftime('%d.%m в 22:00')}. "
+                     "Призы: " + " · ".join(f"{p} ₴" for p in prizes))
     await ws_broadcast({"t": "lottery_start"})   # обновить открытые приложения
     return await _admin_lottery_snapshot()
 
