@@ -1441,7 +1441,7 @@ function go(v) {
   if (v === 'topup') openWallet('topup');
   if (v === 'egrow') renderEgrow();
   if (v === 'referrals') renderReferrals();
-  if (v === 'lottery') loadLottery();
+  if (v === 'lottery') { lotResumeAudio(); loadLottery(); }
   const sc = document.getElementById('views'); if (sc) sc.scrollTop = 0;   // скроллер, не окно
   revealNow(el);   // синхронно — иначе кадр с opacity:0 успевает отрисоваться и раздел мигает
 }
@@ -1452,7 +1452,7 @@ const lotPad5 = n => String(n).padStart(5, '0');
 const LOT_SEEN = 'mm_lottery_seen_round';
 
 function lotGo(t) {
-  haptic('light'); lotTab = t;
+  haptic('light'); lotResumeAudio(); lotTab = t;
   document.querySelectorAll('.lot-sec').forEach(x => x.classList.remove('active'));
   document.getElementById('lot-' + t).classList.add('active');
   document.querySelectorAll('.lot-tab').forEach(x => x.classList.toggle('active', x.dataset.lt === t));
@@ -1580,6 +1580,63 @@ function maybeLotAnimate() {
   const seen = Number(localStorage.getItem(LOT_SEEN) || 0);
   if (last.round > seen) playLotDraw(last);
 }
+/* ── звук: барабанная дробь (Web Audio, без файлов) ── */
+let lotAC = null;
+function lotAudio() {
+  if (lotAC !== null) return lotAC || null;
+  try { lotAC = new (window.AudioContext || window.webkitAudioContext)(); }
+  catch (e) { lotAC = 0; }
+  return lotAC || null;
+}
+function lotResumeAudio() { const a = lotAudio(); if (a && a.state === 'suspended') a.resume().catch(() => {}); }
+function lotNoise(a, sec) {
+  const n = Math.max(1, Math.floor(a.sampleRate * sec)), b = a.createBuffer(1, n, a.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+function lotDrumRoll(dur) {
+  const a = lotAudio(); if (!a) return; if (a.state === 'suspended') a.resume().catch(() => {});
+  const t0 = a.currentTime, buf = lotNoise(a, 0.12), end = t0 + dur;
+  let t = t0, i = 0;
+  while (t < end && i < 500) {
+    const prog = (t - t0) / dur;                          // 0..1 — к концу громче и чаще
+    const src = a.createBufferSource(); src.buffer = buf;
+    const bp = a.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 0.9;
+    const g = a.createGain();
+    const amp = 0.04 + 0.16 * prog;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(amp, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    src.connect(bp); bp.connect(g); g.connect(a.destination);
+    src.start(t); src.stop(t + 0.09);
+    t += Math.max(0.03, 0.09 - 0.06 * prog);              // ускоряемся: 90мс → 30мс
+    i++;
+  }
+}
+function lotCrash() {
+  const a = lotAudio(); if (!a) return; const t = a.currentTime;
+  const src = a.createBufferSource(); src.buffer = lotNoise(a, 1.0);
+  const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 5000;
+  const g = a.createGain(); g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.32, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+  src.connect(hp); hp.connect(g); g.connect(a.destination); src.start(t); src.stop(t + 1.0);
+  const o = a.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(190, t); o.frequency.exponentialRampToValueAtTime(60, t + 0.25);
+  const og = a.createGain(); og.gain.setValueAtTime(0.5, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+  o.connect(og); og.connect(a.destination); o.start(t); o.stop(t + 0.32);
+}
+let lotHapticRoll = null;
+function startHapticRoll(dur) {
+  clearInterval(lotHapticRoll); const t0 = Date.now();
+  lotHapticRoll = setInterval(() => {
+    const p = (Date.now() - t0) / (dur * 1000);
+    if (p >= 1) { clearInterval(lotHapticRoll); return; }
+    try { tg?.HapticFeedback?.impactOccurred(p > 0.7 ? 'medium' : 'light'); } catch (e) {}
+  }, 90);
+}
+function stopHapticRoll() { clearInterval(lotHapticRoll); }
+
 function lotDigitCols(finalStr) {
   const wrap = document.getElementById('lotReelDigits'); wrap.innerHTML = '';
   const cells = [];
@@ -1600,6 +1657,9 @@ function spinLotReel(finalNum) {
   return new Promise(res => {
     const cells = lotDigitCols(lotPad5(finalNum));
     let maxDur = 0;
+    // предварительная оценка длительности для барабанной дроби
+    const spinDur = 2.5 + (cells.length - 1) * 0.4;
+    lotDrumRoll(spinDur); startHapticRoll(spinDur);
     cells.forEach((c, i) => {
       const targetY = -(c.len - 1) * LOT_CELL;
       const dur = 2.5 + i * 0.4;                             // колонки тормозят слева направо
@@ -1638,7 +1698,7 @@ async function playLotDraw(last) {
     rev.classList.remove('show'); document.getElementById('lotRevMe').style.display = 'none';
     haptic('light');
     await spinLotReel(w.number);
-    haptic('heavy');
+    stopHapticRoll(); lotCrash(); haptic('heavy');   // удар барабана + отдача на показе
     document.getElementById('lotRevAv').innerHTML = lotAvatarHtml(w);
     document.getElementById('lotRevWho').textContent = w.is_me ? 'Вы 🎉' : w.name;
     document.getElementById('lotRevPrize').textContent = fmt(w.prize) + ' ₴';
@@ -1662,6 +1722,7 @@ function lotBurst() {
   })();
 }
 document.getElementById('lotClose').onclick = () => {
+  stopHapticRoll();
   if (LOT?.last_result) localStorage.setItem(LOT_SEEN, LOT.last_result.round);
   document.getElementById('lotOverlay').classList.remove('on'); document.getElementById('lotConfetti').classList.remove('on');
   haptic(); renderLottery();
