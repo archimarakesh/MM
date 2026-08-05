@@ -2988,3 +2988,24 @@ async def lottery_mark_paid(round_id: int, place: int) -> None:
         await c.execute(
             "UPDATE lottery_winners SET paid=true WHERE round_id=$1 AND place=$2",
             round_id, place)
+
+
+async def lottery_pay_bonus(round_id: int, place: int, user_id: int, prize: int) -> bool:
+    """Начислить приз как НЕВЫВОДИМЫЙ бонус (в locked, с вейджером — как обычный
+    бонус магазина): нельзя вывести напрямую, можно потратить в магазине или
+    отыграть в казино. Идемпотентно: платим только если winner ещё не paid, и
+    ставим paid в той же транзакции."""
+    async with _pool.acquire() as c, c.transaction():
+        w = await c.fetchrow(
+            "SELECT paid FROM lottery_winners WHERE round_id=$1 AND place=$2 FOR UPDATE",
+            round_id, place)
+        if not w or w["paid"]:
+            return False
+        await c.execute(
+            f"UPDATE users SET balance=balance+$1, locked=locked+$1, "
+            f"wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} "
+            f"WHERE tg_id=$2", int(prize), int(user_id))
+        await c.execute(
+            "UPDATE lottery_winners SET paid=true WHERE round_id=$1 AND place=$2",
+            round_id, place)
+        return True
