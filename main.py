@@ -718,11 +718,9 @@ async def notify(chat_id: int, text: str):
 
 # ── розыгрыш (лотерея): выплаты и авто-жеребьёвка по таймеру ──────────────────
 async def _lottery_pay(round_id: int, place: int, uid: int, prize: int) -> None:
-    """Идемпотентное начисление приза победителю (op_id уникален по кругу/месту)."""
+    """Идемпотентное начисление приза как НЕВЫВОДИМОГО бонуса (locked + вейджер)."""
     try:
-        await db.wallet_op(int(uid), int(prize), f"lot:{round_id}:{place}",
-                           "lottery", f"Розыгрыш · {place} место")
-        await db.lottery_mark_paid(round_id, place)
+        await db.lottery_pay_bonus(round_id, place, int(uid), int(prize))
     except Exception:
         log.exception("Лотерея: не удалось начислить приз %s/%s", round_id, place)
 
@@ -753,7 +751,9 @@ async def _run_lottery_draw(rnd: dict) -> None:
         await notify(w["user_id"],
                      f"🎉 <b>Розыгрыш Magic Market!</b>\n"
                      f"Ваше число <b>{w['number']:05d}</b> взяло <b>{w['place']} место</b> — "
-                     f"приз <b>{w['prize']} ₴</b> зачислен на баланс.")
+                     f"приз <b>{w['prize']} ₴</b> зачислен бонусом на баланс.\n"
+                     "Бонус нельзя вывести напрямую — его можно потратить в магазине "
+                     "или отыграть в казино.")
     await ws_broadcast({"t": "lottery_draw", "round": rnd["id"]})
     if ADMIN_ID:
         top = " · ".join(f"{w['place']}м {w['prize']}₴" for w in winners) or "нет участников"

@@ -1514,7 +1514,7 @@ function renderLotDraw() {
       result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${lotWinPodium(last.winners)}</div>`;
     }
     document.getElementById('lot-draw').innerHTML =
-      `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
+      `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · бонусом на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
       `<div class="lot-card" style="text-align:center"><div class="lot-eyebrow">Розыгрыш скоро</div><div class="lot-hint" style="margin-top:0">Старт объявим отдельно. Заранее <b>подпишись на канал и чат</b>. Друзей зови <b>во время розыгрыша</b> — засчитываются только приглашённые в период розыгрыша.</div><button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Подготовиться →</button></div>` +
       result;
     return;
@@ -1534,11 +1534,11 @@ function renderLotDraw() {
   if (last && last.winners.length) {
     const mine = last.winners.filter(w => w.is_me);
     let banner = '';
-    if (mine.length) { const sum = mine.reduce((a, w) => a + w.prize, 0); banner = `<div class="lot-winbanner">🎉 Вы выиграли <b>${fmt(sum)} ₴</b> в прошлом розыгрыше! Приз на балансе.</div>`; }
+    if (mine.length) { const sum = mine.reduce((a, w) => a + w.prize, 0); banner = `<div class="lot-winbanner">🎉 Вы выиграли <b>${fmt(sum)} ₴</b> в прошлом розыгрыше! Приз зачислен бонусом — на покупки в магазине и игру в казино.</div>`; }
     result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${banner}${lotWinPodium(last.winners)}</div>`;
   }
   document.getElementById('lot-draw').innerHTML =
-    `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
+    `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · бонусом на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
     `<div class="lot-stats"><div class="lot-st"><b>${fmt(st.participants)}</b><span>участников</span></div><div class="lot-st"><b>${fmt(st.tickets)}</b><span>чисел в игре</span></div></div>` +
     `<div class="lot-card" style="margin-top:12px"><div class="lot-eyebrow">Мои числа в розыгрыше</div>${my}</div>` + result;
 }
@@ -3556,7 +3556,7 @@ async function lotAdminStart() {
   });
 }
 async function lotAdminDraw() {
-  lotConfirm('Провести розыгрыш сейчас? Победители определятся случайно, призы зачислятся на баланс.', async () => {
+  lotConfirm('Провести розыгрыш сейчас? Победители определятся случайно, призы зачислятся бонусом на баланс (невыводимо).', async () => {
     try { await API.call('/api/admin/lottery/draw'); toast('Розыгрыш проведён'); haptic('heavy'); renderAdminLottery(); }
     catch (e) { toast(e.message || 'Ошибка'); }
   });
