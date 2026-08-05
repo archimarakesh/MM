@@ -677,6 +677,26 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 .lot-place-badge{position:absolute;right:-3px;bottom:-3px;min-width:15px;height:15px;padding:0 3px;border-radius:99px;
   display:grid;place-items:center;font-family:'Manrope';font-size:9px;font-weight:800;font-style:normal;color:#120d05;
   background:linear-gradient(135deg,var(--gold-soft),#b8891f);box-shadow:0 1px 3px rgba(0,0,0,.5)}
+/* подиум победителей */
+.lot-wp{display:flex;justify-content:center;align-items:flex-end;gap:0.5rem;margin-top:0.9rem}
+.lot-wp .wcol{flex:1;max-width:7rem;display:flex;flex-direction:column;align-items:center;text-align:center}
+.lot-wp .wav{width:3rem;height:3rem;border-radius:50%;overflow:hidden;display:grid;place-items:center;margin-bottom:0.3rem;
+  background:radial-gradient(circle at 40% 32%,#3b2c16,#120d07);border:2px solid rgba(212,175,55,.6);
+  font-family:'Cinzel',serif;font-weight:800;color:var(--gold-soft);font-size:1.1rem}
+.lot-wp .wcol.p1 .wav{width:3.9rem;height:3.9rem;border-color:var(--gold-soft);box-shadow:0 0 0 0.3rem rgba(212,175,55,.12)}
+.lot-wp .wav img{width:100%;height:100%;object-fit:cover}
+.lot-wp .wname{font-size:0.78rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:6.6rem}
+.lot-wp .wstep{margin-top:0.35rem;width:100%;border-radius:0.55rem 0.55rem 0 0;display:flex;flex-direction:column;align-items:center;gap:0.1rem;
+  padding:0.4rem 0.25rem 0.5rem;background:linear-gradient(180deg,rgba(212,175,55,.2),rgba(184,137,31,.05));
+  border:1px solid rgba(212,175,55,.3);border-bottom:none}
+.lot-wp .wcol.p1 .wstep{height:5rem}.lot-wp .wcol.p2 .wstep{height:3.7rem}.lot-wp .wcol.p3 .wstep{height:2.9rem}
+.lot-wp .wmedal{font-size:1.15rem;line-height:1}
+.lot-wp .wprize{font-family:'Cinzel',serif;font-weight:800;font-size:0.92rem;color:var(--gold-soft);line-height:1}
+.lot-wp .wnum{font-size:0.6rem;color:var(--muted)}
+.lot-finale{display:none;margin-top:0.4rem;width:100%;max-width:22rem;text-align:center}
+.lot-finale.show{display:block;animation:lotIn .5s var(--ease)}
+.lot-fin-title{font-family:'Cinzel',serif;font-weight:800;font-size:1.35rem;color:var(--gold-soft)}
+.lot-reel.hide,.lot-reveal.hide{display:none!important}
 .lot-reveal{margin-top:20px;opacity:0;transform:translateY(8px);transition:.5s var(--ease)}
 .lot-reveal.show{opacity:1;transform:none}
 .lot-reveal .who{font-size:18px;font-weight:800;color:#fff5da}
@@ -1148,6 +1168,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <div class="prize" id="lotRevPrize"></div>
     <div class="me" id="lotRevMe" style="display:none">Это вы 🎉</div>
   </div>
+  <div class="lot-finale" id="lotFinale"></div>
   <button class="lot-btn" id="lotClose">Забрать и закрыть</button>
 </div>
 <canvas id="lotConfetti"></canvas>
@@ -1490,8 +1511,7 @@ function renderLotDraw() {
     let result = '';
     const last = LOT.last_result;
     if (last && last.winners.length) {
-      const rows = last.winners.map(w => `<div class="lot-ref" style="margin-top:8px">${lotRowAv(w)}<div class="nm"><b>${w.is_me ? 'Вы' : esc(w.name)}</b><span>число №${lotPad5(w.number)}</span></div><div class="lot-pill ok">${fmt(w.prize)} ₴</div></div>`).join('');
-      result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${rows}</div>`;
+      result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${lotWinPodium(last.winners)}</div>`;
     }
     document.getElementById('lot-draw').innerHTML =
       `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
@@ -1515,8 +1535,7 @@ function renderLotDraw() {
     const mine = last.winners.filter(w => w.is_me);
     let banner = '';
     if (mine.length) { const sum = mine.reduce((a, w) => a + w.prize, 0); banner = `<div class="lot-winbanner">🎉 Вы выиграли <b>${fmt(sum)} ₴</b> в прошлом розыгрыше! Приз на балансе.</div>`; }
-    const rows = last.winners.map(w => `<div class="lot-ref" style="margin-top:8px">${lotRowAv(w)}<div class="nm"><b>${w.is_me ? 'Вы' : esc(w.name)}</b><span>число №${lotPad5(w.number)}</span></div><div class="lot-pill ok">${fmt(w.prize)} ₴</div></div>`).join('');
-    result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${banner}${rows}</div>`;
+    result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${banner}${lotWinPodium(last.winners)}</div>`;
   }
   document.getElementById('lot-draw').innerHTML =
     `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
@@ -1709,9 +1728,26 @@ function lotRowAv(w) {
   const inner = w.avatar ? `<img src="${w.avatar}" alt="">` : esc((w.name || '?').trim()[0] || '?').toUpperCase();
   return `<div class="av lot-row-av">${inner}<i class="lot-place-badge">${w.place}</i></div>`;
 }
+// подиум победителей: 2-е слева, 1-е по центру (выше), 3-е справа
+function lotWinPodium(winners) {
+  const byPlace = {}; winners.forEach(w => byPlace[w.place] = w);
+  const medal = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  const col = pl => {
+    const w = byPlace[pl]; if (!w) return '';
+    const av = w.avatar ? `<img src="${w.avatar}" alt="">` : esc((w.name || '?').trim()[0] || '?').toUpperCase();
+    return `<div class="wcol p${pl}">
+      <div class="wav">${av}</div>
+      <div class="wname">${w.is_me ? 'Вы' : esc(w.name)}</div>
+      <div class="wstep"><div class="wmedal">${medal[pl] || pl}</div><div class="wprize">${fmt(w.prize)} ₴</div><div class="wnum">№${lotPad5(w.number)}</div></div>
+    </div>`;
+  };
+  return `<div class="lot-wp">${[2, 1, 3].map(col).join('')}</div>`;
+}
 async function playLotDraw(last) {
   const ov = document.getElementById('lotOverlay'); ov.classList.add('on');
-  const rev = document.getElementById('lotReveal'); rev.classList.remove('show');
+  const rev = document.getElementById('lotReveal'); rev.classList.remove('show', 'hide');
+  const fin = document.getElementById('lotFinale'); fin.classList.remove('show'); fin.innerHTML = '';
+  document.querySelector('.lot-reel').classList.remove('hide');   // барабан снова виден
   document.getElementById('lotClose').classList.remove('show'); document.getElementById('lotRevMe').style.display = 'none';
   const winners = [...last.winners].sort((a, b) => b.place - a.place);
   const pn = { 1: '1 место', 2: '2 место', 3: '3 место' };
@@ -1728,8 +1764,12 @@ async function playLotDraw(last) {
     document.getElementById('lotRevMe').style.display = w.is_me ? 'inline-block' : 'none';
     rev.classList.add('show');
     if (w.place === 1) lotBurst();
-    await new Promise(r => setTimeout(r, w.place === 1 ? 1500 : 1100));
+    await new Promise(r => setTimeout(r, w.place === 1 ? 1600 : 1100));
   }
+  // финал: убираем барабан/раскрытие и показываем подиум всех победителей
+  document.querySelector('.lot-reel').classList.add('hide'); rev.classList.add('hide');
+  fin.innerHTML = `<div class="lot-fin-title">Победители</div>${lotWinPodium(last.winners)}`;
+  fin.classList.add('show');
   document.getElementById('lotClose').classList.add('show');
 }
 function lotBurst() {
