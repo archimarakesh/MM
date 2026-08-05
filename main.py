@@ -2201,6 +2201,28 @@ async def api_admin_referrals_detail(request: Request):
     return d
 
 
+@app.post("/api/admin/users")
+async def api_admin_users(request: Request):
+    """Поиск/список пользователей для админ-раздела «Пользователи»."""
+    admin_user(request)
+    b = await request.json()
+    return await db.admin_users_list(str(b.get("q") or ""), 50)
+
+
+@app.post("/api/admin/user")
+async def api_admin_user(request: Request):
+    """Карточка пользователя: баланс, покупки, пополнения, выводы, рефералы."""
+    admin_user(request)
+    b = await request.json()
+    uid = pint(b.get("id"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    try:
+        return await db.admin_user_detail(uid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 @app.post("/api/admin/ban")
 async def api_admin_ban(request: Request):
     """Универсальный бан/разбан пользователя из админки: один флаг закрывает и
