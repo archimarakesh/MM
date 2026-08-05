@@ -221,6 +221,19 @@ async def run(notify=None, on_ban=None, on_unban=None):
                 await on_unban(int(uid), "chat")
             except Exception:
                 log.exception("Универсальный разбан %s не прошёл", uid)
+
+    async def _confirm_and_ban(chat_id, uid, reason="бан в чате"):
+        """Зеркалим в универсальный бан ТОЛЬКО настоящий бан. Кик (авто-кик за
+        правила, /kick) — это ban+unban: статус тут же возвращается в 'left'.
+        Поэтому ждём и перепроверяем: если через паузу всё ещё 'kicked' —
+        это реальный бан, иначе (кик) ничего не делаем."""
+        await asyncio.sleep(6)
+        try:
+            m = await bot.get_chat_member(chat_id, uid)
+        except Exception:
+            return
+        if getattr(m, "status", "") == "kicked":
+            await _universal_ban(uid, reason)
     MUTED = ChatPermissions(can_send_messages=False, can_send_media_messages=False,
                             can_send_polls=False, can_send_other_messages=False,
                             can_add_web_page_previews=False)
@@ -381,7 +394,10 @@ async def run(notify=None, on_ban=None, on_unban=None):
         # в универсальный бан: флаг в БД + бан в казино/маркете и других чатах
         new_status = getattr(ev.new_chat_member, "status", "")
         if new_status == "kicked" and getattr(ev.old_chat_member, "status", "") != "kicked":
-            await _universal_ban(u.id, "бан в чате")
+            # НЕ баним сразу: авто-кик за правила и /kick делают ban+unban и дают
+            # мгновенный статус 'kicked'. Перепроверяем через паузу — если всё ещё
+            # забанен, это настоящий бан; кик — нет.
+            asyncio.create_task(_confirm_and_ban(ev.chat.id, u.id))
         if was == now:
             return                              # смена роли, не вход/выход
         direction = "join" if now else "leave"
