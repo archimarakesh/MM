@@ -1224,7 +1224,8 @@ const TIERS = [
   { from: 1, k: 1.00 }, { from: 10, k: 0.90 }, { from: 25, k: 0.80 },
   { from: 50, k: 0.70 }, { from: 100, k: 0.60 },
 ];
-const WEIGHTS = [1, 3, 5, 10, 50, 100];
+const WEIGHTS = [2, 5, 10, 25, 50, 100];
+const MIN_GRAMS = 2;
 const MAX_GRAMS = 100;
 const GRADS = [
   'linear-gradient(140deg,#3a2d0e,#1c1506)', 'linear-gradient(140deg,#23211d,#0e0d0b)',
@@ -1927,7 +1928,7 @@ function toast(msg) {
 const tiersOf = p => p.tiers || TIERS;
 function tierFor(p, g) { const ts = tiersOf(p); let t = ts[0]; for (const x of ts) if (g >= x.from) t = x; return t; }
 function priceFor(p, g) { return Math.round(p.base * tierFor(p, g).k * g); }
-function tierLabel(ts, i) { return i < ts.length - 1 ? `${ts[i].from}–${ts[i + 1].from - 1} г` : `${ts[i].from} г+`; }
+function tierLabel(ts, i) { const lo = Math.max(ts[i].from, MIN_GRAMS); return i < ts.length - 1 ? `${lo}–${ts[i + 1].from - 1} г` : `${lo} г+`; }
 const goodsList = () => P || PRODUCTS;
 const ADMIN_CHAT = 'https://t.me/magicmarket_boss';
 let SHARES = [], PLANS = [];   // мои доли и программы выращивания
@@ -1995,7 +1996,7 @@ function renderProductSheet() {
         </div>
       </div>
     </div>
-    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес · от 1 до ${MAX_GRAMS} г</label>
+    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес · от ${MIN_GRAMS} до ${MAX_GRAMS} г</label>
     <div class="weight-chips">
       ${WEIGHTS.map(w => `<div class="wchip ${w === curGrams ? 'sel' : ''}" data-w="${w}" onclick="setGrams(${w})">${w} г</div>`).join('')}
     </div>
@@ -2036,7 +2037,7 @@ function setGrams(w) {
 }
 function customGramsInput(v) {
   let g = parseInt(v, 10);
-  if (!g || g < 1) return;
+  if (!g || g < MIN_GRAMS) return;   // меньше минимума (MIN_GRAMS) — игнорируем
   if (g > MAX_GRAMS) { g = MAX_GRAMS; document.getElementById('customGrams').value = MAX_GRAMS; }
   curGrams = g;
   updatePrice();
