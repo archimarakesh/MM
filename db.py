@@ -30,6 +30,7 @@ DEFAULT_TIERS = [
     {"from": 50, "k": 0.70}, {"from": 100, "k": 0.60},
 ]
 MAX_GRAMS = 100
+MIN_GRAMS = 2             # минимальная покупка, грамм
 MAX_PHOTO_LEN = 400_000   # ~300 КБ картинки в base64
 MAX_PHOTOS = 4
 MAX_PENDING_ORDERS = 8    # незакрытых заказов на юзера (антиспам/сток)
@@ -708,8 +709,8 @@ async def _order_product_total(c, product_id: int, grams: int, lock: bool = Fals
     p = await c.fetchrow(q, product_id)
     if not p:
         raise ValueError("Товар не найден")
-    if not 1 <= grams <= MAX_GRAMS:
-        raise ValueError(f"Вес — от 1 до {MAX_GRAMS} грамм")
+    if not MIN_GRAMS <= grams <= MAX_GRAMS:
+        raise ValueError(f"Вес — от {MIN_GRAMS} до {MAX_GRAMS} грамм")
     if p["stock"] is not None and grams > p["stock"]:
         raise ValueError("Такого количества нет в наличии — напишите админу")
     return p, price_for(_product_row(p, {}), grams)
