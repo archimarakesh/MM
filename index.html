@@ -2002,7 +2002,7 @@ function renderProductSheet() {
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin:-4px 0 8px">
       <input class="mini-input" id="customGrams" inputmode="numeric" placeholder="Свой вес" style="flex:1"
-        value="${WEIGHTS.includes(curGrams) ? '' : curGrams}" oninput="customGramsInput(this.value)">
+        value="${WEIGHTS.includes(curGrams) ? '' : curGrams}" oninput="customGramsInput(this.value)" onblur="customGramsBlur(this)">
       <span style="font-size:12px;color:var(--muted-2)">грамм</span>
     </div>
     <a class="ref-link" style="margin:0 0 14px;justify-content:center;text-decoration:none" href="${ADMIN_CHAT}" target="_blank" rel="noopener">
@@ -2037,10 +2037,18 @@ function setGrams(w) {
 }
 function customGramsInput(v) {
   let g = parseInt(v, 10);
-  if (!g || g < MIN_GRAMS) return;   // меньше минимума (MIN_GRAMS) — игнорируем
+  if (!g) return;                    // пустое/не число — ждём дальше ввод
   if (g > MAX_GRAMS) { g = MAX_GRAMS; document.getElementById('customGrams').value = MAX_GRAMS; }
+  if (g < MIN_GRAMS) return;         // ниже минимума — пока не применяем (доснимет onblur)
   curGrams = g;
   updatePrice();
+}
+// докручиваем до минимума, когда пользователь ушёл из поля: чтобы «1» не мешало
+// набирать «15», клампим не на каждый ввод, а по завершении
+function customGramsBlur(el) {
+  const g = parseInt(el.value, 10);
+  if (!el.value) return;             // оставили пустым — вернётся выбранный чип
+  if (g && g < MIN_GRAMS) { el.value = MIN_GRAMS; curGrams = MIN_GRAMS; updatePrice(); }
 }
 
 /* ═══════════ Checkout ═══════════ */
