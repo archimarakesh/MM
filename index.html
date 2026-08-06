@@ -2001,7 +2001,7 @@ function renderProductSheet() {
       ${WEIGHTS.map(w => `<div class="wchip ${w === curGrams ? 'sel' : ''}" data-w="${w}" onclick="setGrams(${w})">${w} г</div>`).join('')}
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin:-4px 0 8px">
-      <input class="mini-input" id="customGrams" inputmode="numeric" placeholder="Свой вес" style="flex:1"
+      <input class="mini-input" id="customGrams" inputmode="numeric" placeholder="минимум 2 грамма" style="flex:1"
         value="${WEIGHTS.includes(curGrams) ? '' : curGrams}" oninput="customGramsInput(this.value)" onblur="customGramsBlur(this)">
       <span style="font-size:12px;color:var(--muted-2)">грамм</span>
     </div>
