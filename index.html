@@ -3302,7 +3302,7 @@ async function deleteAccount() {
 }
 
 /* ═══════════ Админка ═══════════ */
-let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peUnit = 'g';
+let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peUnit = 'g', peTiersArr = [];
 async function openAdmin() {
   if (!API.ok) return toast('Админка доступна только на сервере');
   try { AD = await API.call('/api/admin/data'); } catch (e) { return toast(e.message); }
@@ -3665,30 +3665,54 @@ function openPedit(id) {
   peUnit = curPe?.unit || 'g';
   document.getElementById('peMin').value = curPe && curPe.min_qty != null ? curPe.min_qty : '';
   peDelReset();
-  let ts = curPe ? [...curPe.tiers] : [...TIERS];
-  while (ts.length < 5) {
-    const last = ts[ts.length - 1];
-    ts.push({ from: Math.round(last.from * 2), k: +(last.k * 0.9).toFixed(4) });
-  }
-  ts = ts.slice(0, 5);
   const basePrice = curPe ? curPe.base : 100;
+  peTiersArr = (curPe ? curPe.tiers : TIERS).map(t => ({
+    from: t.from, price: Math.round(basePrice * t.k),
+  }));
+  if (!peTiersArr.length) peTiersArr = [{ from: 1, price: 100 }];
   pePhotos = curPe
     ? Array.from({ length: curPe.photos || 0 }, (_, i) => ({ url: `/photo/${curPe.id}/${i}?size=t&v=${curPe.pv || 0}`, payload: { old: i } }))
     : [];
   renderPePhotos();
-  document.getElementById('peTiers').innerHTML = ts.slice(0, 5).map((t, i) => `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+  renderPeTiers();
+  syncPeActive();
+  openSheet('pedit');
+}
+// градации цены — динамический список с добавлением/удалением строк
+function renderPeTiers() {
+  const s = uShort(peUnit);
+  document.getElementById('peTiers').innerHTML = peTiersArr.map((t, i) => `
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px;align-items:center">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--muted-2)">от</span>
         <input class="mini-input" id="peFrom${i}" inputmode="numeric" value="${t.from}">
-        <span class="pe-u" style="font-size:11px;color:var(--muted-2)">${uShort(peUnit)}</span></div>
+        <span class="pe-u" style="font-size:11px;color:var(--muted-2)">${s}</span></div>
       <div style="display:flex;align-items:center;gap:6px">
-        <input class="mini-input" id="pePrice${i}" inputmode="numeric" value="${Math.round(basePrice * t.k)}">
-        <span class="pe-pu" style="font-size:11px;color:var(--muted-2)">₴/${uShort(peUnit)}</span></div>
-    </div>`).join('');
-  peSetUnit(peUnit);
-  syncPeActive();
-  openSheet('pedit');
+        <input class="mini-input" id="pePrice${i}" inputmode="numeric" value="${t.price}">
+        <span class="pe-pu" style="font-size:11px;color:var(--muted-2)">₴/${s}</span></div>
+      <div onclick="peRemoveTier(${i})" title="Убрать градацию" style="width:26px;height:26px;border-radius:8px;border:1px solid var(--line);display:grid;place-items:center;color:var(--danger);font-size:13px;cursor:${peTiersArr.length > 1 ? 'pointer' : 'not-allowed'};opacity:${peTiersArr.length > 1 ? '1' : '.35'}">✕</div>
+    </div>`).join('')
+    + `<button class="btn btn-ghost" style="padding:9px;font-size:12.5px;margin-top:2px" onclick="peAddTier()">+ Добавить градацию</button>`;
+}
+// снять текущие введённые значения в массив (перед добавлением/удалением строки)
+function peReadTiers() {
+  peTiersArr = peTiersArr.map((_, i) => ({
+    from: parseInt(document.getElementById('peFrom' + i).value, 10) || 0,
+    price: parseFloat(document.getElementById('pePrice' + i).value) || 0,
+  }));
+}
+function peAddTier() {
+  peReadTiers();
+  const last = peTiersArr[peTiersArr.length - 1] || { from: 1, price: 100 };
+  peTiersArr.push({ from: Math.round((last.from || 1) * 2),
+                    price: Math.max(1, Math.round((last.price || 100) * 0.9)) });
+  renderPeTiers(); haptic('light');
+}
+function peRemoveTier(i) {
+  if (peTiersArr.length <= 1) return;    // хотя бы одна градация нужна
+  peReadTiers();
+  peTiersArr.splice(i, 1);
+  renderPeTiers(); haptic('light');
 }
 function peSetUnit(u) {
   peUnit = u === 'pc' ? 'pc' : 'g';
@@ -3764,13 +3788,13 @@ function syncPeActive() { document.getElementById('peActive').classList.toggle('
 async function savePedit() {
   const name = document.getElementById('peName').value.trim();
   if (!name) return toast('Укажите название');
+  peReadTiers();
   const rows = [];
-  for (let i = 0; i < 5; i++) {
-    const from = parseInt(document.getElementById('peFrom' + i).value, 10);
-    const price = parseFloat(document.getElementById('pePrice' + i).value);
-    if (!from || !price || price <= 0) return toast('Проверьте градацию цен');
-    rows.push({ from, price });
+  for (const t of peTiersArr) {
+    if (!t.from || !t.price || t.price <= 0) return toast('Проверьте градацию цен');
+    rows.push({ from: t.from, price: t.price });
   }
+  if (!rows.length) return toast('Добавьте хотя бы одну градацию');
   rows.sort((a, b) => a.from - b.from);
   const base = rows[0].price;
   try {
