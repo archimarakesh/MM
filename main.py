@@ -1885,6 +1885,7 @@ async def api_grow_buy(request: Request):
 async def api_admin_grow(request: Request):
     admin_user(request)
     b = await request.json()
+    is_new = not b.get("id")
     try:
         await db.save_grow_plan(b)
     except (KeyError, ValueError) as e:
@@ -1892,6 +1893,14 @@ async def api_admin_grow(request: Request):
     except Exception:
         log.exception("Ошибка сохранения программы выращивания")
         raise HTTPException(400, "Не удалось сохранить программу — подробности в логах сервера")
+    # новая активная программа — анонс всем в бота
+    if is_new and bool(b.get("active", True)):
+        asyncio.create_task(broadcast_all(
+            f"🌱 <b>Новая программа E-grow!</b>\n\n"
+            f"<b>{esc(b.get('name') or 'Новая программа')}</b>"
+            + (f"\n<i>{esc(b.get('sub'))}</i>" if b.get("sub") else "")
+            + f"\nДоля от <b>{pint(b.get('price'))} ₴</b>\n\n"
+            f"Успей вложиться в E-growing 🌿"))
     return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
 
 
@@ -2313,10 +2322,25 @@ async def api_admin_data(request: Request):
 async def api_admin_product(request: Request):
     admin_user(request)
     b = await request.json()
+    is_new = not b.get("id")
     try:
         pid = await db.save_product(b)
     except (KeyError, ValueError) as e:
         raise HTTPException(400, f"Проверьте поля товара: {e}")
+    # новая активная позиция — анонс всем в бота
+    if is_new and bool(b.get("active", True)):
+        unit = "шт" if str(b.get("unit")) == "pc" else "г"
+        try:
+            mink = min((float(t.get("k", 1)) for t in (b.get("tiers") or [])), default=1.0)
+        except Exception:
+            mink = 1.0
+        price_from = round(pint(b.get("base")) * mink)
+        asyncio.create_task(broadcast_all(
+            f"🆕 <b>Новинка в магазине!</b>\n\n"
+            f"{esc(b.get('emoji') or '📦')} <b>{esc(b.get('name') or 'Новинка')}</b>"
+            + (f"\n<i>{esc(b.get('sub'))}</i>" if b.get("sub") else "")
+            + f"\nЦена от <b>{price_from} ₴</b>/{unit}\n\n"
+            f"Загляни в Magic Market 🛒"))
     return {"id": pid, "products": await db.get_products(include_inactive=True)}
 
 
