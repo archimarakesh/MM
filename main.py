@@ -1809,6 +1809,13 @@ async def api_withdraw(request: Request):
     return snap
 
 
+@app.post("/api/admin/orders/done")
+async def api_admin_orders_done(request: Request):
+    """Выполненные заказы (получен) с полной хронологией. Только для админа."""
+    admin_user(request)
+    return {"orders": await db.admin_orders_done(100)}
+
+
 @app.post("/api/admin/withdraw")
 async def api_admin_withdraw(request: Request):
     admin_user(request)
