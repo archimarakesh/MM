@@ -3474,7 +3474,20 @@ function renderAdmin(tab) {
         <b style="margin-left:auto;font-size:11px;white-space:nowrap;color:${stCol}">${stTxt}</b>
       </div>`;
     }).join('');
-    b.innerHTML = pending +
+    const dbo = AD.deposit_bonus || {};
+    const depCard = `
+      <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
+        <div class="section-head" style="margin:0 0 8px"><h2 style="font-size:15px">🎁 Бонус за пополнение</h2>
+          <span>${dbo.active ? 'активна · до 00:00' : 'выключена'}</span></div>
+        <p class="note" style="margin:0 0 10px">Все, кто пополнят баланс до полуночи по Киеву, получат этот % на бонусный (невыводимый) баланс. При включении анонс уходит всем в бота.</p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="mini-input" id="depPct" inputmode="numeric" placeholder="%" style="width:78px" value="${dbo.active ? dbo.pct : ''}">
+          <span style="font-size:12px;color:var(--muted-2)">% до 00:00</span>
+          <button class="btn btn-gold" style="width:auto;padding:11px 16px;margin-left:auto" onclick="setDepBonus()">${dbo.active ? 'Обновить' : 'Включить + анонс'}</button>
+        </div>
+        ${dbo.active ? '<button class="btn btn-ghost" style="margin-top:8px;padding:10px" onclick="stopDepBonus()">Выключить акцию</button>' : ''}
+      </div></div>`;
+    b.innerHTML = depCard + pending +
       `<div class="section-head" style="margin-top:16px"><h2>История пополнений</h2></div>` +
       (hist || '<div class="empty"><p>Пополнений ещё не было</p></div>');
   } else if (tab === 'promo') {
@@ -4320,6 +4333,29 @@ async function savePay() {
     PAY = Object.fromEntries(Object.entries(AD.settings).filter(([, v]) => v));
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Реквизиты сохранены');
+}
+async function setDepBonus() {
+  const pct = parseInt(document.getElementById('depPct').value, 10);
+  if (!pct || pct < 1 || pct > 100) return toast('Укажите % от 1 до 100');
+  const msg = `Включить бонус +${pct}% за пополнение до 00:00 и разослать анонс всем в боте?`;
+  const go = async () => {
+    let r;
+    try { r = await API.call('/api/admin/deposit-bonus', { pct, announce: true }); }
+    catch (e) { return toast(e.message); }
+    AD.deposit_bonus = r.deposit_bonus;
+    haptic('medium'); toast('Акция включена, анонс пошёл 🔥');
+    renderAdmin('topups');
+  };
+  if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
+  else if (confirm(msg)) go();
+}
+async function stopDepBonus() {
+  try {
+    const r = await API.call('/api/admin/deposit-bonus', { pct: 0 });
+    AD.deposit_bonus = r.deposit_bonus;
+  } catch (e) { return toast(e.message); }
+  haptic('light'); toast('Акция выключена');
+  renderAdmin('topups');
 }
 
 /* ═══════════ PIN ═══════════ */
