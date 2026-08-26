@@ -140,6 +140,10 @@ async def init():
             ALTER TABLE products ADD COLUMN IF NOT EXISTS photos TEXT;
             ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT;
             ALTER TABLE products ADD COLUMN IF NOT EXISTS genetics TEXT DEFAULT '';
+            -- единица измерения товара: 'g' — за грамм (вес), 'pc' — поштучно
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'g';
+            -- минимальная покупка в единицах товара (граммов или штук)
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS min_qty INT NOT NULL DEFAULT 2;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
@@ -159,6 +163,8 @@ async def init():
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS delay_paid INT NOT NULL DEFAULT 0;
             -- когда заказ получен (статус→3): для хронологии выполненных заказов
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ;
+            -- единица измерения на момент заказа ('g'/'pc') — для показа «г»/«шт»
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT 'g';
             UPDATE orders SET ship=NULL WHERE status=3 AND ship IS NOT NULL;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
             CREATE TABLE IF NOT EXISTS topups(
@@ -454,6 +460,8 @@ def _product_row(r, rating) -> dict:
         "id": r["id"], "name": r["name"], "sub": r["sub"], "emoji": r["emoji"],
         "genetics": r["genetics"] or "",
         "tag": r["tag"], "base": r["base"],
+        "unit": r["unit"] or "g",
+        "min_qty": int(r["min_qty"] if r["min_qty"] is not None else MIN_GRAMS),
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
         "active": r["active"], "photos": photos,
         "pv": len(r["photos"] or ""),  # версия фото для кэш-бастинга
@@ -509,22 +517,26 @@ async def save_product(d: dict) -> int:
         stock = d.get("stock")
         stock = None if stock in (None, "") else max(0, int(stock))
         genetics = str(d.get("genetics", "")).strip()
+        unit = "pc" if str(d.get("unit", "g")) == "pc" else "g"
+        min_qty = max(1, int(d.get("min_qty") or (1 if unit == "pc" else MIN_GRAMS)))
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
-                                    active=$8, photos=$9, stock=$10, genetics=$11
+                                    active=$8, photos=$9, stock=$10, genetics=$11,
+                                    unit=$12, min_qty=$13
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
                 d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)),
-                pj, stock, genetics)
+                pj, stock, genetics, unit, min_qty)
             return int(d["id"])
         return await c.fetchval("""
-            INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,
+            INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics,
+                                 unit, min_qty, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics)
+            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty)
 
 
 async def delete_product(pid: int):
@@ -592,6 +604,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
     orders = [{
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "product": r["product"], "grams": r["grams"], "total": r["total"],
+        "unit": r["unit"] or "g",
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
         "delay_paid": r["delay_paid"],
         "ship": json.loads(r["ship"]) if r["ship"] else None,
@@ -711,8 +724,10 @@ async def _order_product_total(c, product_id: int, grams: int, lock: bool = Fals
     p = await c.fetchrow(q, product_id)
     if not p:
         raise ValueError("Товар не найден")
-    if not MIN_GRAMS <= grams <= MAX_GRAMS:
-        raise ValueError(f"Вес — от {MIN_GRAMS} до {MAX_GRAMS} грамм")
+    lo = int(p["min_qty"] if p["min_qty"] is not None else MIN_GRAMS)
+    unit_word = "шт" if (p["unit"] or "g") == "pc" else "грамм"
+    if not lo <= grams <= MAX_GRAMS:
+        raise ValueError(f"Количество — от {lo} до {MAX_GRAMS} {unit_word}")
     if p["stock"] is not None and grams > p["stock"]:
         raise ValueError("Такого количества нет в наличии — напишите админу")
     return p, price_for(_product_row(p, {}), grams)
@@ -745,11 +760,11 @@ async def _insert_order(c, tg_id, p, grams, total, status, pay, ship,
                         receipt=None, bonus_part=0) -> int:
     return await c.fetchval("""
         INSERT INTO orders(user_id, product_id, product, grams, total, status, pay,
-                           receipt, ship, date, bonus_part)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
+                           receipt, ship, date, bonus_part, unit)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id
     """, tg_id, p["id"], p["name"], grams, total, status, pay, receipt,
         json.dumps(ship, ensure_ascii=False), datetime.now().strftime("%d.%m.%Y"),
-        int(bonus_part))
+        int(bonus_part), (p["unit"] or "g"))
 
 
 async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
@@ -1207,6 +1222,7 @@ async def admin_orders() -> list:
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "user": r["name"] or "?", "username": r["username"], "user_id": r["user_id"],
         "product": r["product"], "grams": r["grams"], "total": r["total"],
+        "unit": r["unit"] or "g",
         "bonus_part": int(r["bonus_part"] or 0),
         "real_part": int(r["total"] or 0) - int(r["bonus_part"] or 0),
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
@@ -1235,6 +1251,7 @@ async def admin_orders_done(limit: int = 100) -> list:
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "user": r["name"] or "?", "username": r["username"], "user_id": r["user_id"],
         "product": r["product"], "grams": r["grams"], "total": int(r["total"] or 0),
+        "unit": r["unit"] or "g",
         "bonus_part": int(r["bonus_part"] or 0),
         "real_part": int(r["total"] or 0) - int(r["bonus_part"] or 0),
         "pay": r["pay"], "ttn": r["ttn"], "date": r["date"],
@@ -3166,6 +3183,7 @@ async def admin_user_detail(tg_id: int) -> dict:
                      "username": inviter["username"]} if inviter else None),
         "orders": [{
             "id": r["id"], "product": r["product"], "grams": r["grams"],
+            "unit": r["unit"] or "g",
             "total": int(r["total"] or 0), "status": r["status"], "ttn": r["ttn"],
             "date": r["date"], "bonus_part": int(r["bonus_part"] or 0),
             "created": r["created"].isoformat() if r["created"] else None,

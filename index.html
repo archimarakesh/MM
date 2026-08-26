@@ -1093,13 +1093,20 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
   <div class="field"><label>Описание</label><input id="peSub" placeholder="Флагманская позиция"></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
     <div class="field"><label>Бейдж</label><input id="peTag" placeholder="ХИТ / NEW / пусто"></div>
-    <div class="field"><label>Наличие, г</label><input id="peStock" inputmode="numeric" placeholder="пусто — без лимита"></div>
+    <div class="field"><label id="peStockLabel">Наличие, г</label><input id="peStock" inputmode="numeric" placeholder="пусто — без лимита"></div>
   </div>
+  <div class="field"><label>Единица измерения</label>
+    <div class="pay-opts" style="grid-template-columns:1fr 1fr;gap:8px">
+      <div class="pay-opt" id="peUnitG" onclick="peSetUnit('g')">За грамм<small>вес, ₴/г</small></div>
+      <div class="pay-opt" id="peUnitPc" onclick="peSetUnit('pc')">Поштучно<small>штуки, ₴/шт</small></div>
+    </div>
+  </div>
+  <div class="field"><label id="peMinLabel">Минимальная покупка, г</label><input id="peMin" inputmode="numeric" placeholder="2"></div>
   <div class="field"><label>Фото товара · до 4 шт</label>
     <div id="pePhotos" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div>
     <p class="note" id="pePhotoHint" style="margin:6px 0 0;display:none">Перетащите фото, чтобы изменить порядок. Первое — главное.</p>
   </div>
-  <div class="field"><label>Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
+  <div class="field"><label id="peTiersLabel">Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
   <input type="file" id="peFile" accept="image/*" style="display:none">
   <div class="pay-opts" style="grid-template-columns:1fr">
     <div class="pay-opt" id="peActive" onclick="peToggleActive()">Товар активен<small>показывается в каталоге</small></div>
@@ -1227,6 +1234,18 @@ const TIERS = [
 const WEIGHTS = [2, 5, 10, 25, 50, 100];
 const MIN_GRAMS = 2;
 const MAX_GRAMS = 100;
+// единица измерения: 'g' — граммы (вес), 'pc' — штуки (поштучный товар)
+const uShort = u => u === 'pc' ? 'шт' : 'г';        // короткий суффикс: 5 г / 5 шт
+const uWord = u => u === 'pc' ? 'шт' : 'грамм';     // слово: минимум 2 грамма / 2 шт
+const uMin = p => p.min_qty || (p.unit === 'pc' ? 1 : MIN_GRAMS);
+// пресеты количества под товар: начинаем с минимума, дальше лесенка
+function qtyPresets(p) {
+  const min = uMin(p);
+  const ladder = p.unit === 'pc' ? [1, 2, 3, 5, 10, 20] : [2, 5, 10, 25, 50, 100];
+  return [...new Set([min, ...ladder.filter(w => w > min)])].filter(w => w <= MAX_GRAMS).slice(0, 6);
+}
+// количество в заказе с единицей: «5 г» / «3 шт» (o.unit по умолчанию граммы)
+const qtyStr = o => `${o.grams} ${uShort(o.unit || 'g')}`;
 const GRADS = [
   'linear-gradient(140deg,#3a2d0e,#1c1506)', 'linear-gradient(140deg,#23211d,#0e0d0b)',
   'linear-gradient(140deg,#3d2c12,#241505)', 'linear-gradient(140deg,#1f1d2b,#0d0c14)',
@@ -1928,7 +1947,7 @@ function toast(msg) {
 const tiersOf = p => p.tiers || TIERS;
 function tierFor(p, g) { const ts = tiersOf(p); let t = ts[0]; for (const x of ts) if (g >= x.from) t = x; return t; }
 function priceFor(p, g) { return Math.round(p.base * tierFor(p, g).k * g); }
-function tierLabel(ts, i) { const lo = Math.max(ts[i].from, MIN_GRAMS); return i < ts.length - 1 ? `${lo}–${ts[i + 1].from - 1} г` : `${lo} г+`; }
+function tierLabel(ts, i, unit) { const u = uShort(unit); const lo = Math.max(ts[i].from, unit === 'pc' ? 1 : MIN_GRAMS); return i < ts.length - 1 ? `${lo}–${ts[i + 1].from - 1} ${u}` : `${lo} ${u}+`; }
 const goodsList = () => P || PRODUCTS;
 const ADMIN_CHAT = 'https://t.me/magicmarket_boss';
 let SHARES = [], PLANS = [];   // мои доли и программы выращивания
@@ -1955,7 +1974,7 @@ function renderGoods() {
           <div class="good-meta">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> · ` : ''}${stockLabel(p)}${p.rating?.reviews ? ` · <span class="good-rev" onclick="event.stopPropagation();openReviews('${p.id}')">${p.rating.reviews} ${plReviews(p.rating.reviews)}</span>` : ''}</div>
         </div>
         <div class="good-price">
-          <span class="gp-val"><b>от ${fmt(Math.round(p.base * Math.min(...tiersOf(p).map(t => t.k))))} ₴</b> <i>/ грамм</i></span>
+          <span class="gp-val"><b>от ${fmt(Math.round(p.base * Math.min(...tiersOf(p).map(t => t.k))))} ₴</b> <i>/ ${uWord(p.unit)}</i></span>
           <button class="good-buy" onclick="event.stopPropagation();openProduct('${p.id}')">Купить
             <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2 3h3l2.2 11.2a1.6 1.6 0 0 0 1.6 1.3h8.4a1.6 1.6 0 0 0 1.6-1.3L21.5 7H6"/></svg></span>
           </button>
@@ -1968,7 +1987,8 @@ function renderGoods() {
 let curProduct = null, curGrams = 10;
 function openProduct(id) {
   curProduct = goodsList().find(p => String(p.id) === String(id));
-  curGrams = 10;
+  // дефолт количества: для веса — 10 г (но не ниже минимума), для штук — минимум
+  curGrams = Math.min(MAX_GRAMS, Math.max(uMin(curProduct), curProduct.unit === 'pc' ? uMin(curProduct) : 10));
   renderProductSheet();
   openSheet('product');
 }
@@ -1988,7 +2008,7 @@ function renderProductSheet() {
         <h2>${p.name}</h2>
         ${p.genetics ? `<div style="font-size:12.5px;font-weight:600;color:var(--gold-soft);margin-top:3px">🧬 ${p.genetics}</div>` : ''}
         <p class="sheet-sub" style="margin:5px 0 0">${p.sub}</p>
-        <p class="sheet-sub" style="margin:5px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}базово ${fmt(p.base)} ₴/г · ${stockLabel(p)}</p>
+        <p class="sheet-sub" style="margin:5px 0 0">${p.rating?.count ? `<span style="color:var(--gold-soft)">★ ${p.rating.avg}</span> (${p.rating.count}) · ` : ''}базово ${fmt(p.base)} ₴/${uShort(p.unit)} · ${stockLabel(p)}</p>
         <div class="rev-open" onclick="openReviews('${p.id}')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span>${p.rating?.reviews ? `Отзывы (${p.rating.reviews})` : 'Отзывов пока нет — оставьте первый'}</span>
@@ -1996,18 +2016,18 @@ function renderProductSheet() {
         </div>
       </div>
     </div>
-    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">Вес · от ${MIN_GRAMS} до ${MAX_GRAMS} г</label>
+    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">${p.unit === 'pc' ? 'Количество' : 'Вес'} · от ${uMin(p)} до ${MAX_GRAMS} ${uShort(p.unit)}</label>
     <div class="weight-chips">
-      ${WEIGHTS.map(w => `<div class="wchip ${w === curGrams ? 'sel' : ''}" data-w="${w}" onclick="setGrams(${w})">${w} г</div>`).join('')}
+      ${qtyPresets(p).map(w => `<div class="wchip ${w === curGrams ? 'sel' : ''}" data-w="${w}" onclick="setGrams(${w})">${w} ${uShort(p.unit)}</div>`).join('')}
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin:-4px 0 8px">
-      <input class="mini-input" id="customGrams" inputmode="numeric" placeholder="Минимум 2 г" style="flex:1"
-        value="${WEIGHTS.includes(curGrams) ? '' : curGrams}" oninput="customGramsInput(this.value)" onblur="customGramsBlur(this)">
-      <span style="font-size:12px;color:var(--muted-2)">грамм</span>
+      <input class="mini-input" id="customGrams" inputmode="numeric" placeholder="Минимум ${uMin(p)} ${uShort(p.unit)}" style="flex:1"
+        value="${qtyPresets(p).includes(curGrams) ? '' : curGrams}" oninput="customGramsInput(this.value)" onblur="customGramsBlur(this)">
+      <span style="font-size:12px;color:var(--muted-2)">${uWord(p.unit)}</span>
     </div>
     <a class="ref-link" style="margin:0 0 14px;justify-content:center;text-decoration:none" href="${ADMIN_CHAT}" target="_blank" rel="noopener">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><path d="M4 18v-7a8 8 0 0 1 16 0v7"/><path d="M20 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM4 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H4z"/></svg>
-      <span>Нужно больше ${MAX_GRAMS} г? Напишите админу</span>
+      <span>Нужно больше ${MAX_GRAMS} ${uShort(p.unit)}? Напишите админу</span>
     </a>
     <div class="tier-table" id="tierTable"></div>
     <div class="total-row"><span id="totalGrams"></span><b id="totalSum"></b></div>
@@ -2019,8 +2039,8 @@ function updatePrice() {
   document.querySelectorAll('#sheet-product .wchip').forEach(w =>
     w.classList.toggle('sel', parseInt(w.dataset.w, 10) === curGrams));
   document.getElementById('tierTable').innerHTML = ts.map((x, i) =>
-    `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${tierLabel(ts, i)}</span><b>${fmt(Math.round(p.base * x.k))} ₴/г</b></div>`).join('');
-  document.getElementById('totalGrams').textContent = `Итого · ${curGrams} г`;
+    `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${tierLabel(ts, i, p.unit)}</span><b>${fmt(Math.round(p.base * x.k))} ₴/${uShort(p.unit)}</b></div>`).join('');
+  document.getElementById('totalGrams').textContent = `Итого · ${curGrams} ${uShort(p.unit)}`;
   document.getElementById('totalSum').textContent = fmt(priceFor(p, curGrams)) + ' ₴';
   const short = p.stock != null && (p.stock === 0 || curGrams > p.stock);
   document.getElementById('orderAction').innerHTML = short ? `
@@ -2039,7 +2059,7 @@ function customGramsInput(v) {
   let g = parseInt(v, 10);
   if (!g) return;                    // пустое/не число — ждём дальше ввод
   if (g > MAX_GRAMS) { g = MAX_GRAMS; document.getElementById('customGrams').value = MAX_GRAMS; }
-  if (g < MIN_GRAMS) return;         // ниже минимума — пока не применяем (доснимет onblur)
+  if (g < uMin(curProduct)) return;  // ниже минимума — пока не применяем (доснимет onblur)
   curGrams = g;
   updatePrice();
 }
@@ -2048,7 +2068,8 @@ function customGramsInput(v) {
 function customGramsBlur(el) {
   const g = parseInt(el.value, 10);
   if (!el.value) return;             // оставили пустым — вернётся выбранный чип
-  if (g && g < MIN_GRAMS) { el.value = MIN_GRAMS; curGrams = MIN_GRAMS; updatePrice(); }
+  const min = uMin(curProduct);
+  if (g && g < min) { el.value = min; curGrams = min; updatePrice(); }
 }
 
 /* ═══════════ Checkout ═══════════ */
@@ -2120,7 +2141,7 @@ function openCheckout() {
   const total = priceFor(curProduct, curGrams);
   payMethod = 'balance';
   document.getElementById('coSummary').textContent =
-    `${curProduct.name} · ${curGrams} г · ${fmt(total)} ₴`;
+    `${curProduct.name} · ${curGrams} ${uShort(curProduct.unit)} · ${fmt(total)} ₴`;
   const enough = S.balance >= total;
   document.getElementById('coPays').innerHTML =
     `<p class="note" style="grid-column:1/-1;margin:0">Оплата с баланса · доступно <b style="color:${enough ? 'var(--gold-soft)' : 'var(--danger)'}">${fmt(S.balance)} ₴</b>` +
@@ -2202,7 +2223,7 @@ function renderOrders() {
     return `<div class="order bezel reveal" style="transition-delay:${j * 60}ms" onclick="openOrder(${i})">
       <div class="bezel-core">
         <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
-        <div class="order-meta"><span>${o.product} · ${o.grams} г · ${o.date}</span><b>${fmt(o.total)} ₴</b></div>
+        <div class="order-meta"><span>${o.product} · ${qtyStr(o)} · ${o.date}</span><b>${fmt(o.total)} ₴</b></div>
       </div>
     </div>`;
   }).join('') + pagerHtml(S.orders.length, ordersPage, 'ordersGo');
@@ -2215,7 +2236,7 @@ function renderOrderBody(i) {
   if (!o) return;
   document.getElementById('orderBody').innerHTML = `
     <h2>${o.id}</h2>
-    <p class="sheet-sub">${o.product} · ${o.grams} г · ${o.date} · <b style="color:var(--gold-soft)">${fmt(o.total)} ₴</b></p>
+    <p class="sheet-sub">${o.product} · ${qtyStr(o)} · ${o.date} · <b style="color:var(--gold-soft)">${fmt(o.total)} ₴</b></p>
     ${o.status >= 0 ? `
     <div class="timeline">
       ${STATUSES.map((s, k) => `
@@ -3281,7 +3302,7 @@ async function deleteAccount() {
 }
 
 /* ═══════════ Админка ═══════════ */
-let AD = null, adminTab = 'products', curPe = null, peActiveVal = true;
+let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peUnit = 'g';
 async function openAdmin() {
   if (!API.ok) return toast('Админка доступна только на сервере');
   try { AD = await API.call('/api/admin/data'); } catch (e) { return toast(e.message); }
@@ -3359,7 +3380,7 @@ function renderAdmin(tab) {
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
         <div style="font-size:12px;color:var(--muted);line-height:1.65">
-          ${esc(o.product)} · ${o.grams} г · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
+          ${esc(o.product)} · ${qtyStr(o)} · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
           ${esc(o.user)}${o.username ? ' · @' + esc(o.username) : ''}${paySplit(o)}
         </div>
         ${o.ship ? shipChips(o.ship) : ''}
@@ -3641,6 +3662,8 @@ function openPedit(id) {
   document.getElementById('peSub').value = curPe?.sub || '';
   document.getElementById('peTag').value = curPe?.tag || '';
   document.getElementById('peStock').value = curPe ? (curPe.stock ?? '') : '';
+  peUnit = curPe?.unit || 'g';
+  document.getElementById('peMin').value = curPe && curPe.min_qty != null ? curPe.min_qty : '';
   peDelReset();
   let ts = curPe ? [...curPe.tiers] : [...TIERS];
   while (ts.length < 5) {
@@ -3658,13 +3681,26 @@ function openPedit(id) {
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--muted-2)">от</span>
         <input class="mini-input" id="peFrom${i}" inputmode="numeric" value="${t.from}">
-        <span style="font-size:11px;color:var(--muted-2)">г</span></div>
+        <span class="pe-u" style="font-size:11px;color:var(--muted-2)">${uShort(peUnit)}</span></div>
       <div style="display:flex;align-items:center;gap:6px">
         <input class="mini-input" id="pePrice${i}" inputmode="numeric" value="${Math.round(basePrice * t.k)}">
-        <span style="font-size:11px;color:var(--muted-2)">₴/г</span></div>
+        <span class="pe-pu" style="font-size:11px;color:var(--muted-2)">₴/${uShort(peUnit)}</span></div>
     </div>`).join('');
+  peSetUnit(peUnit);
   syncPeActive();
   openSheet('pedit');
+}
+function peSetUnit(u) {
+  peUnit = u === 'pc' ? 'pc' : 'g';
+  const s = uShort(peUnit), word = peUnit === 'pc' ? 'штуку' : 'грамм';
+  document.getElementById('peUnitG').classList.toggle('sel', peUnit === 'g');
+  document.getElementById('peUnitPc').classList.toggle('sel', peUnit === 'pc');
+  document.getElementById('peMinLabel').textContent = `Минимальная покупка, ${s}`;
+  document.getElementById('peStockLabel').textContent = `Наличие, ${s}`;
+  document.getElementById('peTiersLabel').textContent = `Градация цены, ₴ за ${word}`;
+  document.querySelectorAll('#peTiers .pe-u').forEach(e => e.textContent = s);
+  document.querySelectorAll('#peTiers .pe-pu').forEach(e => e.textContent = '₴/' + s);
+  const mn = document.getElementById('peMin'); if (mn) mn.placeholder = peUnit === 'pc' ? '1' : '2';
 }
 let pePhotos = [];
 function renderPePhotos() {
@@ -3745,6 +3781,8 @@ async function savePedit() {
       tag: document.getElementById('peTag').value.trim(),
       base, tiers: rows.map(x => ({ from: x.from, k: +(x.price / base).toFixed(4) })),
       active: peActiveVal,
+      unit: peUnit,
+      min_qty: Math.max(1, parseInt(document.getElementById('peMin').value, 10) || (peUnit === 'pc' ? 1 : 2)),
       photos: pePhotos.map(x => x.payload),
       stock: document.getElementById('peStock').value.trim() === ''
         ? null : Math.max(0, parseInt(document.getElementById('peStock').value, 10) || 0),
@@ -4010,7 +4048,7 @@ async function loadDoneOrders() {
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${o.id}</b><span class="status ok">Получен</span></div>
         <div style="font-size:12px;color:var(--muted);line-height:1.65">
-          ${esc(o.product)} · ${o.grams} г · <b style="color:var(--txt)">${fmt(o.total)} ₴</b>${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
+          ${esc(o.product)} · ${qtyStr(o)} · <b style="color:var(--txt)">${fmt(o.total)} ₴</b>${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
           ${esc(o.user)}${o.username ? ' · @' + esc(o.username) : ''}${paySplit(o)}
         </div>
         ${o.ttn ? `<div class="ttn" style="margin-top:8px"><span>ТТН</span><b>${esc(o.ttn)}</b></div>` : ''}
@@ -4185,7 +4223,7 @@ async function adminUserOpen(id) {
   const u = d.user;
   const sect = (title, n, inner) => `<div class="section-head" style="margin:16px 0 8px"><h2 style="font-size:15px">${title}</h2><span>${n}</span></div>${inner}`;
   const orders = (d.orders || []).map(o => `
-    <div class="set-row"><div><h3>${auEsc(o.product || 'Заказ')}${o.grams ? ' · ' + o.grams + ' г' : ''}</h3>
+    <div class="set-row"><div><h3>${auEsc(o.product || 'Заказ')}${o.grams ? ' · ' + o.grams + ' ' + uShort(o.unit || 'g') : ''}</h3>
     <p>${fmt(o.total)} ₴${o.bonus_part ? ` (бонус ${fmt(o.bonus_part)} ₴)` : ''} · ${AU_ORDER_ST[o.status] || o.status}${o.date ? ' · ' + auEsc(o.date) : ''}${o.ttn ? ' · ТТН ' + auEsc(o.ttn) : ''}</p></div></div>`).join('') || '<p class="note">нет заказов</p>';
   const topups = (d.topups || []).map(t => `
     <div class="set-row"><div><h3>${fmt(t.amount)} ₴ · ${AU_KIND[t.kind] || t.kind}${t.detail ? ' ' + auEsc(t.detail) : ''}</h3>
