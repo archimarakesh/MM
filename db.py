@@ -369,6 +369,11 @@ async def init():
                 cnt        INT    NOT NULL,
                 amount     BIGINT NOT NULL,
                 created    TIMESTAMPTZ NOT NULL DEFAULT now());
+            -- призовые места гонки: 1/2/3. Раньше был один приз за неделю (PK по
+            -- week_start), теперь несколько мест — снимаем старый PK, ключ (week, place)
+            ALTER TABLE ref_race_awards ADD COLUMN IF NOT EXISTS place INT NOT NULL DEFAULT 1;
+            ALTER TABLE ref_race_awards DROP CONSTRAINT IF EXISTS ref_race_awards_pkey;
+            CREATE UNIQUE INDEX IF NOT EXISTS ref_race_awards_wp ON ref_race_awards(week_start, place);
             -- ── Розыгрыш (лотерея) ───────────────────────────────────────────
             -- круг розыгрыша: открыт до дедлайна, потом разыгрывается и закрывается
             CREATE TABLE IF NOT EXISTS lottery_rounds(
@@ -2389,11 +2394,15 @@ async def ref_race_activated(week_start, week_end) -> list:
              "name": r["name"] or "участник", "username": r["username"]} for r in rows]
 
 
-async def ref_race_award_record(week_start, user_id: int, cnt: int, prize: int) -> bool:
-    """Идемпотентно за неделю начисляет приз победителю и фиксирует запись.
-    True — приз начислен сейчас; False — за эту неделю уже награждали."""
+async def ref_race_award_record(week_start, user_id: int, cnt: int, prize: int,
+                                place: int = 1) -> bool:
+    """Идемпотентно за неделю начисляет приз призёру места `place` (1/2/3) и
+    фиксирует запись. True — приз начислен сейчас; False — это место за эту
+    неделю уже награждали."""
     async with _pool.acquire() as c, c.transaction():
-        if await c.fetchval("SELECT 1 FROM ref_race_awards WHERE week_start=$1", week_start):
+        if await c.fetchval(
+                "SELECT 1 FROM ref_race_awards WHERE week_start=$1 AND place=$2",
+                week_start, place):
             return False
         await c.execute("INSERT INTO users(tg_id) VALUES($1) "
                         "ON CONFLICT (tg_id) DO NOTHING", user_id)
@@ -2401,9 +2410,9 @@ async def ref_race_award_record(week_start, user_id: int, cnt: int, prize: int) 
                         f"wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} "
                         f"WHERE tg_id=$2", prize, user_id)
         await c.execute("""
-            INSERT INTO ref_race_awards(week_start, user_id, cnt, amount)
-            VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING
-        """, week_start, user_id, cnt, prize)
+            INSERT INTO ref_race_awards(week_start, user_id, cnt, amount, place)
+            VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING
+        """, week_start, user_id, cnt, prize, place)
     return True
 
 

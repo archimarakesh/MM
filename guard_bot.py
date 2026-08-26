@@ -76,6 +76,10 @@ QUIZ_Q_SEC = int(os.getenv("QUIZ_Q_SEC", "150") or 150)     # время на в
 QUIZ_READ_SEC = int(os.getenv("QUIZ_READ_SEC", "15") or 15)
 # ── недельная реферальная гонка ─────────────────────────────────────────────
 REF_RACE_PRIZE = int(os.getenv("REF_RACE_PRIZE", "1000") or 1000)
+REF_RACE_PRIZE_2 = int(os.getenv("REF_RACE_PRIZE_2", "500") or 500)   # 2-е место
+REF_RACE_PRIZE_3 = int(os.getenv("REF_RACE_PRIZE_3", "200") or 200)   # 3-е место
+# призы призовых мест по порядку; 0 — место без приза
+REF_RACE_PRIZES = [p for p in (REF_RACE_PRIZE, REF_RACE_PRIZE_2, REF_RACE_PRIZE_3) if p > 0]
 REF_RACE_MIN_TOTAL = int(os.getenv("REF_RACE_MIN_TOTAL", "20") or 20)  # общий порог за неделю
 REF_RACE_HOUR = int(os.getenv("REF_RACE_HOUR", "13") or 13)  # понедельник, Киев
 # где проверяем, что приглашённый не отписался (канал приоритетнее чата).
@@ -1301,23 +1305,33 @@ async def run(notify=None, on_ban=None, on_unban=None):
                 # перепроверка подписки на выплате: отписавшиеся в зачёт не идут
                 standings, total = await race_standings_live(prev_mon, this_mon)
                 if total >= REF_RACE_MIN_TOTAL and standings:
-                    w = standings[0]
-                    if await db.ref_race_award_record(prev_mon, w["user_id"], w["cnt"], REF_RACE_PRIZE):
+                    medals = ["👑", "🥈", "🥉"]
+                    awarded = []                 # (place, winner, prize) — реально начисленные
+                    for place, prize in enumerate(REF_RACE_PRIZES, start=1):
+                        if place > len(standings):
+                            break
+                        w = standings[place - 1]
+                        if await db.ref_race_award_record(
+                                prev_mon, w["user_id"], w["cnt"], prize, place):
+                            awarded.append((place, w, prize))
+                    if awarded:
+                        lines = [f"{medals[pl-1]} <b>{_esc(w['name'])}</b> — "
+                                 f"{w['cnt']} · <b>{prize} ₴</b>" for pl, w, prize in awarded]
                         await quiz_send(
                             "🏁 <b>Реферальная гонка недели</b>\n\n"
                             f"Все вместе привели <b>{total}</b> друзей (подписанных) — цель взята! 🎯\n\n"
-                            f"👑 Больше всех — <b>{_esc(w['name'])}</b> "
-                            f"(<b>{w['cnt']}</b>). Приз <b>{REF_RACE_PRIZE} ₴</b> уже на балансе.\n"
-                            "Спасибо всем, кто растит комьюнити 🔥")
+                            + "\n".join(lines)
+                            + "\nПризы уже на балансе. Спасибо всем, кто растит комьюнити 🔥")
                         if notify:
-                            try:
-                                await notify(w["user_id"],
-                                             "🏁 Вы выиграли реферальную гонку недели! "
-                                             f"Начислено {REF_RACE_PRIZE} ₴ бонусом.")
-                            except Exception:
-                                pass
-                        log.info("Реф-гонка: победитель %s (%s реф., всего %s подписанных)",
-                                 w["user_id"], w["cnt"], total)
+                            for pl, w, prize in awarded:
+                                try:
+                                    await notify(w["user_id"],
+                                                 f"🏁 Вы заняли {pl}-е место в реферальной гонке недели! "
+                                                 f"Начислено {prize} ₴ бонусом.")
+                                except Exception:
+                                    pass
+                        log.info("Реф-гонка: призёров %s, всего %s подписанных",
+                                 len(awarded), total)
                 else:
                     log.info("Реф-гонка: общий порог %s (подписанных) за неделю не взят",
                              REF_RACE_MIN_TOTAL)
@@ -1358,12 +1372,14 @@ async def run(notify=None, on_ban=None, on_unban=None):
             return
         rows = rows[:10]
         reached = total >= REF_RACE_MIN_TOTAL
+        prize_line = " · ".join(
+            f"{m} <b>{p} ₴</b>" for m, p in zip(["🥇", "🥈", "🥉"], REF_RACE_PRIZES))
         goal = (f"Всего за неделю: <b>{total}</b> / {REF_RACE_MIN_TOTAL} "
-                + ("✅ цель взята — топ-1 получит приз!" if reached
+                + ("✅ цель взята — призёры получат награду!" if reached
                    else f"(осталось {REF_RACE_MIN_TOTAL - total})"))
         head = ("🏁 <b>Реферальная гонка недели</b>\n"
                 f"Общая цель: <b>{REF_RACE_MIN_TOTAL}+</b> приглашённых со всех участников — "
-                f"тогда тот, кто привёл больше всех, забирает <b>{REF_RACE_PRIZE} ₴</b>. "
+                f"тогда призёры забирают: {prize_line}. "
                 f"Считаются только оставшиеся подписанными. Итоги — в понедельник.\n\n{goal}\n\n")
         if not rows:
             await message.answer(
