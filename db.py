@@ -157,6 +157,8 @@ async def init():
             -- delay_paid — за сколько просроченных суток уже начислена компенсация
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS worked_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS delay_paid INT NOT NULL DEFAULT 0;
+            -- когда заказ получен (статус→3): для хронологии выполненных заказов
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ;
             UPDATE orders SET ship=NULL WHERE status=3 AND ship IS NOT NULL;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
             CREATE TABLE IF NOT EXISTS topups(
@@ -413,7 +415,7 @@ async def init():
 # ── авто-статус «Получен» ────────────────────────────────────────────────────
 async def _auto_deliver(c):
     await c.execute("""
-        UPDATE orders SET status=3, ship=NULL
+        UPDATE orders SET status=3, ship=NULL, received_at=COALESCE(received_at, now())
         WHERE status IN (1,2) AND shipped_at IS NOT NULL AND shipped_at < $1
     """, datetime.now(timezone.utc) - timedelta(days=AUTO_DELIVER_DAYS))
 
@@ -1205,11 +1207,43 @@ async def admin_orders() -> list:
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "user": r["name"] or "?", "username": r["username"], "user_id": r["user_id"],
         "product": r["product"], "grams": r["grams"], "total": r["total"],
+        "bonus_part": int(r["bonus_part"] or 0),
+        "real_part": int(r["total"] or 0) - int(r["bonus_part"] or 0),
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
         "pay": r["pay"], "delay_paid": r["delay_paid"],
+        "created": r["created"].isoformat() if r["created"] else None,
+        "worked_at": r["worked_at"].isoformat() if r["worked_at"] else None,
+        "shipped_at": r["shipped_at"].isoformat() if r["shipped_at"] else None,
         "receipt": r["receipt"] if r["status"] == -1 else None,
         "ship": json.loads(r["ship"]) if r["ship"] else None,
         "np_status_text": r["np_status_text"], "np_eta": r["np_eta"], "np_arrival": r["np_arrival"],
+    } for r in rows]
+
+
+async def admin_orders_done(limit: int = 100) -> list:
+    """Выполненные заказы (получен, status=3) с полной хронологией:
+    создан → взят в работу → отправлен → получен, плюс сплит бонус/реал."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT o.*, u.name, u.username FROM orders o
+            LEFT JOIN users u ON u.tg_id = o.user_id
+            WHERE o.status = 3
+            ORDER BY COALESCE(o.received_at, o.shipped_at, o.created) DESC, o.id DESC
+            LIMIT $1
+        """, limit)
+    return [{
+        "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
+        "user": r["name"] or "?", "username": r["username"], "user_id": r["user_id"],
+        "product": r["product"], "grams": r["grams"], "total": int(r["total"] or 0),
+        "bonus_part": int(r["bonus_part"] or 0),
+        "real_part": int(r["total"] or 0) - int(r["bonus_part"] or 0),
+        "pay": r["pay"], "ttn": r["ttn"], "date": r["date"],
+        "delay_paid": int(r["delay_paid"] or 0),
+        "ship": json.loads(r["ship"]) if r["ship"] else None,
+        "created": r["created"].isoformat() if r["created"] else None,
+        "worked_at": r["worked_at"].isoformat() if r["worked_at"] else None,
+        "shipped_at": r["shipped_at"].isoformat() if r["shipped_at"] else None,
+        "received_at": r["received_at"].isoformat() if r["received_at"] else None,
     } for r in rows]
 
 
@@ -1253,12 +1287,13 @@ async def order_to_work(order_code: str) -> dict:
 
 
 async def compensate_delayed_orders(amount: int) -> list:
-    """Компенсация за просрочку отправки. Девиз — отправка в день заказа, поэтому
-    дедлайн считаем от ДАТЫ СОЗДАНИЯ заказа (created): за КАЖДЫЕ просроченные сутки
-    (полночь Киева, к которой оплаченный заказ без ТТН так и не отправлен) начисляем
-    `amount` ₴ БОНУСОМ (в locked, с вейджером — как остальные бонусы). Берём заказы
-    оплаченные/в работе (status 0 или 1) без ТТН — сюда попадают и уже висящие в
-    работе. Идемпотентно по delay_paid: повтор за те же сутки не начислит дважды,
+    """Компенсация за просрочку отправки. Отсчёт идёт от момента «взят в работу»
+    (worked_at), а НЕ от создания заказа: пока заказ просто оплачен и лежит в
+    очереди (status 0), компенсация не капает — она начинается, только когда мы
+    сами взяли его в работу. За КАЖДЫЕ просроченные сутки (полночь Киева, к которой
+    взятый в работу заказ без ТТН так и не отправлен) начисляем `amount` ₴ БОНУСОМ
+    (в locked, с вейджером — как остальные бонусы). Берём заказы в работе (status 1)
+    без ТТН. Идемпотентно по delay_paid: повтор за те же сутки не начислит дважды,
     пропущенный день догоняется. Прикрепили ТТН (status≥2) — заказ выпал из выборки.
     Возвращает список начислений для уведомления покупателей."""
     if amount <= 0:
@@ -1268,9 +1303,9 @@ async def compensate_delayed_orders(amount: int) -> list:
         rows = await c.fetch("""
             SELECT id, user_id, delay_paid,
                    ((now() AT TIME ZONE 'Europe/Kyiv')::date
-                    - (created AT TIME ZONE 'Europe/Kyiv')::date) AS overdue
+                    - (worked_at AT TIME ZONE 'Europe/Kyiv')::date) AS overdue
             FROM orders
-            WHERE status IN (0, 1) AND ttn IS NULL
+            WHERE status = 1 AND worked_at IS NOT NULL AND ttn IS NULL
             FOR UPDATE
         """)
         for r in rows:
@@ -1314,7 +1349,9 @@ async def update_order_np(oid: int, code, text: str, eta: str, arrival: str):
 
 async def mark_delivered(oid: int) -> bool:
     async with _pool.acquire() as c:
-        tag = await c.execute("UPDATE orders SET status=3, ship=NULL WHERE id=$1 AND status=2", oid)
+        tag = await c.execute(
+            "UPDATE orders SET status=3, ship=NULL, received_at=COALESCE(received_at, now()) "
+            "WHERE id=$1 AND status=2", oid)
     return tag == "UPDATE 1"
 
 
