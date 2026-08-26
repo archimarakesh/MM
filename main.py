@@ -328,7 +328,8 @@ async def _settle(inv: dict, txid: str) -> bool:
                      f"Админка → Заказы.")
     else:
         await notify(res["user_id"],
-                     f"✅ Оплата получена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+                     f"✅ Оплата получена — баланс пополнен на <b>{res['amount']} ₴</b>."
+                     + _dep_bonus_line(res))
         await notify(ADMIN_ID,
                      f"₿ Крипто-пополнение: счёт #{inv['id']}, +{res['amount']} ₴ "
                      f"({inv['amount_crypto']} {CRYPTO[inv['currency']]['label']}).")
@@ -714,6 +715,35 @@ async def notify(chat_id: int, text: str):
         await bot.send_message(chat_id, text, parse_mode="HTML")
     except Exception:
         log.warning("Не удалось отправить уведомление %s", chat_id)
+
+
+def _dep_bonus_line(res: dict) -> str:
+    """Приписка про бонус за пополнение к уведомлению (если он начислен)."""
+    b = int((res or {}).get("bonus") or 0)
+    return (f"\n🎁 Акция: <b>+{b} ₴</b> бонусом за пополнение (нужно отыграть)!"
+            if b > 0 else "")
+
+
+async def broadcast_all(text: str) -> int:
+    """Рассылка сообщения всем пользователям бота (кроме забаненных), с
+    троттлингом ~20/с. Заблокировавшие бота просто пропускаются."""
+    if not bot:
+        return 0
+    try:
+        uids = await db.all_user_ids()
+    except Exception:
+        log.exception("Рассылка: не удалось получить список пользователей")
+        return 0
+    sent = 0
+    for uid in uids:
+        try:
+            await bot.send_message(uid, text, parse_mode="HTML")
+            sent += 1
+        except Exception:
+            pass                       # заблокировали бота / удалились — молча
+        await asyncio.sleep(0.05)
+    log.info("Рассылка: отправлено %s из %s", sent, len(uids))
+    return sent
 
 
 # ── розыгрыш (лотерея): выплаты и авто-жеребьёвка по таймеру ──────────────────
@@ -1340,7 +1370,8 @@ async def _card_settle(payment_id: str) -> bool:
     if not res:
         return False
     await notify(res["user_id"],
-                 f"✅ Оплата картой получена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+                 f"✅ Оплата картой получена — баланс пополнен на <b>{res['amount']} ₴</b>."
+                 + _dep_bonus_line(res))
     await notify(ADMIN_ID, f"💳 PayDome: +{res['amount']} ₴ (payment {payment_id}).")
     return True
 
@@ -2184,7 +2215,8 @@ async def api_admin_payment_resolve(request: Request):
         raise HTTPException(400, str(e))
     if res["credited"]:
         await notify(res["user_id"],
-                     f"✅ Оплата подтверждена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+                     f"✅ Оплата подтверждена — баланс пополнен на <b>{res['amount']} ₴</b>."
+                     + _dep_bonus_line(res))
     elif res["reversed"]:
         await notify(res["user_id"],
                      f"⚠️ Пополнение на <b>{res['amount']} ₴</b> отменено — сумма списана с баланса.")
@@ -2273,6 +2305,7 @@ async def api_admin_data(request: Request):
         "sales": await db.sales_stats(),
         "grow_stats": await db.grow_stats(),
         "promos": await db.admin_promos(),
+        "deposit_bonus": await db.deposit_bonus_state(),
     }
 
 
@@ -2302,6 +2335,29 @@ async def api_admin_settings(request: Request):
     return {"settings": await db.get_settings()}
 
 
+@app.post("/api/admin/deposit-bonus")
+async def api_admin_deposit_bonus(request: Request):
+    """Акция «бонус за пополнение +X% до 00:00». pct=0 — выключить.
+    По умолчанию при включении рассылает анонс всем в боте."""
+    admin_user(request)
+    b = await request.json()
+    pct = max(0, min(100, pint(b.get("pct"))))
+    if pct <= 0:
+        await db.deposit_bonus_set(0, "")
+        return {"deposit_bonus": await db.deposit_bonus_state(), "sent": 0}
+    # действует до ближайшей полуночи по Киеву
+    until = (datetime.now(KYIV) + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    await db.deposit_bonus_set(pct, until.isoformat())
+    if bool(b.get("announce", True)):
+        asyncio.create_task(broadcast_all(
+            f"🔥 <b>Акция: +{pct}% за пополнение!</b>\n\n"
+            f"Пополни баланс до <b>00:00</b> — и получи <b>+{pct}%</b> бонусом сверху.\n"
+            f"Например: пополнил 1000 ₴ → <b>+{pct * 10} ₴</b> бонусом на баланс.\n\n"
+            f"Успей до полуночи ⏳"))
+    return {"deposit_bonus": await db.deposit_bonus_state(), "sent": -1}
+
+
 @app.post("/api/admin/topup")
 async def api_admin_topup(request: Request):
     admin_user(request)
@@ -2312,7 +2368,8 @@ async def api_admin_topup(request: Request):
         raise HTTPException(400, str(e))
     if res["approved"]:
         await notify(res["user_id"],
-                     f"✅ Оплата подтверждена — баланс пополнен на <b>{res['amount']} ₴</b>.")
+                     f"✅ Оплата подтверждена — баланс пополнен на <b>{res['amount']} ₴</b>."
+                     + _dep_bonus_line(res))
     else:
         await notify(res["user_id"],
                      "❌ Квитанция не прошла проверку. Если это ошибка — напишите в поддержку.")

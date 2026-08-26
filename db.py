@@ -589,6 +589,64 @@ async def set_kv(key: str, value: str):
         """, key, value)
 
 
+# ── глобальный бонус за пополнение (акция «+X% до 00:00») ─────────────────────
+async def _deposit_bonus(c, user_id: int, amount: int) -> int:
+    """Если сейчас активна акция «бонус за пополнение» — начисляет % от суммы
+    пополнения НЕвыводимым бонусом (locked + вейджер, как остальные бонусы).
+    Возвращает начисленную сумму (0 — акция не активна). Вызывать в той же
+    транзакции сразу после зачисления самого пополнения."""
+    pct = await c.fetchval("SELECT value FROM settings WHERE key='dep_bonus_pct'")
+    until = await c.fetchval("SELECT value FROM settings WHERE key='dep_bonus_until'")
+    try:
+        pct = int(pct or 0)
+    except (TypeError, ValueError):
+        pct = 0
+    if pct <= 0 or not until:
+        return 0
+    try:
+        if datetime.fromisoformat(until) <= datetime.now(timezone.utc):
+            return 0
+    except ValueError:
+        return 0
+    bonus = int(amount) * pct // 100
+    if bonus <= 0:
+        return 0
+    await c.execute(
+        f"UPDATE users SET balance=balance+$1, locked=locked+$1, "
+        f"wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} "
+        f"WHERE tg_id=$2", bonus, int(user_id))
+    return bonus
+
+
+async def deposit_bonus_state() -> dict:
+    """Текущее состояние акции: {pct, until, active}."""
+    pct, until = await get_kv("dep_bonus_pct"), await get_kv("dep_bonus_until")
+    try:
+        pct = int(pct or 0)
+    except (TypeError, ValueError):
+        pct = 0
+    active = False
+    if pct > 0 and until:
+        try:
+            active = datetime.fromisoformat(until) > datetime.now(timezone.utc)
+        except ValueError:
+            active = False
+    return {"pct": pct, "until": until or "", "active": active}
+
+
+async def deposit_bonus_set(pct: int, until_iso: str) -> None:
+    await set_kv("dep_bonus_pct", str(int(pct)))
+    await set_kv("dep_bonus_until", str(until_iso or ""))
+
+
+async def all_user_ids(exclude_banned: bool = True) -> list:
+    """tg_id всех пользователей — для рассылки в бота."""
+    q = "SELECT tg_id FROM users" + (" WHERE NOT banned" if exclude_banned else "")
+    async with _pool.acquire() as c:
+        rows = await c.fetch(q)
+    return [r["tg_id"] for r in rows]
+
+
 def payment_public(s: dict) -> dict:
     """Только заполненные реквизиты — что показывать покупателю."""
     return {k: v for k, v in s.items() if v}
@@ -1102,9 +1160,11 @@ async def admin_payment_resolve(kind: str, pid: int, approve: bool) -> dict:
             raise ValueError("Неизвестный тип платежа")
         was_credited = r["status"] == 1        # деньги уже были на балансе
         credited = reversed_ = False
+        bonus = 0
         if approve and not was_credited:       # зачисляем впервые
             await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2", amount, uid)
             credited = True
+            bonus = await _deposit_bonus(c, uid, amount)
         elif not approve and was_credited:      # откатываем ранее зачисленное
             await c.execute("""
                 UPDATE users SET balance = GREATEST(0, balance - $1),
@@ -1113,7 +1173,7 @@ async def admin_payment_resolve(kind: str, pid: int, approve: bool) -> dict:
             """, amount, uid)
             reversed_ = True
     return {"user_id": uid, "amount": amount, "approved": approve,
-            "credited": credited, "reversed": reversed_}
+            "credited": credited, "reversed": reversed_, "bonus": bonus}
 
 
 async def topup_decide(topup_id: int, approve: bool) -> dict:
@@ -1124,10 +1184,13 @@ async def topup_decide(topup_id: int, approve: bool) -> dict:
             raise ValueError("Заявка не найдена или уже обработана")
         await c.execute("UPDATE topups SET status=$2, decided=now() WHERE id=$1",
                         topup_id, 1 if approve else 2)
+        bonus = 0
         if approve:
             await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
                             t["amount"], t["user_id"])
-        return {"user_id": t["user_id"], "amount": t["amount"], "approved": approve}
+            bonus = await _deposit_bonus(c, t["user_id"], t["amount"])
+        return {"user_id": t["user_id"], "amount": t["amount"], "approved": approve,
+                "bonus": bonus}
 
 
 # ── админ: заказы и ТТН ──────────────────────────────────────────────────────
@@ -1488,7 +1551,8 @@ async def invoice_paid(inv_id: int, txid: str) -> dict | None:
         if not inv:
             return None
         await c.execute("UPDATE invoices SET status=1, txid=$2 WHERE id=$1", inv_id, txid)
-        res = {"user_id": inv["user_id"], "amount": inv["amount_uah"], "order_code": None}
+        res = {"user_id": inv["user_id"], "amount": inv["amount_uah"],
+               "order_code": None, "bonus": 0}
         if inv["order_id"]:
             upd = await c.execute(
                 "UPDATE orders SET status=0 WHERE id=$1 AND status=-1", inv["order_id"])
@@ -1498,6 +1562,7 @@ async def invoice_paid(inv_id: int, txid: str) -> dict | None:
         else:
             await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
                             inv["amount_uah"], inv["user_id"])
+            res["bonus"] = await _deposit_bonus(c, inv["user_id"], inv["amount_uah"])
         return res
 
 
@@ -1809,7 +1874,8 @@ async def card_payment_paid(payment_id: str) -> dict | None:
         # на баланс — желаемая сумма (amount_uah); разница pay_uah−amount_uah = сервисный сбор
         await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
                         p["amount_uah"], p["user_id"])
-        return {"user_id": p["user_id"], "amount": p["amount_uah"]}
+        bonus = await _deposit_bonus(c, p["user_id"], p["amount_uah"])
+        return {"user_id": p["user_id"], "amount": p["amount_uah"], "bonus": bonus}
 
 
 # ── вывод баланса (ручная выплата) ───────────────────────────────────────────
