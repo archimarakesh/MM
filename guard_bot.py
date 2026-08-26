@@ -566,6 +566,34 @@ async def run(notify=None, on_ban=None, on_unban=None):
     async def cmd_chatid(message: Message):
         await message.answer(f"ID этого чата: <code>{message.chat.id}</code>", parse_mode="HTML")
 
+    @dp.message(Command("quiz", "викторина"))
+    async def cmd_quiz(message: Message):
+        """Остаток свежих (не задававшихся) вопросов по темам — только владельцу."""
+        if message.from_user.id != GUARD_ADMIN_ID:
+            return
+        try:
+            used = await db.quiz_used_themes()
+        except Exception:
+            used = set()
+        lines, total_left = ["🧠 <b>Остаток вопросов</b> (ещё не задавались):"], 0
+        for key in qb.theme_keys():
+            title, emoji = qb.theme_meta(key)
+            qs = qb.theme_questions(key)
+            try:
+                asked = await db.quiz_asked_hashes(key)
+            except Exception:
+                asked = set()
+            left = sum(1 for item in qs if qb.qhash(item[0]) not in asked)
+            total_left += left
+            days = left // QUIZ_QUESTIONS if QUIZ_QUESTIONS else 0
+            lines.append(
+                f"{emoji} {_esc(title)}: <b>{left}</b> из {len(qs)}"
+                + (f" · ~{days} викт." if days else " · на подходе сброс")
+                + (" ✓пройдена в круге" if key in used else ""))
+        lines.append(f"\nВсего свежих: <b>{total_left}</b> · по {QUIZ_QUESTIONS} вопр./день. "
+                     f"Когда в теме кончаются — круг по ней сбрасывается автоматически.")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
     @dp.message(Command("rules", "правила"))
     async def cmd_rules(message: Message):
         if message.chat.type != "private":
