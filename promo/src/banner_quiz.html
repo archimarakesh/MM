@@ -1,0 +1,76 @@
+<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800;900&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:1200px;height:675px;overflow:hidden;position:relative;font-family:'Manrope',sans-serif;
+  background:#080604;color:#f3eee2;display:flex;align-items:center}
+.glow{position:absolute;width:820px;height:820px;bottom:-360px;left:-260px;border-radius:50%;
+  background:radial-gradient(circle,rgba(212,175,55,.20),transparent 62%);pointer-events:none}
+.glow2{position:absolute;width:520px;height:520px;top:-220px;right:120px;border-radius:50%;
+  background:radial-gradient(circle,rgba(212,175,55,.10),transparent 64%);pointer-events:none}
+
+.left{padding-left:52px;width:640px;position:relative;z-index:2}
+.logo-row{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+.logo-row img{width:52px;filter:drop-shadow(0 8px 22px rgba(212,175,55,.45))}
+.logo-row span{font-family:'Cinzel',serif;font-weight:700;font-size:26px;letter-spacing:.14em}
+.pill-tag{display:inline-flex;align-items:center;gap:9px;border:1px solid rgba(212,175,55,.4);
+  border-radius:999px;padding:9px 22px;font-size:15px;font-weight:800;letter-spacing:.16em;
+  color:#e8c96a;background:rgba(212,175,55,.06)}
+.h{font-family:'Cinzel',serif;font-weight:900;font-size:74px;line-height:.98;margin:20px 0 0;
+  background:linear-gradient(160deg,#fbeaa6,#e6c368 42%,#b78a24);-webkit-background-clip:text;
+  background-clip:text;color:transparent;filter:drop-shadow(0 3px 1px rgba(0,0,0,.5))}
+.tag{font-size:20px;color:#b7ae98;margin-top:20px;line-height:1.5;max-width:560px}
+.tag b{color:#f0d98a}
+.stats{display:flex;gap:15px;margin-top:30px;max-width:600px}
+.stat{flex:1;background:rgba(255,255,255,.035);border:1px solid rgba(212,175,55,.16);border-radius:20px;
+  padding:20px 10px 16px;text-align:center;box-shadow:inset 0 1px 1px rgba(255,255,255,.06)}
+.stat b{display:block;font-family:'Cinzel',serif;font-weight:800;font-size:38px;
+  background:linear-gradient(160deg,#fbeaa6,#d4af37);-webkit-background-clip:text;background-clip:text;color:transparent}
+.stat span{display:block;font-size:14px;color:#8d846f;font-weight:600;line-height:1.35;margin-top:7px}
+.cta{display:inline-flex;align-items:center;gap:12px;margin-top:34px;border-radius:16px;
+  padding:16px 30px;font-size:22px;font-weight:800;color:#140f03;
+  background:linear-gradient(135deg,#f0d47a,#c9971d);box-shadow:0 16px 44px rgba(212,175,55,.30)}
+
+.card{position:absolute;right:56px;top:50%;transform:translateY(-50%);width:452px;z-index:2;
+  background:linear-gradient(180deg,rgba(20,17,11,.96),rgba(11,9,6,.96));
+  border:1px solid rgba(212,175,55,.22);border-radius:26px;padding:26px 26px 22px;
+  box-shadow:0 40px 90px rgba(0,0,0,.6),inset 0 1px 1px rgba(255,255,255,.05)}
+.q-top{font-size:14px;font-weight:800;letter-spacing:.08em;color:#8d846f;margin-bottom:10px}
+.q-top b{color:#e8c96a}
+.q{font-family:'Manrope';font-weight:800;font-size:27px;color:#f4ecd8;margin-bottom:18px}
+.opt{display:flex;align-items:center;gap:14px;border:1px solid rgba(255,255,255,.09);border-radius:15px;
+  padding:15px 17px;margin-bottom:11px;font-size:19px;color:#e6ded0;font-weight:600}
+.opt .k{width:34px;height:34px;flex:none;border-radius:9px;background:rgba(255,255,255,.06);
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:#c9bfa8}
+.opt.win{border-color:rgba(78,201,138,.6);background:rgba(78,201,138,.10)}
+.opt.win .k{background:#4ec98a;color:#08130c}
+.opt .win-tag{margin-left:auto;font-weight:800;color:#4ec98a;font-size:17px}
+.card-foot{display:flex;justify-content:space-between;font-size:15px;color:#8d846f;font-weight:600;
+  margin-top:16px;padding-top:15px;border-top:1px solid rgba(255,255,255,.07)}
+.card-foot b{color:#e8c96a}
+</style></head><body>
+<div class="glow"></div><div class="glow2"></div>
+
+<div class="left">
+  <div class="logo-row"><img src="file:///home/user/mm/logo.png"><span><b style="color:#f59e2d">MAGIC</b> MARKET</span></div>
+  <div class="pill-tag">🧠 ВИКТОРИНА ДНЯ</div>
+  <div class="h">Отвечай<br>и зарабатывай</div>
+  <div class="tag">Каждый день в чате — <b>10 вопросов</b> на тему, выбранную голосованием. Первый верный ответ забирает приз!</div>
+  <div class="stats">
+    <div class="stat"><b>10</b><span>вопросов<br>каждый день</span></div>
+    <div class="stat"><b>+20 ₴</b><span>за каждый<br>правильный ответ</span></div>
+    <div class="stat"><b>+50 ₴</b><span>победителю<br>дня сверху</span></div>
+  </div>
+  <div class="cta">🕐 Сегодня в 18:00 · отвечай первым в чате</div>
+</div>
+
+<div class="card">
+  <div class="q-top">ВОПРОС <b>5/10</b> · 🌍 ГЕОГРАФИЯ</div>
+  <div class="q">Столица Японии?</div>
+  <div class="opt"><span class="k">A</span>Пекин</div>
+  <div class="opt win"><span class="k">B</span>Токио<span class="win-tag">+20 ₴ ✓</span></div>
+  <div class="opt"><span class="k">C</span>Сеул</div>
+  <div class="opt"><span class="k">D</span>Бангкок</div>
+  <div class="card-foot"><span>Тема — <b>голосованием</b></span><span>Приз — <b>на баланс</b></span></div>
+</div>
+</body></html>
