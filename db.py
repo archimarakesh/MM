@@ -2606,28 +2606,53 @@ async def casino_real_bank() -> int:
 async def wallet_bonus(tg_id: int, amount: int, op_id: str,
                        kind: str = "bonus", ref: str = None) -> dict:
     """Начисление БОНУСА: идёт в locked (нельзя вывести; тратится в магазине
-    или отыгрывается в казино). Используется рейкбеком из казино. Идемпотентно по op_id."""
+    или отыгрывается в казино). Идемпотентно по op_id.
+
+    Обычный бонус (рейкбек и т.п.): вейджер РАСТЁТ на amount×BONUS_WAGER_X.
+
+    kind='freespin' — выигрыш фриспина Kush Reels: тоже в бонус (locked,
+    невыводимо), но вейджер НЕ растёт, а НАОБОРОТ отматывается на сумму
+    выигрыша (не больше BONUS_MAX_BET за спин — джекпот-фриспин не должен
+    гасить весь отыгрыш разом). Если вейджер добит фриспинами — бонус
+    освобождается в вывод, как при обычном отыгрыше."""
     op_id = str(op_id or "").strip()
     if not op_id or len(op_id) > 64:
         raise ValueError("Неверный op_id")
     if amount <= 0:
         raise ValueError("Сумма бонуса должна быть > 0")
+    is_freespin = (kind == "freespin")
     async with _pool.acquire() as c, c.transaction():
         await c.execute("INSERT INTO users(tg_id) VALUES($1) ON CONFLICT (tg_id) DO NOTHING", tg_id)
-        await c.execute("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        u = await c.fetchrow(
+            "SELECT balance, locked, wager_req FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         prev = await c.fetchrow("SELECT balance_after FROM wallet_ops WHERE op_id=$1", op_id)
         if prev:
             return {"balance": prev["balance_after"], "duplicate": True}
-        r = await c.fetchrow(f"""
-            UPDATE users SET balance=balance+$1, locked=locked+$1,
-                             wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} WHERE tg_id=$2
-            RETURNING balance
-        """, amount, tg_id)
+        balance = u["balance"]
+        locked = u["locked"] or 0
+        wager = u["wager_req"] or 0
+        new_balance = balance + amount
+        new_locked = locked + amount
+        real_delta = 0
+        if is_freespin:
+            # выигрыш отматывает вейджер (turnover-прогресс), а не раздувает его
+            reduce = min(amount, BONUS_MAX_BET)
+            new_wager = max(0, wager - reduce)
+            if wager > 0 and new_wager == 0:
+                new_locked = 0            # вейджер добит — бонус в вывод
+            # Δ выводимых средств: 0 пока бонус заперт, скачок при освобождении
+            real_delta = (new_balance - new_locked) - (balance - locked)
+        else:
+            new_wager = (0 if locked <= 0 else wager) + amount * BONUS_WAGER_X
+        await c.execute(
+            "UPDATE users SET balance=$1, locked=$2, wager_req=$3 WHERE tg_id=$4",
+            new_balance, new_locked, new_wager, tg_id)
         await c.execute("""
-            INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after)
-            VALUES($1,$2,$3,$4,$5,$6)
-        """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None), r["balance"])
-        return {"balance": r["balance"], "duplicate": False}
+            INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after, real_delta)
+            VALUES($1,$2,$3,$4,$5,$6,$7)
+        """, op_id, tg_id, amount, str(kind)[:32], (str(ref)[:64] if ref else None),
+             new_balance, real_delta)
+        return {"balance": new_balance, "duplicate": False}
 
 
 # ── статистика реферальной программы для админки ────────────────────────────
