@@ -3194,6 +3194,131 @@ async def admin_users_list(query: str = "", limit: int = 50) -> dict:
     }
 
 
+async def _user_money(c, tg_id: int) -> dict:
+    """Движение денег пользователя для админки: откуда пришли (пополнения,
+    бонусы, рефералы, выигрыши в казино, выплаты E-grow) и куда ушли (ставки,
+    покупки, выводы, вложения в E-grow). Собираем из разных таблиц — единого
+    журнала на маркет-часть нет, поэтому агрегируем по источникам, а хронологию
+    склеиваем из тех событий, у которых есть точная метка времени.
+
+    Возвращает {sources:[...], uses:[...], summary:{...}, timeline:[...]}."""
+    # ── притоки реальных денег: одобренные пополнения (квитанция/крипто/карта) ──
+    deposited = int(await c.fetchval("""
+        SELECT COALESCE(SUM(amount), 0) FROM (
+            SELECT amount     FROM topups        WHERE user_id=$1 AND status=1
+            UNION ALL SELECT amount_uah FROM invoices WHERE user_id=$1 AND status=1
+                                                            AND order_id IS NULL
+            UNION ALL SELECT amount_uah FROM card_payments WHERE user_id=$1 AND status=1
+        ) x
+    """, tg_id) or 0)
+    # ── казино: ставки/выигрыши берём из журнала кошелька (kind bet/win) ─────────
+    cas = await c.fetchrow("""
+        SELECT COALESCE(SUM(-delta) FILTER (WHERE kind='bet'), 0)::BIGINT AS bet,
+               COALESCE(SUM(delta)  FILTER (WHERE kind='win'), 0)::BIGINT AS win,
+               COALESCE(SUM(delta)  FILTER (WHERE kind='bonus'), 0)::BIGINT AS rakeback
+        FROM wallet_ops WHERE user_id=$1
+    """, tg_id)
+    cas_bet = int(cas["bet"] or 0); cas_win = int(cas["win"] or 0)
+    rakeback = int(cas["rakeback"] or 0)
+    # ── магазин: потрачено всего и сколько из этого покрыто бонусами ────────────
+    shop = await c.fetchrow("""
+        SELECT COALESCE(SUM(total), 0)::BIGINT      AS spent,
+               COALESCE(SUM(bonus_part), 0)::BIGINT AS bonus
+        FROM orders WHERE user_id=$1 AND status >= 1
+    """, tg_id)
+    shop_spent = int(shop["spent"] or 0); shop_bonus = int(shop["bonus"] or 0)
+    # ── выводы (одобренные) ────────────────────────────────────────────────────
+    withdrawn = int(await c.fetchval(
+        "SELECT COALESCE(SUM(amount), 0) FROM withdrawals WHERE user_id=$1 AND status=1",
+        tg_id) or 0)
+    # ── E-grow: вложено всего и получено по завершённым долям ───────────────────
+    eg = await c.fetchrow("""
+        SELECT COALESCE(SUM(invested), 0)::BIGINT                       AS invested,
+               COALESCE(SUM(payout) FILTER (WHERE status=1), 0)::BIGINT AS payout
+        FROM shares WHERE user_id=$1
+    """, tg_id)
+    eg_in = int(eg["invested"] or 0); eg_out = int(eg["payout"] or 0)
+    # ── начисленные бонусы (те, что оставили след в своих таблицах) ─────────────
+    aw = await c.fetchrow("""
+        SELECT COALESCE((SELECT SUM(amount) FROM activity_awards WHERE user_id=$1), 0)::BIGINT AS activity,
+               COALESCE((SELECT SUM(amount) FROM ref_race_awards WHERE user_id=$1), 0)::BIGINT AS race,
+               COALESCE((SELECT SUM(prize)  FROM lottery_winners WHERE user_id=$1), 0)::BIGINT AS lottery
+    """, tg_id)
+    bonus_awarded = (int(aw["activity"] or 0) + int(aw["race"] or 0)
+                     + int(aw["lottery"] or 0) + rakeback)
+    ref_earned = int(await c.fetchval(
+        "SELECT COALESCE(ref_earned, 0) FROM users WHERE tg_id=$1", tg_id) or 0)
+
+    # ── хронология: события с точной меткой времени (казино-раунды не сыплем —
+    #    их тысячи, они уже свёрнуты в сводку выше) ──────────────────────────────
+    ev = await c.fetch("""
+        SELECT * FROM (
+            SELECT created AS ts, 'deposit' AS type, amount AS amount,
+                   COALESCE('Пополнение · '||method, 'Пополнение') AS label, status
+            FROM topups WHERE user_id=$1 AND status=1
+            UNION ALL
+            SELECT created, 'deposit', amount_uah, 'Пополнение · крипто ('||currency||')', status
+            FROM invoices WHERE user_id=$1 AND status=1 AND order_id IS NULL
+            UNION ALL
+            SELECT created, 'deposit', amount_uah, 'Пополнение · карта', status
+            FROM card_payments WHERE user_id=$1 AND status=1
+            UNION ALL
+            SELECT created, 'withdraw', -amount, 'Вывод · '||COALESCE(method,''), status
+            FROM withdrawals WHERE user_id=$1 AND status=1
+            UNION ALL
+            SELECT created, 'order', -total,
+                   'Покупка · '||COALESCE(product,'товар'), status
+            FROM orders WHERE user_id=$1 AND status >= 1
+            UNION ALL
+            SELECT created, 'egrow', -invested, 'E-grow · вложение', status
+            FROM shares WHERE user_id=$1
+            UNION ALL
+            SELECT created, 'egrow', payout, 'E-grow · выплата', status
+            FROM shares WHERE user_id=$1 AND status=1
+            UNION ALL
+            SELECT created, 'bonus', amount, 'Бонус · активность в чате', 0
+            FROM activity_awards WHERE user_id=$1
+            UNION ALL
+            SELECT created, 'bonus', amount, 'Бонус · реферальная гонка', 0
+            FROM ref_race_awards WHERE user_id=$1
+            UNION ALL
+            SELECT created, 'bonus', delta, 'Бонус · рейкбек казино', 0
+            FROM wallet_ops WHERE user_id=$1 AND kind='bonus'
+        ) e ORDER BY ts DESC LIMIT 60
+    """, tg_id)
+    timeline = [{
+        "ts": r["ts"].isoformat() if r["ts"] else None,
+        "type": r["type"], "amount": int(r["amount"] or 0), "label": r["label"],
+    } for r in ev]
+
+    sources = [
+        {"key": "deposit", "label": "Пополнения (реал)",   "amount": deposited},
+        {"key": "bonus",   "label": "Бонусы начислено",     "amount": bonus_awarded},
+        {"key": "ref",     "label": "Рефералы",             "amount": ref_earned},
+        {"key": "casino",  "label": "Выигрыши в казино",    "amount": cas_win},
+        {"key": "egrow",   "label": "Выплаты E-grow",       "amount": eg_out},
+    ]
+    uses = [
+        {"key": "casino",  "label": "Ставки в казино",      "amount": cas_bet},
+        {"key": "shop",    "label": "Покупки в магазине",   "amount": shop_spent},
+        {"key": "withdraw","label": "Выводы",               "amount": withdrawn},
+        {"key": "egrow",   "label": "Вложения в E-grow",    "amount": eg_in},
+    ]
+    return {
+        "sources": sources, "uses": uses, "timeline": timeline,
+        "summary": {
+            "deposited": deposited, "bonus_awarded": bonus_awarded,
+            "ref_earned": ref_earned, "withdrawn": withdrawn,
+            "casino_bet": cas_bet, "casino_win": cas_win,
+            "casino_net": cas_win - cas_bet,
+            "shop_spent": shop_spent, "shop_bonus": shop_bonus,
+            "egrow_in": eg_in, "egrow_out": eg_out,
+            "in_total": deposited + bonus_awarded + ref_earned + cas_win + eg_out,
+            "out_total": cas_bet + shop_spent + withdrawn + eg_in,
+        },
+    }
+
+
 async def admin_user_detail(tg_id: int) -> dict:
     """Полная карточка пользователя для админки: баланс, покупки, пополнения,
     выводы, рефералы (и кто пригласил его самого)."""
@@ -3212,9 +3337,10 @@ async def admin_user_detail(tg_id: int) -> dict:
             inviter = await c.fetchrow(
                 "SELECT tg_id, name, username FROM users WHERE tg_id=$1", u["ref_by"])
         orders = await c.fetch("""
-            SELECT id, product, grams, total, status, ttn, date, bonus_part, created
+            SELECT id, product, grams, unit, total, status, ttn, date, bonus_part, created
             FROM orders WHERE user_id=$1 ORDER BY created DESC LIMIT 50
         """, tg_id)
+        money = await _user_money(c, tg_id)
         topups = await c.fetch("""
             SELECT * FROM (
                 SELECT t.id, t.amount, 'receipt' AS kind,
@@ -3279,4 +3405,5 @@ async def admin_user_detail(tg_id: int) -> dict:
             "orders": int(r["orders"] or 0), "spent": int(r["spent"] or 0),
             "banned": bool(r["banned"]),
         } for r in refs],
+        "money": money,
     }
