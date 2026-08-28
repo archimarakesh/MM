@@ -267,6 +267,15 @@ img.rev-ava{background:rgba(255,255,255,.06)}
   transition:all .45s var(--ease)}
 .wchip.sel{border-color:var(--gold);color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d);
   box-shadow:0 0.375rem 1rem rgba(212,175,55,.25)}
+/* двухуровневое меню админки: группы сверху, подвкладки под ними */
+.admin-groups{display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.625rem 0 0.5rem}
+.admin-subtabs{display:flex;gap:0.5rem;flex-wrap:wrap;margin:0 0 0.875rem;
+  padding-top:0.625rem;border-top:0.0625rem solid var(--line)}
+.gchip{display:inline-flex;align-items:center;gap:0.3rem;padding:0.5rem 0.85rem;border-radius:0.8rem;
+  font-size:0.8125rem;font-weight:800;cursor:pointer;border:0.0625rem solid var(--line);
+  background:rgba(255,255,255,.04);color:var(--muted);transition:all .3s var(--ease)}
+.gchip.sel{border-color:var(--gold);color:var(--gold-soft);background:rgba(212,175,55,.10);
+  box-shadow:0 0.25rem 0.75rem rgba(212,175,55,.14)}
 .grow-toggle{display:flex;align-items:center;justify-content:center;gap:0.4375rem;width:100%;
   background:rgba(212,175,55,.06);color:var(--gold-soft);border:0.0625rem solid var(--line);
   border-radius:var(--r-lg);padding:0.6875rem;font:inherit;font-size:0.78125rem;font-weight:700;
@@ -909,7 +918,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
       </div>
       <h1 class="page-title" style="margin:0;font-size:22px">Админка 👑</h1>
     </div>
-    <div class="weight-chips" id="adminTabs"></div>
+    <div id="adminTabs"></div>
     <div id="adminBody"></div>
   </section>
 
@@ -3303,6 +3312,21 @@ async function deleteAccount() {
 
 /* ═══════════ Админка ═══════════ */
 let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peUnit = 'g', peTiersArr = [];
+// админка сгруппирована: группа сверху → её подвкладки под ней (меню/подменю)
+const ADMIN_TABS = {
+  products: 'Товары', orders: 'Заказы',
+  topups: 'Пополнения', withdrawals: 'Выводы', pay: 'Оплата',
+  grow: 'E-grow', lottery: 'Рулетка', promo: 'Промокоды',
+  refs: 'Рефералы', users: 'Пользователи', reviews: 'Отзывы',
+};
+const ADMIN_GROUPS = [
+  { key: 'shop',      title: 'Магазин',  icon: '🛍', tabs: ['products', 'orders'] },
+  { key: 'finance',   title: 'Финансы',  icon: '💳', tabs: ['topups', 'withdrawals', 'pay'] },
+  { key: 'marketing', title: 'Акции',    icon: '🎁', tabs: ['grow', 'lottery', 'promo'] },
+  { key: 'people',    title: 'Люди',     icon: '👥', tabs: ['refs', 'users', 'reviews'] },
+];
+let adminGroup = 'shop';
+const adminGroupLast = {};   // последняя открытая подвкладка в каждой группе
 async function openAdmin() {
   if (!API.ok) return toast('Админка доступна только на сервере');
   try { AD = await API.call('/api/admin/data'); } catch (e) { return toast(e.message); }
@@ -3315,15 +3339,22 @@ function renderAdmin(tab) {
   // точка = требует действий: заказ проверить/взять в работу, оплата на проверке
   const dot = ' <span class="rdot"></span>';
   const ordersTodo = AD.orders.filter(o => o.status === -1 || o.status === 0).length;
-  const tabs = [
-    ['products', 'Товары'], ['grow', 'E-grow'],
-    ['orders', 'Заказы' + (ordersTodo ? ` · ${ordersTodo}${dot}` : '')],
-    ['topups', 'Пополнения' + (AD.topups.length ? ` · ${AD.topups.length}${dot}` : '')],
-    ['withdrawals', 'Выводы' + ((AD.withdrawals || []).length ? ` · ${AD.withdrawals.length}${dot}` : '')],
-    ['promo', 'Промокоды'], ['refs', 'Рефералы'], ['users', 'Пользователи'], ['lottery', 'Рулетка'], ['reviews', 'Отзывы'], ['pay', 'Оплата'],
-  ];
-  document.getElementById('adminTabs').innerHTML = tabs.map(([k, l]) =>
-    `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${l}</div>`).join('');
+  const counts = { orders: ordersTodo, topups: AD.topups.length,
+                   withdrawals: (AD.withdrawals || []).length };
+  // активную группу выводим из активной вкладки и запоминаем последнюю подвкладку
+  const grp = ADMIN_GROUPS.find(g => g.tabs.includes(adminTab)) || ADMIN_GROUPS[0];
+  adminGroup = grp.key;
+  adminGroupLast[grp.key] = adminTab;
+  const cnt = k => counts[k] ? ` · ${counts[k]}${dot}` : '';
+  const groups = ADMIN_GROUPS.map(g => {
+    const tgt = adminGroupLast[g.key] || g.tabs[0];
+    const gdot = g.tabs.some(k => counts[k]) ? dot : '';
+    return `<div class="gchip ${g.key === adminGroup ? 'sel' : ''}" onclick="renderAdmin('${tgt}')">${g.icon} ${g.title}${gdot}</div>`;
+  }).join('');
+  const subs = grp.tabs.map(k =>
+    `<div class="wchip ${k === adminTab ? 'sel' : ''}" onclick="renderAdmin('${k}')">${ADMIN_TABS[k]}${cnt(k)}</div>`).join('');
+  document.getElementById('adminTabs').innerHTML =
+    `<div class="admin-groups">${groups}</div><div class="admin-subtabs">${subs}</div>`;
   const b = document.getElementById('adminBody');
   const dt = s => new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   if (tab === 'products') {
