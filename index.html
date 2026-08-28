@@ -4250,6 +4250,44 @@ const AU_ORDER_ST = { '-2': 'отменён', '-1': 'ждёт оплаты', '0'
 const AU_PAY_ST = { '0': 'в обработке', '1': 'зачислено', '2': 'отклонено' };
 const AU_WD_ST = { '0': 'на проверке', '1': 'выплачено', '2': 'отклонено' };
 const AU_KIND = { receipt: 'квитанция', crypto: 'крипта', card: 'карта' };
+const AU_TL_ICON = { deposit: '💳', withdraw: '🏦', order: '🛒', egrow: '🌱', bonus: '🎁' };
+// «₴» с плюсом/минусом и цветом — для строки движения денег
+function auSigned(n) {
+  const s = n >= 0 ? '+' : '−';
+  const col = n >= 0 ? 'var(--gold-soft)' : '#ff8a8a';
+  return `<b style="color:${col}">${s}${fmt(Math.abs(n))} ₴</b>`;
+}
+function auMoney(m) {
+  if (!m) return '';
+  const s = m.summary || {};
+  const row = (o) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:13px">
+      <span style="color:var(--muted)">${o.label}</span><b>${fmt(o.amount)} ₴</b></div>`;
+  const col = (title, arr, tot, totLabel) => `
+    <div style="flex:1;min-width:150px">
+      <p class="note" style="margin:0 0 4px;font-weight:700">${title}</p>
+      ${arr.filter(o => o.amount).map(row).join('') || '<p class="note" style="margin:4px 0">—</p>'}
+      <div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0 0;margin-top:4px;border-top:1px solid rgba(255,255,255,.08);font-size:13px">
+        <span style="color:var(--muted)">${totLabel}</span><b style="color:var(--gold-soft)">${fmt(tot)} ₴</b></div>
+    </div>`;
+  const tl = (m.timeline || []).map(e => `
+    <div class="set-row"><div><h3 style="font-size:13px">${AU_TL_ICON[e.type] || '•'} ${auEsc(e.label)}</h3>
+    <p>${e.ts ? auDate(e.ts) : ''}</p></div>
+    <div style="margin-left:auto;text-align:right">${auSigned(e.amount)}</div></div>`).join('')
+    || '<p class="note">событий пока нет</p>';
+  return `
+    <div class="section-head" style="margin:16px 0 8px"><h2 style="font-size:15px">Движение средств</h2><span>откуда и куда</span></div>
+    <div class="bezel gold"><div class="bezel-core" style="padding:14px 15px">
+      <div style="display:flex;gap:18px;flex-wrap:wrap">
+        ${col('Откуда деньги', m.sources || [], s.in_total || 0, 'Всего пришло')}
+        ${col('Куда уходят', m.uses || [], s.out_total || 0, 'Всего ушло')}
+      </div>
+      <p class="note" style="margin:11px 0 0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)">
+        🎰 Казино: поставил <b>${fmt(s.casino_bet || 0)} ₴</b>, выиграл <b>${fmt(s.casino_win || 0)} ₴</b>,
+        нетто ${auSigned(s.casino_net || 0)}${s.shop_bonus ? ` · 🛒 из покупок бонусами <b>${fmt(s.shop_bonus)} ₴</b>` : ''}</p>
+    </div></div>
+    <details style="margin-top:10px"><summary class="note" style="cursor:pointer;user-select:none">Хронология (${(m.timeline || []).length})</summary>
+      <div style="margin-top:8px">${tl}</div></details>`;
+}
 async function adminUserOpen(id) {
   const b = document.getElementById('adminBody');
   b.innerHTML = '<p class="note">Загрузка…</p>';
@@ -4291,6 +4329,7 @@ async function adminUserOpen(id) {
       ${inviter}
       <div style="margin-top:12px"><button class="ref-ban${u.banned ? ' on' : ''}" onclick="banUser(${u.tg_id}, ${u.banned ? 'false' : 'true'}); setTimeout(()=>adminUserOpen(${u.tg_id}), 400)">${u.banned ? '♻ Разбанить' : '🚫 Забанить'}</button></div>
     </div></div>
+    ${auMoney(d.money)}
     ${sect('Покупки', (d.orders || []).length, orders)}
     ${sect('Пополнения', (d.topups || []).length, topups)}
     ${sect('Выводы', (d.withdrawals || []).length, withdrawals)}
