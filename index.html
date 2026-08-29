@@ -4248,6 +4248,19 @@ async function banUser(id, ban) {
   if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
   else if (confirm(msg)) go();
 }
+async function resetPin(id) {
+  const msg = `Сбросить пин-код у ID ${id}?\n\nПосмотреть пин нельзя — он хранится хэшем. После сброса человек задаст новый при следующем входе.`;
+  const go = async () => {
+    let r;
+    try { r = await API.call('/api/admin/reset-pin', { id }); }
+    catch (e) { return toast(e.message); }
+    haptic('medium');
+    toast(r.had_pin ? 'Пин-код сброшен 🔑' : 'У пользователя не было пина');
+    adminUserOpen(id);
+  };
+  if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
+  else if (confirm(msg)) go();
+}
 let auSearchTimer = null;
 function auEsc(s) { return String(s == null ? '' : s).replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch])); }
 function auDate(iso) { if (!iso) return ''; try { return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: '2-digit' }); } catch (e) { return ''; } }
@@ -4357,8 +4370,14 @@ async function adminUserOpen(id) {
         <div><b>${(d.referrals || []).length}</b><span>приглашено</span></div>
       </div>
       <p class="note" style="margin:8px 0 0">ID ${u.tg_id}${u.created ? ' · с ' + auDate(u.created) : ''}${u.banned ? ` · <span style="color:#ff6b6b">ЗАБЛОКИРОВАН</span>${u.ban_reason ? ' (' + auEsc(u.ban_reason) + ')' : ''}` : ''}</p>
+      <p class="note" style="margin:4px 0 0">🔒 Пин-код: ${u.has_pin
+        ? `<b style="color:var(--gold-soft)">задан</b>${u.pin_locked ? ` · <span style="color:#ff6b6b">ввод заблокирован до ${auDate(u.pin_locked)}</span>` : ''} · посмотреть нельзя (хранится хэшем)`
+        : '<b>не задан</b>'}</p>
       ${inviter}
-      <div style="margin-top:12px"><button class="ref-ban${u.banned ? ' on' : ''}" onclick="banUser(${u.tg_id}, ${u.banned ? 'false' : 'true'}); setTimeout(()=>adminUserOpen(${u.tg_id}), 400)">${u.banned ? '♻ Разбанить' : '🚫 Забанить'}</button></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="ref-ban${u.banned ? ' on' : ''}" onclick="banUser(${u.tg_id}, ${u.banned ? 'false' : 'true'}); setTimeout(()=>adminUserOpen(${u.tg_id}), 400)">${u.banned ? '♻ Разбанить' : '🚫 Забанить'}</button>
+        ${(u.has_pin || u.pin_locked) ? `<button class="ref-ban" style="border-color:var(--gold-line);color:var(--gold-soft)" onclick="resetPin(${u.tg_id})">🔑 Сбросить пин</button>` : ''}
+      </div>
     </div></div>
     ${auMoney(d.money)}
     ${sect('Покупки', (d.orders || []).length, orders)}

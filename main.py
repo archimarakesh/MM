@@ -2291,6 +2291,21 @@ async def api_admin_ban(request: Request):
     return {"ok": True, "id": uid, "banned": ban}
 
 
+@app.post("/api/admin/reset-pin")
+async def api_admin_reset_pin(request: Request):
+    """Сброс пин-кода пользователя. Посмотреть пин нельзя (хэш+соль) — только
+    сбросить: человек задаст новый при следующем входе."""
+    admin_user(request)
+    b = await request.json()
+    uid = pint(b.get("id"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    try:
+        return await db.admin_reset_pin(uid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 @app.post("/api/referrals")
 async def api_referrals(request: Request):
     """Подробности реф-программы клиента: сплит казино/покупки + свои рефералы
