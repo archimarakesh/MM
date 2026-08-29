@@ -1820,6 +1820,24 @@ async def set_pin(tg_id: int, pin: str, old: str) -> dict:
         return {"ok": True}
 
 
+async def admin_reset_pin(tg_id: int) -> dict:
+    """Сброс пин-кода из админки. Посмотреть пин нельзя (хранится хэшем с солью),
+    поэтому только сбрасываем: снимаем пин, обнуляем счётчик неверных попыток и
+    часовую блокировку. Человек задаст новый пин при следующем входе."""
+    async with _pool.acquire() as c:
+        r = await c.fetchrow(
+            "SELECT pin_hash FROM users WHERE tg_id=$1", tg_id)
+        if not r:
+            raise ValueError("Пользователь не найден")
+        had_pin = bool(r["pin_hash"])
+        await c.execute("""
+            UPDATE users SET pin_hash=NULL, pin_salt=NULL, pin_fails=0,
+                             pin_locked_until=NULL
+            WHERE tg_id=$1
+        """, tg_id)
+    return {"ok": True, "had_pin": had_pin}
+
+
 # ── PayDome: авто-карта для пополнения ───────────────────────────────────────
 CARD_PAY_TTL = 30 * 60  # 30 минут на оплату карты
 
@@ -3333,7 +3351,8 @@ async def admin_user_detail(tg_id: int) -> dict:
         u = await c.fetchrow("""
             SELECT tg_id, name, username, balance, locked, wager_req, ref_by,
                    ref_earned, banned, ban_reason, banned_at, created,
-                   platform, tg_premium, tg_photo
+                   platform, tg_premium, tg_photo,
+                   pin_hash, pin_locked_until
             FROM users WHERE tg_id=$1
         """, tg_id)
         if not u:
@@ -3385,6 +3404,10 @@ async def admin_user_detail(tg_id: int) -> dict:
             "ref_earned": int(u["ref_earned"] or 0),
             "created": u["created"].isoformat() if u["created"] else None,
             "platform": u["platform"], "premium": u["tg_premium"], "photo": u["tg_photo"],
+            "has_pin": bool(u["pin_hash"]),
+            "pin_locked": (u["pin_locked_until"].isoformat()
+                           if u["pin_locked_until"]
+                           and u["pin_locked_until"] > datetime.now(timezone.utc) else None),
         },
         "inviter": ({"tg_id": inviter["tg_id"], "name": inviter["name"] or "?",
                      "username": inviter["username"]} if inviter else None),
