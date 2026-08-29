@@ -73,7 +73,7 @@ QUIZ_WIN_PRIZE = int(os.getenv("QUIZ_WIN_PRIZE", "50") or 50)  # лучшему 
 QUIZ_POLL_SEC = int(os.getenv("QUIZ_POLL_SEC", str(10 * 60)) or 10 * 60)  # голосование за тему
 QUIZ_Q_SEC = int(os.getenv("QUIZ_Q_SEC", "150") or 150)     # время на вопрос
 # сначала показываем текст вопроса, через QUIZ_READ_SEC сек — опрос с вариантами
-QUIZ_READ_SEC = int(os.getenv("QUIZ_READ_SEC", "15") or 15)
+QUIZ_READ_SEC = int(os.getenv("QUIZ_READ_SEC", "10") or 10)
 # ── недельная реферальная гонка ─────────────────────────────────────────────
 REF_RACE_PRIZE = int(os.getenv("REF_RACE_PRIZE", "1000") or 1000)
 REF_RACE_PRIZE_2 = int(os.getenv("REF_RACE_PRIZE_2", "500") or 500)   # 2-е место
