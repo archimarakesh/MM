@@ -1897,7 +1897,7 @@ async def card_payment_paid(payment_id: str) -> dict | None:
 
 
 # ── вывод баланса (ручная выплата) ───────────────────────────────────────────
-MIN_WITHDRAW = 100
+MIN_WITHDRAW = int(os.getenv("MIN_WITHDRAW", "1000") or 1000)
 
 
 async def create_withdrawal(tg_id: int, amount: int, method: str, requisites: str) -> dict:

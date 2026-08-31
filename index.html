@@ -2882,10 +2882,13 @@ function renderWithdraw() {
   document.getElementById('wdMethods').innerHTML = WD_METHODS.map(([k, l]) =>
     `<div class="wchip ${k === wdMethod ? 'sel' : ''}" onclick="wdSel('${k}')">${l}</div>`).join('');
   document.getElementById('wdReq').placeholder = WD_METHODS.find(m => m[0] === wdMethod)[2];
+  const min = S.min_withdraw || 1000;
+  const sumEl = document.getElementById('wdSum');
+  if (sumEl) sumEl.placeholder = String(min);
   const w = S.withdrawable != null ? S.withdrawable : S.balance;
   const el = document.getElementById('wdAvail');
   if (el) {
-    let t = `Доступно к выводу: ${fmt(w)} ₴`;
+    let t = `Доступно к выводу: ${fmt(w)} ₴ · минимум ${fmt(min)} ₴`;
     if (w < S.balance) {
       t += ` (бонус ${fmt(S.balance - w)} ₴ — на покупки и в казино)`;
       if (S.wager > 0) t += `\nЧтобы вывести бонус — отыграйте ещё ${fmt(S.wager)} ₴ ставками в казино.`;
@@ -2910,7 +2913,8 @@ function wdSel(k) { haptic('light'); wdMethod = k; renderWithdraw(); }
 async function submitWithdraw() {
   const v = parseInt(document.getElementById('wdSum').value, 10);
   const avail = S.withdrawable != null ? S.withdrawable : S.balance;
-  if (!v || v < 100) return toast('Минимальная сумма вывода — 100 ₴');
+  const min = S.min_withdraw || 1000;
+  if (!v || v < min) return toast(`Минимальная сумма вывода — ${fmt(min)} ₴`);
   if (v > avail) return toast('Бонусные средства можно только потратить в магазине');
   const req = document.getElementById('wdReq').value.trim();
   if (!req) return toast('Укажите реквизиты для выплаты');
