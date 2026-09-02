@@ -1622,9 +1622,7 @@ async def api_bonus_claim(request: Request):
                              client_device(request), client_ip(request))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    await notify(ADMIN_ID,
-                 f"🎁 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) получил "
-                 f"приветственный бонус {BONUS_AMOUNT} ₴.")
+    # админу про каждый приветственный бонус НЕ шлём — их много, только докучало
     # мгновенный бонус пригласившему за активацию друга (если сработал)
     for r in db.pop_activation_notify():
         await notify(r["ref_by"],
