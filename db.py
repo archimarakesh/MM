@@ -660,7 +660,11 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
     c = conn
     await _auto_deliver(c)
     u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1", tg_id)
-    cnt = await c.fetchval("SELECT COUNT(*) FROM users WHERE ref_by=$1", tg_id)
+    # в зачёт (счётчик и уровень %) идут только активированные друзья:
+    # bonus_claimed=true — забрали приветственный бонус, т.е. выполнили ВСЕ
+    # условия (канал, чат, правила). Просто кликнувшие по ссылке не считаются.
+    cnt = await c.fetchval(
+        "SELECT COUNT(*) FROM users WHERE ref_by=$1 AND bonus_claimed", tg_id)
     rows = await c.fetch("SELECT * FROM orders WHERE user_id=$1 ORDER BY id DESC", tg_id)
     rate = {r["order_id"]: r for r in await c.fetch(
         "SELECT order_id, stars, text, anon FROM ratings WHERE user_id=$1", tg_id)}
@@ -773,7 +777,10 @@ async def _ref_bonus(c, buyer_id: int, total: int):
     """Процент рефереру по его уровню — начисляется только после фактической оплаты."""
     ref_by = await c.fetchval("SELECT ref_by FROM users WHERE tg_id=$1", buyer_id)
     if ref_by:
-        invited = await c.fetchval("SELECT COUNT(*) FROM users WHERE ref_by=$1", ref_by)
+        # уровень % — по числу АКТИВИРОВАННЫХ друзей (bonus_claimed), а не всех,
+        # кто просто кликнул по ссылке
+        invited = await c.fetchval(
+            "SELECT COUNT(*) FROM users WHERE ref_by=$1 AND bonus_claimed", ref_by)
         bonus = round(total * ref_percent(invited))
         await c.execute("""
             UPDATE users SET balance=balance+$1, ref_earned=ref_earned+$1 WHERE tg_id=$2
@@ -2659,8 +2666,10 @@ async def admin_ref_stats() -> dict:
     """Топ рефереров: приглашённые, покупки приглашённых (всего и за 30 дней),
     заработано бонусов; плюс общие итоги программы."""
     async with _pool.acquire() as c:
+        # «приглашено» везде = активированные (bonus_claimed): выполнили все
+        # условия (канал, чат, бонус). Кликнувшие, но не активировавшиеся — не в счёт.
         total_invited = int(await c.fetchval(
-            "SELECT COUNT(*) FROM users WHERE ref_by IS NOT NULL") or 0)
+            "SELECT COUNT(*) FROM users WHERE ref_by IS NOT NULL AND bonus_claimed") or 0)
         total_earned = int(await c.fetchval(
             "SELECT COALESCE(SUM(ref_earned), 0) FROM users") or 0)
         buys = await c.fetchrow("""
@@ -2674,7 +2683,7 @@ async def admin_ref_stats() -> dict:
         top = await c.fetch("""
             WITH inv AS (
                 SELECT ref_by AS r, COUNT(*) AS invited
-                FROM users WHERE ref_by IS NOT NULL GROUP BY ref_by),
+                FROM users WHERE ref_by IS NOT NULL AND bonus_claimed GROUP BY ref_by),
             pur AS (
                 SELECT u.ref_by AS r, COUNT(o.id) AS orders,
                        COALESCE(SUM(o.total), 0) AS total,
@@ -2820,8 +2829,10 @@ async def my_referrals(tg_id: int) -> dict:
         """, tg_id) or 0)
         casino = min(casino, earned_total)
         shop = max(0, earned_total - casino)
+        # счётчик «приглашено» = активированные (bonus_claimed) — как в профиле;
+        # список ниже показывает всех, у каждого виден статус активации
         invited = int(await c.fetchval(
-            "SELECT COUNT(*) FROM users WHERE ref_by=$1", tg_id) or 0)
+            "SELECT COUNT(*) FROM users WHERE ref_by=$1 AND bonus_claimed", tg_id) or 0)
         rows = await c.fetch("""
             SELECT u.tg_id, u.name, u.created AS joined, u.bonus_claimed,
                    COUNT(o.id) FILTER (WHERE o.status >= 0)               AS orders,
@@ -2963,17 +2974,22 @@ async def lottery_last_finished() -> dict | None:
 async def lottery_new_candidates(referrer: int, since=None) -> list[int]:
     """Приглашённые данным человеком, ещё НЕ учтённые в лотерее (нет в lottery_refs).
     since — считаем ТОЛЬКО новых, пришедших после старта круга (u.created >= since):
-    в зачёт идут только приглашённые ВО ВРЕМЯ розыгрыша."""
+    в зачёт идут только приглашённые ВО ВРЕМЯ розыгрыша.
+
+    В зачёт идут ТОЛЬКО активированные друзья (bonus_claimed=true — забрали
+    приветственный бонус, а значит выполнили все условия: канал, чат и правила).
+    Подписку на момент зачёта ещё раз проверяет бот вживую (getChatMember)."""
     async with _pool.acquire() as c:
         if since is not None:
             rows = await c.fetch(
                 "SELECT u.tg_id FROM users u WHERE u.ref_by=$1 AND u.tg_id <> $1 "
-                "AND u.created >= $2 "
+                "AND u.bonus_claimed AND u.created >= $2 "
                 "AND NOT EXISTS(SELECT 1 FROM lottery_refs r WHERE r.referral=u.tg_id)",
                 referrer, since)
         else:
             rows = await c.fetch(
                 "SELECT u.tg_id FROM users u WHERE u.ref_by=$1 AND u.tg_id <> $1 "
+                "AND u.bonus_claimed "
                 "AND NOT EXISTS(SELECT 1 FROM lottery_refs r WHERE r.referral=u.tg_id)",
                 referrer)
         return [r["tg_id"] for r in rows]
@@ -3069,7 +3085,8 @@ async def lottery_my_referrals(referrer: int, since=None) -> list[dict]:
                        COALESCE(r.ticketed, false)       AS ticketed
                 FROM users u
                 LEFT JOIN lottery_refs r ON r.referral = u.tg_id
-                WHERE u.ref_by=$1 AND u.tg_id <> $1 AND u.created >= $2
+                WHERE u.ref_by=$1 AND u.tg_id <> $1 AND u.bonus_claimed
+                      AND u.created >= $2
                 ORDER BY u.created DESC""", referrer, since)
         else:
             rows = await c.fetch("""
@@ -3078,7 +3095,7 @@ async def lottery_my_referrals(referrer: int, since=None) -> list[dict]:
                        COALESCE(r.ticketed, false)       AS ticketed
                 FROM users u
                 LEFT JOIN lottery_refs r ON r.referral = u.tg_id
-                WHERE u.ref_by=$1 AND u.tg_id <> $1
+                WHERE u.ref_by=$1 AND u.tg_id <> $1 AND u.bonus_claimed
                 ORDER BY u.created DESC""", referrer)
         return [dict(x) for x in rows]
 
