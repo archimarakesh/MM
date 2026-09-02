@@ -605,13 +605,18 @@ if BOT_TOKEN:
     @dp.message(Command("chatid"))
     async def cmd_chatid(message: Message):
         txt = f"ID этого чата: <code>{message.chat.id}</code>"
-        # если команду отправили В теме супергруппы — покажем и id темы (thread),
-        # его ставим в PROMO_TOPIC_ID, а chat id — в PROMO_TARGET_CHAT
-        if getattr(message, "is_topic_message", False) and message.message_thread_id:
-            txt += (f"\nID этой темы: <code>{message.message_thread_id}</code>"
+        # id темы (thread) показываем, как только он есть — флаг is_topic_message
+        # для командных сообщений часто пустой, а message_thread_id — надёжнее.
+        # В теме «Общее» (General) thread-id нет — тогда постим без темы.
+        tid = message.message_thread_id
+        if tid:
+            txt += (f"\nID этой темы: <code>{tid}</code>"
                     "\n\nДля постинга промо в эту тему задай в Railway:"
                     f"\n<code>PROMO_TARGET_CHAT={message.chat.id}</code>"
-                    f"\n<code>PROMO_TOPIC_ID={message.message_thread_id}</code>")
+                    f"\n<code>PROMO_TOPIC_ID={tid}</code>")
+        else:
+            txt += ("\n(тема не определена — это «Общее»/обычный чат. Отправь "
+                    "/chatid внутри нужной темы супергруппы.)")
         await message.answer(txt, parse_mode="HTML")
 
     @dp.message(Command("give"))
