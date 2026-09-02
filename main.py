@@ -58,11 +58,18 @@ MARKET_BOT = os.getenv("MARKET_BOT", "Magic_Marketplace_bot")
 # автопостинг промо в канал (по умолчанию — в бонусный канал)
 KYIV = ZoneInfo("Europe/Kyiv")
 PROMO_CHANNEL_ID = os.getenv("PROMO_CHANNEL_ID", "") or BONUS_CHANNEL_ID
-# КУДА постим промо. По умолчанию — старый канал. Чтобы слать в ТЕМУ супергруппы:
-#   PROMO_TARGET_CHAT = id супергруппы (напр. -100…), PROMO_TOPIC_ID = id темы (thread).
-# Узнать id темы: команда /id, отправленная В нужной теме супергруппы.
-PROMO_TARGET_CHAT = os.getenv("PROMO_TARGET_CHAT", "") or PROMO_CHANNEL_ID
-PROMO_TOPIC_ID = int(os.getenv("PROMO_TOPIC_ID", "0") or 0)   # 0 = без темы (обычный чат/канал)
+# КУДА постим промо по расписанию.
+#   PROMO_TOPIC_ID — id темы (thread) супергруппы; 0 = без темы.
+# Куда именно постить (PROMO_TARGET_CHAT):
+#   • задан явно — туда;
+#   • иначе, если указана тема (PROMO_TOPIC_ID) — в BONUS_CHAT_ID (супергруппу),
+#     чтобы не заводить отдельную переменную под чат;
+#   • иначе — в старый канал (PROMO_CHANNEL_ID = BONUS_CHANNEL_ID) — прежнее поведение.
+# Узнать id темы: команда /chatid, отправленная В нужной теме супергруппы.
+PROMO_TOPIC_ID = int(os.getenv("PROMO_TOPIC_ID", "0") or 0)   # 0 = без темы
+PROMO_TARGET_CHAT = (os.getenv("PROMO_TARGET_CHAT", "")
+                     or (BONUS_CHAT_ID if PROMO_TOPIC_ID else "")
+                     or PROMO_CHANNEL_ID)
 # кнопка под постом: после /newapp в BotFather поставь https://t.me/Magic_Marketplace_bot/shop —
 # будет открывать мини-апп сразу (web_app-кнопки в каналах Telegram не разрешает)
 PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace_bot/shop")
