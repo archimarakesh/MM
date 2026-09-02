@@ -425,8 +425,6 @@ async def post_promo(path: str, caption: str):
         rows.append([InlineKeyboardButton(text="🎰 Открыть Magic Casino", url=PROMO_CASINO_URL)])
     if PROMO_CHAT_URL:
         rows.append([InlineKeyboardButton(text="💬 Чат", url=PROMO_CHAT_URL)])
-    if PROMO_CHANNEL_URL:
-        rows.append([InlineKeyboardButton(text="📣 Канал", url=PROMO_CHANNEL_URL)])
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     # в тему супергруппы — через message_thread_id; в канал/обычный чат — без него
     kw = {"message_thread_id": PROMO_TOPIC_ID} if PROMO_TOPIC_ID else {}
