@@ -2247,6 +2247,24 @@ async def bump_activity(user_id: int, name: str, points: int = 1):
         """, user_id, name, points, ACTIVITY_DAY_CAP)
 
 
+async def taggable_members(days: int = 60, limit: int = 300) -> list:
+    """Кого может тегнуть «зазывала»: участники, писавшие в чат за последние
+    `days` дней (Bot API не отдаёт полный список участников — тегаем только
+    тех, кого бот видел). С последним известным именем, свежие — первыми.
+    Служебный self-test (user_id=-1) и владельца-плательщика исключаем."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT user_id,
+                   (array_agg(name ORDER BY day DESC))[1] AS name
+            FROM chat_activity
+            WHERE day >= CURRENT_DATE - $1::int AND user_id > 0
+            GROUP BY user_id
+            ORDER BY MAX(day) DESC
+            LIMIT $2
+        """, int(days), int(limit))
+    return [{"user_id": int(r["user_id"]), "name": r["name"] or "друг"} for r in rows]
+
+
 async def activity_selftest(week_start) -> str:
     """Самопроверка счётчика: гоняем НАСТОЯЩИЙ bump_activity, не копию SQL —
     иначе ошибка в боевом запросе останется незамеченной."""
