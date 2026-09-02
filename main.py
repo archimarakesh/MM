@@ -702,7 +702,21 @@ if BOT_TOKEN:
         try:
             sent = await publish_promo(items)
         except Exception as e:
-            await message.answer(f"Ошибка постинга: {e}")
+            hint = ""
+            err = str(e).upper()
+            if "TOPIC_CLOSED" in err:
+                hint = ("\n\nТема закрыта. Открой её (меню темы → «Открыть тему») "
+                        "или сделай бота админом супергруппы с правом «Управление темами».")
+            elif "MESSAGE_THREAD_NOT_FOUND" in err or "TOPIC_DELETED" in err:
+                hint = ("\n\nТемы с таким id нет. Проверь PROMO_TOPIC_ID: отправь "
+                        "/chatid внутри нужной темы.")
+            elif "CHAT_ADMIN_REQUIRED" in err or "NOT ENOUGH RIGHTS" in err or "CHAT_WRITE_FORBIDDEN" in err:
+                hint = ("\n\nУ бота нет прав писать сюда. Добавь бота в супергруппу "
+                        "админом (с правом писать/управлять темами).")
+            elif "CHAT_NOT_FOUND" in err:
+                hint = ("\n\nЧат не найден. Проверь PROMO_TARGET_CHAT / BONUS_CHAT_ID "
+                        "(после конвертации в супергруппу id меняется).")
+            await message.answer(f"Ошибка постинга: {e}{hint}")
             return
         where = f"чат <code>{PROMO_TARGET_CHAT}</code>" + (
             f", тема <code>{PROMO_TOPIC_ID}</code>" if PROMO_TOPIC_ID else "")
