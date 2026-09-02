@@ -679,21 +679,36 @@ if BOT_TOKEN:
             "бухгалтерия пересчитается сама.")
 
     @dp.message(Command("promo"))
-    async def cmd_promo(message: Message):
+    async def cmd_promo(message: Message, command: CommandObject):
+        """Опубликовать промо ПРЯМО СЕЙЧАС (тест без ожидания слота).
+        /promo — все посты; /promo N — только N-й (1..кол-во) для быстрой проверки."""
         if not ADMIN_ID or message.from_user.id != ADMIN_ID:
             return
-        if not PROMO_CHANNEL_ID:
-            await message.answer("Канал не задан: добавьте PROMO_CHANNEL_ID или BONUS_CHANNEL_ID.")
+        if not PROMO_TARGET_CHAT:
+            await message.answer("Не задано, куда постить. Укажи PROMO_TOPIC_ID "
+                                 "(+ BONUS_CHAT_ID) — или PROMO_TARGET_CHAT / PROMO_CHANNEL_ID.")
             return
-        missing = [path for path, _ in PROMO_POSTS if not os.path.exists(path)]
+        items = PROMO_POSTS
+        arg = (command.args or "").strip()
+        if arg:
+            if not arg.isdigit() or not (1 <= int(arg) <= len(PROMO_POSTS)):
+                await message.answer(f"Укажи номер поста 1–{len(PROMO_POSTS)} "
+                                     f"(или /promo без номера — все).")
+                return
+            items = [PROMO_POSTS[int(arg) - 1]]
+        missing = [path for path, _ in items if not os.path.exists(path)]
         for path in missing:
             await message.answer(f"Файл не найден: {path}")
         try:
-            sent = await publish_promo(PROMO_POSTS)
+            sent = await publish_promo(items)
         except Exception as e:
             await message.answer(f"Ошибка постинга: {e}")
             return
-        await message.answer(f"✅ Опубликовано постов: {sent}/{len(PROMO_POSTS)} · старые удалены")
+        where = f"чат <code>{PROMO_TARGET_CHAT}</code>" + (
+            f", тема <code>{PROMO_TOPIC_ID}</code>" if PROMO_TOPIC_ID else "")
+        await message.answer(
+            f"✅ Опубликовано: {sent}/{len(items)} → {where} · старые копии удалены",
+            parse_mode="HTML")
 
     @dp.channel_post()
     async def channel_chatid(message: Message):
