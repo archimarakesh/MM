@@ -1000,9 +1000,8 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 <div class="sheet" id="sheet-bonus">
   <div class="sheet-grip"></div>
   <div style="text-align:center;font-size:52px;margin:6px 0 4px">🎁</div>
-  <h2 style="text-align:center">Бонус за подписку</h2>
-  <p class="sheet-sub" style="text-align:center">Подпишитесь на канал, вступите в чат и примите его правила<br>(кнопка под приветствием) — получите <b style="color:var(--gold-soft)"><span id="bonusAmt">100</span> ₴</b> на баланс. Одноразово.</p>
-  <a class="btn btn-ghost" style="text-decoration:none;margin-bottom:10px" href="https://t.me/+HJLPBVv65kQ0YjAy" target="_blank" rel="noopener">📣 Подписаться на канал</a>
+  <h2 style="text-align:center">Бонус за вступление</h2>
+  <p class="sheet-sub" style="text-align:center">Вступите в чат и примите его правила<br>(кнопка под приветствием) — получите <b style="color:var(--gold-soft)"><span id="bonusAmt">100</span> ₴</b> на баланс. Одноразово.</p>
   <a class="btn btn-ghost" style="text-decoration:none;margin-bottom:14px" href="https://t.me/+0_b77ETKGVpiZGY6" target="_blank" rel="noopener">💬 Вступить в чат</a>
   <button class="btn btn-gold" onclick="claimBonus()">Проверить и получить
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
@@ -1546,7 +1545,7 @@ function renderLotDraw() {
     }
     document.getElementById('lot-draw').innerHTML =
       `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · бонусом на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
-      `<div class="lot-card" style="text-align:center"><div class="lot-eyebrow">Розыгрыш скоро</div><div class="lot-hint" style="margin-top:0">Старт объявим отдельно. Заранее <b>подпишись на канал и чат</b>. Друзей зови <b>во время розыгрыша</b> — засчитываются только приглашённые в период розыгрыша.</div><button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Подготовиться →</button></div>` +
+      `<div class="lot-card" style="text-align:center"><div class="lot-eyebrow">Розыгрыш скоро</div><div class="lot-hint" style="margin-top:0">Старт объявим отдельно. Заранее <b>вступи в чат</b>. Друзей зови <b>во время розыгрыша</b> — засчитываются только приглашённые в период розыгрыша.</div><button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Подготовиться →</button></div>` +
       result;
     return;
   }
@@ -1556,7 +1555,7 @@ function renderLotDraw() {
   } else {
     let msg = me.eligible
       ? `Приглашай друзей: до первого числа осталось <b>${need - (me.confirmed % need || 0)}</b> из ${need}.`
-      : `Сначала <b>подпишись на канал и чат</b> — это условие участия.`;
+      : `Сначала <b>вступи в чат</b> — это условие участия.`;
     my = `<div class="lot-hint">${msg}</div>` + lotProgress(me) +
       `<button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Выполнить задания →</button>`;
   }
@@ -1582,8 +1581,8 @@ function renderLotTasks() {
   const me = LOT.me, L = LOT.links;
   const subRow = (ok, label, url) => `<a class="lot-lnk" href="${url}" target="_blank" rel="noopener"><div class="ic">${ok ? '✅' : '📣'}</div><div class="tx"><b>${label}</b><span>${ok ? 'Вы подписаны' : 'Подпишитесь, чтобы участвовать'}</span></div><div class="lot-pill ${ok ? 'ok' : 'mid'}">${ok ? 'готово' : 'подписаться'}</div></a>`;
   const steps = [
-    ['Подпишись на канал и чат', 'Обязательное условие участия'],
-    ['Пригласи 3 друзей во время розыгрыша', 'В зачёт идут только приглашённые после старта — каждый тоже подписывается на канал и чат'],
+    ['Вступи в чат', 'Обязательное условие участия'],
+    ['Пригласи 3 друзей во время розыгрыша', 'В зачёт идут только приглашённые после старта — каждый тоже вступает в чат'],
     ['Получи число в розыгрыше', 'За каждые 3 друга — ещё одно число. Больше чисел — больше шансов'],
     ['Жди розыгрыш', 'По таймеру случайное число определит победителей'],
   ].map((s, i) => `<div class="lot-step"><div class="n">${i + 1}</div><div class="tx"><b>${s[0]}</b><span>${s[1]}</span></div></div>`).join('');
@@ -1600,15 +1599,15 @@ function renderLotTasks() {
     let pill, note;
     if (r.status === 'ticketed') { pill = `<div class="lot-pill ok">✓ в числе</div>`; note = 'засчитан, вошёл в число'; }
     else if (r.status === 'counted') { pill = `<div class="lot-pill ok">✓ засчитан</div>`; note = 'все условия выполнены'; }
-    else { const ch = r.sub_channel === 'yes', cht = r.sub_chat === 'yes'; note = (!ch && !cht) ? 'нет подписки на канал и чат' : (!ch ? 'нет подписки на канал' : 'нет подписки на чат'); pill = `<div class="lot-pill mid">ждём</div>`; }
+    else { const cht = r.sub_chat === 'yes'; note = cht ? 'ждём' : 'не вступил в чат'; pill = `<div class="lot-pill mid">ждём</div>`; }
     return `<div class="lot-ref"><div class="av">${esc(ini)}</div><div class="nm"><b>${esc(nm)}</b><span>${note}</span></div>${pill}</div>`;
   }).join('');
   document.getElementById('lot-tasks').innerHTML =
     `<div class="lot-card"><div class="lot-eyebrow">Как участвовать</div><div class="lot-steps">${steps}</div></div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Подписки — условие участия</div>${subRow(me.sub_channel === 'yes', 'Канал магазина', L.channel)}<div style="height:8px"></div>${subRow(me.sub_chat === 'yes', 'Чат магазина', L.chat)}</div>` +
+    `<div class="lot-card"><div class="lot-eyebrow">Условие участия</div>${subRow(me.sub_chat === 'yes', 'Чат магазина', L.chat)}</div>` +
     `<div class="lot-card"><div class="lot-eyebrow">Приглашай друзей</div><div class="lot-hint" style="margin-top:0">За каждые <b>${me.need}</b> друзей — <b>+1 число</b>. Друг заходит в маркет, забирает бонус и подписывается. Засчитываются только приглашённые <b>во время розыгрыша</b>.</div><button class="lot-btn" style="margin-top:12px" onclick="lotShareRef()">🔗 Пригласить друга</button><button class="lot-btn ghost" style="margin-top:9px" onclick="lotCopyRef()">Скопировать ссылку</button></div>` +
     `<div class="lot-card"><div class="lot-eyebrow">Мои приглашённые</div><div class="lot-hint" style="margin-top:0;font-size:11.5px">Зелёный — прошёл все условия и засчитан. Жёлтый — пригласил, ждём подписку.</div><div class="lot-reflist" style="margin-top:10px">${refHtml}</div><button class="lot-btn ghost" style="margin-top:12px" onclick="loadLottery()">↻ Обновить статусы</button></div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Кто считается рефералом</div><p style="font-size:12.5px;line-height:1.6;color:var(--muted);margin:0">Реферал — друг, который перешёл <b style="color:var(--gold-soft)">по твоей ссылке</b> и подписался на <b style="color:var(--gold-soft)">канал и чат</b> магазина. Каждого можно засчитать <b style="color:var(--gold-soft)">только один раз</b>: в следующем розыгрыше нужны новые друзья.</p></div>`;
+    `<div class="lot-card"><div class="lot-eyebrow">Кто считается рефералом</div><p style="font-size:12.5px;line-height:1.6;color:var(--muted);margin:0">Реферал — друг, который перешёл <b style="color:var(--gold-soft)">по твоей ссылке</b> и вступил в <b style="color:var(--gold-soft)">чат</b> магазина. Каждого можно засчитать <b style="color:var(--gold-soft)">только один раз</b>: в следующем розыгрыше нужны новые друзья.</p></div>`;
 }
 function lotShareRef() {
   haptic('medium'); const url = LOT?.ref_link || ''; if (!url) return;
@@ -2967,7 +2966,6 @@ function stDot(s) {
 }
 function refStatusRow(r) {
   return `<div class="ref-status">
-    <span>📣 Канал${stDot(r.sub_channel)}</span>
     <span>💬 Чат${stDot(r.sub_chat)}</span>
     <span>🎁 Бонус${stDot(r.bonus)}</span>
   </div>`;
@@ -3221,7 +3219,7 @@ const FAQ = [
   { q: '🌱 E-growing: как работает и когда выплата',
     a: 'Вы покупаете <b>долю куста</b> (кратно 10%, куст = 100%) на текущей стадии: 🌰 Семечко → 🌱 Саженец → 🌿 Вегетативная → 🌸 Предцвет → 🌷 Цветение → 🧺 Сбор. <b>Чем раньше вход — тем выше процент.</b><br>Вкладка <b>E-Grow</b> → программа → размер доли → «Купить». В карточке видны живые фото куста с датами, ваш процент, сумма выплаты и дни до конца цикла. После окончания сбора урожая вход и процент приходят на баланс автоматически.' },
   { q: '🎁 Бонус за подписку и рефералка',
-    a: '<b>Приветственный бонус:</b> подпишитесь на канал и вступите в чат, затем нажмите «Проверить и получить» — 100 ₴ на баланс. Одноразово: раз на аккаунт, устройство и IP.<br><b>Рефералка:</b> ссылка в <b>Профиле</b>. С каждой покупки приглашённого вам начисляется <b>5%</b> (до 10 друзей), <b>7%</b> (10–49), <b>10%</b> (50+). Тот же процент капает и с <b>Magic Casino</b>: раз в месяц вы получаете свою долю от прибыли казино с игр приглашённых.' },
+    a: '<b>Приветственный бонус:</b> вступите в чат и примите правила, затем нажмите «Проверить и получить» — 100 ₴ на баланс. Одноразово: раз на аккаунт, устройство и IP.<br><b>Рефералка:</b> ссылка в <b>Профиле</b>. С каждой покупки приглашённого вам начисляется <b>5%</b> (до 10 друзей), <b>7%</b> (10–49), <b>10%</b> (50+). Тот же процент капает и с <b>Magic Casino</b>: раз в месяц вы получаете свою долю от прибыли казино с игр приглашённых.' },
   { q: '🔐 Пин-код, перенос и удаление аккаунта',
     a: 'Пин-код создаётся при первом входе и запрашивается при каждом открытии, сменить — в настройках (⚙️ вверху). Там же <b>перенос аккаунта</b>: код на старом → ввод на новом за 15 минут (баланс, заказы, доли и рефералы переедут). И <b>удаление аккаунта</b> — безвозвратно стирает все данные.' },
   { q: '⚠️ Оплата не зачислилась — что делать?',

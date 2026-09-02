@@ -1028,7 +1028,7 @@ async def _snap(uid: int) -> dict:
         # красные точки: заказы в работу и оплаты на проверку
         snap["admin_todo"] = await db.admin_todo()
     snap["bonus_offer"] = (not snap.get("bonus_claimed")
-                           and bool(bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID))
+                           and bool(bot and BONUS_CHAT_ID))
     snap["bonus_amount"] = BONUS_AMOUNT
     snap["min_withdraw"] = db.MIN_WITHDRAW
     snap["card_auto"] = paydome.enabled()
@@ -1528,8 +1528,7 @@ async def _enrich_ref_status(refs: list, strip_tgid: bool = False) -> list:
     async def one(r):
         uid = r.get("tg_id")
         async with sem:
-            r["sub_channel"] = (await _member_state_cached(BONUS_CHANNEL_ID, uid)
-                                if bot and uid and BONUS_CHANNEL_ID else "err")
+            r["sub_channel"] = "yes"      # канал больше не условие
             r["sub_chat"] = (await _member_state_cached(BONUS_CHAT_ID, uid)
                              if bot and uid and BONUS_CHAT_ID else "err")
         if strip_tgid:
@@ -1546,21 +1545,20 @@ _bonus_err_notified = 0.0   # чтобы не спамить админу на �
 async def api_bonus_claim(request: Request):
     global _bonus_err_notified
     u = tg_user(request)
-    if not (bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID):
+    # условие бонуса — только чат (канал убрали: мешает переделать группу в
+    # супергруппу). Проверяем вступление в чат + принятие правил при клейме.
+    if not (bot and BONUS_CHAT_ID):
         raise HTTPException(400, "Бонус временно недоступен")
-    ch = await _member_state(BONUS_CHANNEL_ID, u["id"])
     cht = await _member_state(BONUS_CHAT_ID, u["id"])
-    if "err" in (ch, cht):
+    if cht == "err":
         now = time.time()
         if now - _bonus_err_notified > 3600:
             _bonus_err_notified = now
             await notify(ADMIN_ID,
                          "⚠️ Бонус не работает: бот не может проверить участника "
-                         f"(канал: {ch}, чат: {cht}). Проверьте, что бот — админ в канале "
-                         "и состоит в чате, а BONUS_CHANNEL_ID/BONUS_CHAT_ID верные.")
+                         f"(чат: {cht}). Проверьте, что бот состоит в чате, а "
+                         "BONUS_CHAT_ID верный.")
         raise HTTPException(400, "Не получилось проверить подписку — попробуйте позже")
-    if ch == "no":
-        raise HTTPException(400, "Не видим подписку на канал — подпишитесь и нажмите ещё раз")
     if cht == "no":
         raise HTTPException(400, "Не видим вас в чате — вступите и нажмите ещё раз")
     try:
@@ -1590,14 +1588,11 @@ async def _lottery_state(uid: int) -> dict:
     rnd = await db.lottery_open_round()   # None, пока розыгрыш не запущен вручную
     running = bool(rnd)
     rid = rnd["id"] if rnd else 0
-    subs_on = bool(bot and BONUS_CHANNEL_ID and BONUS_CHAT_ID)
-    # моя подписка на канал и чат
-    if subs_on:
-        my_ch = await _member_state_cached(BONUS_CHANNEL_ID, uid)
-        my_cht = await _member_state_cached(BONUS_CHAT_ID, uid)
-    else:
-        my_ch = my_cht = "err"
-    eligible = (my_ch == "yes" and my_cht == "yes")
+    subs_on = bool(bot and BONUS_CHAT_ID)
+    # условие участия — только чат (канал убрали)
+    my_ch = "yes"
+    my_cht = await _member_state_cached(BONUS_CHAT_ID, uid) if subs_on else "err"
+    eligible = (my_cht == "yes")
     grant = {"numbers": [], "confirmed": 0, "pending": 0}
     stats = {"participants": 0, "tickets": 0}
     since = rnd.get("created") if running else None   # старт круга: считаем только новых
@@ -1612,9 +1607,8 @@ async def _lottery_state(uid: int) -> dict:
 
                 async def _chk(cid):
                     async with sem:
-                        a = await _member_state_cached(BONUS_CHANNEL_ID, cid)
                         b = await _member_state_cached(BONUS_CHAT_ID, cid)
-                    if a == "yes" and b == "yes":
+                    if b == "yes":
                         confirmed.append(cid)
 
                 await asyncio.gather(*[_chk(x) for x in cands[:150]])
@@ -1630,7 +1624,7 @@ async def _lottery_state(uid: int) -> dict:
 
         async def _en(r):
             async with sem:
-                r["sub_channel"] = await _member_state_cached(BONUS_CHANNEL_ID, r["tg_id"])
+                r["sub_channel"] = "yes"      # канал больше не условие
                 r["sub_chat"] = await _member_state_cached(BONUS_CHAT_ID, r["tg_id"])
 
         await asyncio.gather(*[_en(r) for r in pend])
