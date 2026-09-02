@@ -82,9 +82,9 @@ REF_RACE_PRIZE_3 = int(os.getenv("REF_RACE_PRIZE_3", "200") or 200)   # 3-е м�
 REF_RACE_PRIZES = [p for p in (REF_RACE_PRIZE, REF_RACE_PRIZE_2, REF_RACE_PRIZE_3) if p > 0]
 REF_RACE_MIN_TOTAL = int(os.getenv("REF_RACE_MIN_TOTAL", "20") or 20)  # общий порог за неделю
 REF_RACE_HOUR = int(os.getenv("REF_RACE_HOUR", "13") or 13)  # понедельник, Киев
-# где проверяем, что приглашённый не отписался (канал приоритетнее чата).
+# где проверяем, что приглашённый не вышел (канал убрали — проверяем по чату).
 # Бот должен быть админом этой цели, иначе проверка пропускается (все засчитываются).
-REF_CHECK_CHAT = os.getenv("REF_CHECK_CHAT", "") or STATS_CHANNEL_ID or RULES_CHAT_ID
+REF_CHECK_CHAT = os.getenv("REF_CHECK_CHAT", "") or RULES_CHAT_ID or STATS_CHANNEL_ID
 
 
 def _week_start(d):
