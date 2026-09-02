@@ -835,6 +835,53 @@ async def run(notify=None, on_ban=None, on_unban=None):
             await message.answer(f"❌ Счётчик сломан:\n<code>{_esc(str(e)[:400])}</code>",
                                  parse_mode="HTML")
 
+    _zov_last = {}   # chat_id -> ts последнего зазыва (антиспам)
+
+    @dp.message(Command("all", "все", "всех", "здесь", "here", "pingall", "зазвать"))
+    async def cmd_all(message: Message, command: CommandObject):
+        """«Зазывала»: тегает участников чата (только админ).
+        /all [текст] — например: /all залетайте на розыгрыш!
+        Тегаем только тех, кого бот видел пишущими (Bot API не даёт полный
+        список участников), пачками, с паузой — чтобы не словить флуд-лимит."""
+        if message.chat.type == "private":
+            return
+        if RULES_CHAT_ID and str(message.chat.id) != str(RULES_CHAT_ID):
+            return
+        if not await is_admin(message.chat.id, message.from_user.id):
+            return  # зазывать может только админ — иначе это спам-кнопка для всех
+        now = time.time()
+        if now - _zov_last.get(message.chat.id, 0) < 300:
+            left = int(300 - (now - _zov_last.get(message.chat.id, 0)))
+            await message.reply(f"⏳ Слишком часто. Следующий сбор можно через {left} сек.")
+            return
+        members = await db.taggable_members(days=60, limit=300)
+        # себя-инициатора не тегаем
+        members = [m for m in members if m["user_id"] != message.from_user.id]
+        if not members:
+            await message.reply("Пока некого звать — я тегаю только тех, кто "
+                                "писал в чат. Как участники напишут — попадут в список.")
+            return
+        _zov_last[message.chat.id] = now
+        call = (command.args or "").strip() or "Общий сбор! Залетаем 👀"
+        BATCH = 8                     # мягкие пачки — меньше шанс флуд-лимита
+        total = len(members)
+        for i in range(0, total, BATCH):
+            chunk = members[i:i + BATCH]
+            tags = " ".join(
+                f'<a href="tg://user?id={m["user_id"]}">{_esc(m["name"])}</a>'
+                for m in chunk)
+            head = f"📣 <b>{_esc(call)}</b>\n" if i == 0 else "📣 "
+            try:
+                await message.answer(head + tags, parse_mode="HTML")
+            except Exception as e:
+                log.warning("зазывала: пачка не ушла: %s", e)
+                await asyncio.sleep(5)          # похоже на флуд-лимит — притормозим
+            await asyncio.sleep(3)              # держимся ниже лимита ~20 сообщений/мин
+        try:
+            await message.answer(f"✅ Позвал участников: {total}")
+        except Exception:
+            pass
+
     @dp.message(Command("top"))
     async def cmd_top(message: Message):
         """Текущий рейтинг активности за идущую неделю."""
