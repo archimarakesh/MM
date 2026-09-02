@@ -58,6 +58,11 @@ MARKET_BOT = os.getenv("MARKET_BOT", "Magic_Marketplace_bot")
 # автопостинг промо в канал (по умолчанию — в бонусный канал)
 KYIV = ZoneInfo("Europe/Kyiv")
 PROMO_CHANNEL_ID = os.getenv("PROMO_CHANNEL_ID", "") or BONUS_CHANNEL_ID
+# КУДА постим промо. По умолчанию — старый канал. Чтобы слать в ТЕМУ супергруппы:
+#   PROMO_TARGET_CHAT = id супергруппы (напр. -100…), PROMO_TOPIC_ID = id темы (thread).
+# Узнать id темы: команда /id, отправленная В нужной теме супергруппы.
+PROMO_TARGET_CHAT = os.getenv("PROMO_TARGET_CHAT", "") or PROMO_CHANNEL_ID
+PROMO_TOPIC_ID = int(os.getenv("PROMO_TOPIC_ID", "0") or 0)   # 0 = без темы (обычный чат/канал)
 # кнопка под постом: после /newapp в BotFather поставь https://t.me/Magic_Marketplace_bot/shop —
 # будет открывать мини-апп сразу (web_app-кнопки в каналах Telegram не разрешает)
 PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_Marketplace_bot/shop")
@@ -411,11 +416,16 @@ async def post_promo(path: str, caption: str):
     rows = [[InlineKeyboardButton(text="🛍 Открыть Magic Market", url=PROMO_BUTTON_URL)]]
     if PROMO_CASINO_URL:
         rows.append([InlineKeyboardButton(text="🎰 Открыть Magic Casino", url=PROMO_CASINO_URL)])
-    rows.append([InlineKeyboardButton(text="💬 Чат", url=PROMO_CHAT_URL)])
-    rows.append([InlineKeyboardButton(text="📣 Канал", url=PROMO_CHANNEL_URL)])
+    if PROMO_CHAT_URL:
+        rows.append([InlineKeyboardButton(text="💬 Чат", url=PROMO_CHAT_URL)])
+    if PROMO_CHANNEL_URL:
+        rows.append([InlineKeyboardButton(text="📣 Канал", url=PROMO_CHANNEL_URL)])
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
-    msg = await bot.send_photo(int(PROMO_CHANNEL_ID), FSInputFile(path),
-                               caption=caption or None, parse_mode="HTML", reply_markup=kb)
+    # в тему супергруппы — через message_thread_id; в канал/обычный чат — без него
+    kw = {"message_thread_id": PROMO_TOPIC_ID} if PROMO_TOPIC_ID else {}
+    msg = await bot.send_photo(int(PROMO_TARGET_CHAT), FSInputFile(path),
+                               caption=caption or None, parse_mode="HTML",
+                               reply_markup=kb, **kw)
     return msg.message_id
 
 
@@ -453,7 +463,7 @@ async def publish_promo(items):
         key = f"promo_msg:{path}"                       # своя память на каждый пост
         await _delete_promo_msg(await db.get_kv(key))   # снести только прошлый такой же
         mid = await post_promo(path, caption)
-        await db.set_kv(key, f"{int(PROMO_CHANNEL_ID)}:{mid}")
+        await db.set_kv(key, f"{int(PROMO_TARGET_CHAT)}:{mid}")
         n += 1
     return n
 
@@ -462,8 +472,8 @@ async def promo_poster():
     """Автопостинг промо в канал: слот времени = своя картинка, каждая постится
     ровно один раз в день (перед публикацией сносится её вчерашняя копия).
     Слотов больше, чем картинок, — лишние слоты пропускаются."""
-    if not (bot and PROMO_CHANNEL_ID and PROMO_TIMES):
-        log.warning("Промо-постинг выключен: нет бота или PROMO_CHANNEL_ID")
+    if not (bot and PROMO_TARGET_CHAT and PROMO_TIMES):
+        log.warning("Промо-постинг выключен: нет бота или PROMO_TARGET_CHAT")
         return
     while True:
         try:
@@ -594,8 +604,15 @@ if BOT_TOKEN:
 
     @dp.message(Command("chatid"))
     async def cmd_chatid(message: Message):
-        await message.answer(f"ID этого чата: <code>{message.chat.id}</code>",
-                             parse_mode="HTML")
+        txt = f"ID этого чата: <code>{message.chat.id}</code>"
+        # если команду отправили В теме супергруппы — покажем и id темы (thread),
+        # его ставим в PROMO_TOPIC_ID, а chat id — в PROMO_TARGET_CHAT
+        if getattr(message, "is_topic_message", False) and message.message_thread_id:
+            txt += (f"\nID этой темы: <code>{message.message_thread_id}</code>"
+                    "\n\nДля постинга промо в эту тему задай в Railway:"
+                    f"\n<code>PROMO_TARGET_CHAT={message.chat.id}</code>"
+                    f"\n<code>PROMO_TOPIC_ID={message.message_thread_id}</code>")
+        await message.answer(txt, parse_mode="HTML")
 
     @dp.message(Command("give"))
     async def cmd_give(message: Message, command: CommandObject):
