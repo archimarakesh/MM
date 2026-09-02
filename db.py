@@ -2247,21 +2247,63 @@ async def bump_activity(user_id: int, name: str, points: int = 1):
         """, user_id, name, points, ACTIVITY_DAY_CAP)
 
 
-async def taggable_members(days: int = 60, limit: int = 300) -> list:
-    """Кого может тегнуть «зазывала»: участники, писавшие в чат за последние
-    `days` дней (Bot API не отдаёт полный список участников — тегаем только
-    тех, кого бот видел). С последним известным именем, свежие — первыми.
-    Служебный self-test (user_id=-1) и владельца-плательщика исключаем."""
+async def note_member(user_id: int, name: str) -> None:
+    """Регистрируем участника в ростере (для «зазывалы»), не трогая очки/статы:
+    строка в chat_activity с points=0, msgs=0. Зовём при показе правил на входе —
+    тогда в список тегов попадают и «молчуны», которые ещё ничего не написали."""
+    if not user_id or user_id <= 0:
+        return
+    async with _pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO chat_activity(user_id, day, points, msgs, name)
+            VALUES($1, CURRENT_DATE, 0, 0, $2)
+            ON CONFLICT (user_id, day) DO UPDATE
+                SET name = COALESCE(EXCLUDED.name, chat_activity.name)
+        """, user_id, name)
+
+
+async def taggable_members(chat_id: int, days: int = 90, limit: int = 500) -> list:
+    """Кого может тегнуть «зазывала». Bot API не отдаёт полный список участников,
+    поэтому собираем из того, что бот видел: (1) кто СЕЙЧАС в чате по событиям
+    входа/выхода (member_events, последнее событие = join — сюда попадают и
+    молчуны), плюс (2) кто писал за `days` дней (chat_activity — на случай, если
+    вступил до трекинга событий). Исключаем вышедших (последнее событие = leave),
+    забаненных и служебные записи."""
     async with _pool.acquire() as c:
         rows = await c.fetch("""
-            SELECT user_id,
-                   (array_agg(name ORDER BY day DESC))[1] AS name
-            FROM chat_activity
-            WHERE day >= CURRENT_DATE - $1::int AND user_id > 0
-            GROUP BY user_id
-            ORDER BY MAX(day) DESC
-            LIMIT $2
-        """, int(days), int(limit))
+            WITH latest AS (
+                SELECT DISTINCT ON (user_id) user_id, dir
+                FROM member_events WHERE chat_id = $1
+                ORDER BY user_id, at DESC
+            ),
+            joined AS (
+                SELECT le.user_id,
+                       (SELECT name FROM member_events m
+                        WHERE m.chat_id=$1 AND m.user_id=le.user_id
+                        ORDER BY at DESC LIMIT 1) AS name
+                FROM latest le WHERE le.dir = 'join'
+            ),
+            gone AS (SELECT user_id FROM latest WHERE dir = 'leave'),
+            wrote AS (
+                SELECT user_id, (array_agg(name ORDER BY day DESC))[1] AS name
+                FROM chat_activity
+                WHERE day >= CURRENT_DATE - $2::int AND user_id > 0
+                GROUP BY user_id
+            ),
+            combined AS (
+                SELECT user_id, name FROM joined
+                UNION ALL
+                SELECT user_id, name FROM wrote
+            )
+            SELECT c2.user_id, max(c2.name) AS name
+            FROM combined c2
+            LEFT JOIN users u ON u.tg_id = c2.user_id
+            WHERE c2.user_id > 0
+              AND COALESCE(u.banned, false) = false
+              AND c2.user_id NOT IN (SELECT user_id FROM gone)
+            GROUP BY c2.user_id
+            LIMIT $3
+        """, int(chat_id), int(days), int(limit))
     return [{"user_id": int(r["user_id"]), "name": r["name"] or "друг"} for r in rows]
 
 
