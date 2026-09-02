@@ -298,6 +298,11 @@ async def run(notify=None, on_ban=None, on_unban=None):
 
     async def gate_user(chat, u):
         key = (chat.id, u.id)
+        # заносим вошедшего в ростер «зазывалы» — чтобы тегались и молчуны
+        try:
+            await db.note_member(u.id, u.full_name)
+        except Exception:
+            pass
         old = _pending.pop(key, None)
         if old:
             old.cancel()
@@ -854,12 +859,12 @@ async def run(notify=None, on_ban=None, on_unban=None):
             left = int(300 - (now - _zov_last.get(message.chat.id, 0)))
             await message.reply(f"⏳ Слишком часто. Следующий сбор можно через {left} сек.")
             return
-        members = await db.taggable_members(days=60, limit=300)
+        members = await db.taggable_members(message.chat.id, days=90, limit=500)
         # себя-инициатора не тегаем
         members = [m for m in members if m["user_id"] != message.from_user.id]
         if not members:
-            await message.reply("Пока некого звать — я тегаю только тех, кто "
-                                "писал в чат. Как участники напишут — попадут в список.")
+            await message.reply("Пока некого звать — список пуст. В него попадают те, "
+                                "кто вступил при мне (видел правила) или писал в чат.")
             return
         _zov_last[message.chat.id] = now
         call = (command.args or "").strip() or "Общий сбор! Залетаем 👀"
