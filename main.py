@@ -781,9 +781,10 @@ def _dep_bonus_line(res: dict) -> str:
             if b > 0 else "")
 
 
-async def broadcast_all(text: str) -> int:
+async def broadcast_all(text: str, photo: str = None, button: tuple = None) -> int:
     """Рассылка сообщения всем пользователям бота (кроме забаненных), с
-    троттлингом ~20/с. Заблокировавшие бота просто пропускаются."""
+    троттлингом ~20/с. Заблокировавшие бота просто пропускаются.
+    photo — URL картинки (шлём фото с подписью); button — (текст, url) кнопки."""
     if not bot:
         return 0
     try:
@@ -791,10 +792,24 @@ async def broadcast_all(text: str) -> int:
     except Exception:
         log.exception("Рассылка: не удалось получить список пользователей")
         return 0
+    kb = None
+    if button:
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=button[0], url=button[1])]])
     sent = 0
     for uid in uids:
         try:
-            await bot.send_message(uid, text, parse_mode="HTML")
+            if photo:
+                try:
+                    await bot.send_photo(uid, photo, caption=text,
+                                         parse_mode="HTML", reply_markup=kb)
+                except Exception:
+                    # фото не подтянулось (или иная ошибка) — не теряем анонс,
+                    # шлём текстом; если это блок бота — упадёт и текст, пропустим
+                    await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
+            else:
+                await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
             sent += 1
         except Exception:
             pass                       # заблокировали бота / удалились — молча
@@ -1937,20 +1952,24 @@ async def api_admin_grow(request: Request):
     b = await request.json()
     is_new = not b.get("id")
     try:
-        await db.save_grow_plan(b)
+        gid = await db.save_grow_plan(b)
     except (KeyError, ValueError) as e:
         raise HTTPException(400, f"Проверьте поля программы: {e}")
     except Exception:
         log.exception("Ошибка сохранения программы выращивания")
         raise HTTPException(400, "Не удалось сохранить программу — подробности в логах сервера")
-    # новая активная программа — анонс всем в бота
+    # новая активная программа — красивый анонс всем в бота (с фото и кнопкой)
     if is_new and bool(b.get("active", True)):
-        asyncio.create_task(broadcast_all(
-            f"🌱 <b>Новая программа E-grow!</b>\n\n"
+        caption = (
+            "🌿 <b>НОВАЯ ПРОГРАММА E-GROW</b> 🌿\n\n"
             f"<b>{esc(b.get('name') or 'Новая программа')}</b>"
             + (f"\n<i>{esc(b.get('sub'))}</i>" if b.get("sub") else "")
-            + f"\nДоля от <b>{pint(b.get('price'))} ₴</b>\n\n"
-            f"Успей вложиться в E-growing 🌿"))
+            + f"\n\n💰 Доля от <b>{pint(b.get('price'))} ₴</b>\n\n"
+            "Вложись и расти вместе с нами 👇")
+        has_photo = bool(b.get("photo")) and str(b.get("photo")) != "keep"
+        photo = f"{APP_URL}/growphoto/{gid}" if (APP_URL and has_photo) else None
+        asyncio.create_task(broadcast_all(
+            caption, photo=photo, button=("🌱 Открыть Magic Market", PROMO_BUTTON_URL)))
     return {"grow_plans": await db.get_grow_plans(include_inactive=True)}
 
 
@@ -2392,7 +2411,7 @@ async def api_admin_product(request: Request):
         pid = await db.save_product(b)
     except (KeyError, ValueError) as e:
         raise HTTPException(400, f"Проверьте поля товара: {e}")
-    # новая активная позиция — анонс всем в бота
+    # новая активная позиция — красивый анонс всем в бота (с фото и кнопкой)
     if is_new and bool(b.get("active", True)):
         unit = "шт" if str(b.get("unit")) == "pc" else "г"
         try:
@@ -2400,12 +2419,16 @@ async def api_admin_product(request: Request):
         except Exception:
             mink = 1.0
         price_from = round(pint(b.get("base")) * mink)
-        asyncio.create_task(broadcast_all(
-            f"🆕 <b>Новинка в магазине!</b>\n\n"
+        caption = (
+            "✨ <b>НОВИНКА В МАГАЗИНЕ</b> ✨\n\n"
             f"{esc(b.get('emoji') or '📦')} <b>{esc(b.get('name') or 'Новинка')}</b>"
             + (f"\n<i>{esc(b.get('sub'))}</i>" if b.get("sub") else "")
-            + f"\nЦена от <b>{price_from} ₴</b>/{unit}\n\n"
-            f"Загляни в Magic Market 🛒"))
+            + f"\n\n💰 Цена от <b>{price_from} ₴</b>/{unit}\n\n"
+            "Успей забрать 👇")
+        # фото первой картинки товара — публичный /photo, Telegram подтянет по URL
+        photo = f"{APP_URL}/photo/{pid}/0" if (APP_URL and b.get("photos")) else None
+        asyncio.create_task(broadcast_all(
+            caption, photo=photo, button=("🛒 Открыть Magic Market", PROMO_BUTTON_URL)))
     return {"id": pid, "products": await db.get_products(include_inactive=True)}
 
 
