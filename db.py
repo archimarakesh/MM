@@ -1665,6 +1665,12 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
             tg_id)
         if row["bonus_claimed"]:
             raise ValueError("Бонус уже был получен")
+        # раз на Telegram-аккаунт НАВСЕГДА: запись в bonus_claims не стирается при
+        # удалении аккаунта (в отличие от флага users.bonus_claimed, который уходит
+        # вместе со строкой). Иначе «удалить → перерегаться → снова 100₴» — фарм.
+        if await c.fetchval(
+                "SELECT 1 FROM bonus_claims WHERE user_id=$1 LIMIT 1", tg_id):
+            raise ValueError("Бонус уже был получен на этот аккаунт")
         if not row["rules_accepted"]:
             raise ValueError("Примите правила чата — кнопка под приветствием "
                              "(или команда /rules в чате)")
