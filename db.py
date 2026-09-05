@@ -3426,6 +3426,45 @@ async def _user_money(c, tg_id: int) -> dict:
     }
 
 
+async def admin_wallet_log(tg_id: int, limit: int = 100, offset: int = 0) -> dict:
+    """Журнал кошелька игрока: КАЖДАЯ операция казино/бонуса (ставка, выигрыш,
+    бонус, рейкбек, реферал) с суммой, балансом после и Δвыводимых. Читается из
+    wallet_ops, который удаление аккаунта НЕ стирает — поэтому виден точный
+    источник денег даже после перерегистраций. Свежие сверху, с пагинацией."""
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    async with _pool.acquire() as c:
+        total = int(await c.fetchval(
+            "SELECT COUNT(*) FROM wallet_ops WHERE user_id=$1", tg_id) or 0)
+        agg = await c.fetchrow("""
+            SELECT COALESCE(SUM(-delta) FILTER (WHERE kind='bet'), 0)::BIGINT AS bet,
+                   COALESCE(SUM(delta)  FILTER (WHERE kind='win'), 0)::BIGINT AS win,
+                   COALESCE(SUM(delta)  FILTER (WHERE kind IN ('bonus','freespin')), 0)::BIGINT AS bonus,
+                   COALESCE(SUM(delta)  FILTER (WHERE kind='referral' OR ref='referral'), 0)::BIGINT AS ref
+            FROM wallet_ops WHERE user_id=$1
+        """, tg_id)
+        rows = await c.fetch("""
+            SELECT delta, kind, ref, balance_after, real_delta, created
+            FROM wallet_ops WHERE user_id=$1
+            ORDER BY created DESC, op_id DESC
+            LIMIT $2 OFFSET $3
+        """, tg_id, limit, offset)
+    return {
+        "total": total, "offset": offset, "limit": limit,
+        "summary": {
+            "bet": int(agg["bet"] or 0), "win": int(agg["win"] or 0),
+            "bonus": int(agg["bonus"] or 0), "ref": int(agg["ref"] or 0),
+            "net": int(agg["win"] or 0) - int(agg["bet"] or 0),
+        },
+        "ops": [{
+            "delta": int(r["delta"] or 0), "kind": r["kind"], "ref": r["ref"],
+            "balance_after": int(r["balance_after"] or 0),
+            "real_delta": int(r["real_delta"] or 0),
+            "ts": r["created"].isoformat() if r["created"] else None,
+        } for r in rows],
+    }
+
+
 async def admin_user_detail(tg_id: int) -> dict:
     """Полная карточка пользователя для админки: баланс, покупки, пополнения,
     выводы, рефералы (и кто пригласил его самого)."""
