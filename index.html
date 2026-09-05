@@ -4382,10 +4382,52 @@ async function adminUserOpen(id) {
       </div>
     </div></div>
     ${auMoney(d.money)}
+    <div style="margin-top:14px">
+      <button class="btn btn-ghost" id="walBtn" onclick="loadWalletLog(${u.tg_id}, 0)">🧾 Журнал кошелька (казино/бонусы)</button>
+      <div id="walLog"></div>
+    </div>
     ${sect('Покупки', (d.orders || []).length, orders)}
     ${sect('Пополнения', (d.topups || []).length, topups)}
     ${sect('Выводы', (d.withdrawals || []).length, withdrawals)}
     ${sect('Рефералы', (d.referrals || []).length, refs)}`;
+}
+const AU_OP = {
+  bet: ['🎲', 'Ставка'], win: ['🏆', 'Выигрыш'], bonus: ['🎁', 'Бонус (рейкбек)'],
+  freespin: ['🎰', 'Выигрыш фриспина'], referral: ['🤝', 'Реферал'],
+};
+let walOps = [];   // накопленные операции (для «показать ещё»)
+async function loadWalletLog(id, offset) {
+  const box = document.getElementById('walLog');
+  if (!box) return;
+  if (!offset) { walOps = []; box.innerHTML = '<p class="note">Загрузка…</p>'; }
+  let d;
+  try { d = await API.call('/api/admin/wallet-log', { id, offset }); }
+  catch (e) { box.innerHTML = `<p class="note">${auEsc(e.message || 'Не удалось загрузить')}</p>`; return; }
+  walOps = walOps.concat(d.ops || []);
+  const s = d.summary || {};
+  const signed = n => `<b style="color:${n >= 0 ? 'var(--gold-soft)' : '#ff8a8a'}">${n >= 0 ? '+' : '−'}${fmt(Math.abs(n))} ₴</b>`;
+  const head = `
+    <div class="bezel" style="margin:8px 0"><div class="bezel-core" style="padding:12px 14px">
+      <p class="note" style="margin:0 0 6px">Всего операций: <b>${fmt(d.total || 0)}</b></p>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:12.5px">
+        <span>🎲 Ставок: <b>${fmt(s.bet || 0)} ₴</b></span>
+        <span>🏆 Выигрышей: <b>${fmt(s.win || 0)} ₴</b></span>
+        <span>нетто: ${signed(s.net || 0)}</span>
+        <span>🎁 Бонусы: <b>${fmt(s.bonus || 0)} ₴</b></span>
+        ${s.ref ? `<span>🤝 Реф: <b>${fmt(s.ref)} ₴</b></span>` : ''}
+      </div>
+    </div></div>`;
+  const rows = walOps.map(o => {
+    const meta = AU_OP[o.kind] || ['•', auEsc(o.kind || 'операция')];
+    const g = o.ref && o.ref !== 'referral' && o.ref !== 'freespin' ? ` · ${auEsc(o.ref)}` : '';
+    return `<div class="set-row"><div><h3 style="font-size:13px">${meta[0]} ${meta[1]}${g}</h3>
+      <p>${o.ts ? auDate(o.ts) : ''} · баланс после ${fmt(o.balance_after)} ₴</p></div>
+      <div style="margin-left:auto;text-align:right">${signed(o.delta)}</div></div>`;
+  }).join('') || '<p class="note">операций нет</p>';
+  const more = walOps.length < (d.total || 0)
+    ? `<button class="btn btn-ghost" style="margin-top:8px" onclick="loadWalletLog(${id}, ${walOps.length})">Показать ещё (${fmt((d.total || 0) - walOps.length)})</button>`
+    : '';
+  box.innerHTML = head + rows + more;
 }
 async function genPromos() {
   const amount = parseInt(document.getElementById('promoAmount').value, 10);

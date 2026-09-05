@@ -2340,6 +2340,18 @@ async def api_admin_user(request: Request):
         raise HTTPException(404, str(e))
 
 
+@app.post("/api/admin/wallet-log")
+async def api_admin_wallet_log(request: Request):
+    """Журнал кошелька игрока (wallet_ops): каждая операция казино/бонуса.
+    Переживает удаление аккаунта — виден точный источник денег."""
+    admin_user(request)
+    b = await request.json()
+    uid = pint(b.get("id"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    return await db.admin_wallet_log(uid, 100, pint(b.get("offset")))
+
+
 @app.post("/api/admin/ban")
 async def api_admin_ban(request: Request):
     """Универсальный бан/разбан пользователя из админки: один флаг закрывает и
