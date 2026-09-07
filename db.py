@@ -46,6 +46,8 @@ MAX_PENDING_TOPUPS = 8    # квитанций на проверке на юзе
 # а ставка ограничена BONUS_MAX_BET — нельзя слить весь бонус в один спин.
 BONUS_WAGER_X = int(os.getenv("BONUS_WAGER_X", "15") or 15)
 BONUS_MAX_BET = int(os.getenv("BONUS_MAX_BET", "100") or 100)
+# бонусом (locked) можно оплатить не больше этого % покупки — остальное реальными
+BONUS_PAY_MAX_PCT = max(0, min(100, int(os.getenv("BONUS_PAY_MAX_PCT", "50") or 50)))
 SEED_PRODUCTS = [
     ("Golden Reserve", "Флагманская позиция", "🏆", "ХИТ", 120),
     ("Black Label", "Тёмная классика", "🖤", "", 95),
@@ -846,10 +848,19 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
         if pay == "balance":
             if u["balance"] < total:
                 raise ValueError("Недостаточно средств — пополните баланс")
-            # какая часть оплачена бонусами: locked списывается первым
-            bonus_part = min(int(u["locked"] or 0), total)
+            # бонусом (locked) — не больше BONUS_PAY_MAX_PCT% заказа; остальное
+            # обязательно реальными (выводимыми). locked тратим первым, но с капом.
+            locked = int(u["locked"] or 0)
+            withdrawable = int(u["balance"]) - locked
+            bonus_cap = total * BONUS_PAY_MAX_PCT // 100
+            bonus_part = min(locked, bonus_cap)
+            real_need = total - bonus_part
+            if withdrawable < real_need:
+                raise ValueError(
+                    f"Бонусами можно оплатить не больше {BONUS_PAY_MAX_PCT}%. "
+                    f"Нужно реальными: {real_need} ₴, доступно: {max(0, withdrawable)} ₴")
             await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", total, tg_id)
-            await _spend_locked(c, tg_id, total)
+            await _spend_locked(c, tg_id, bonus_part)   # списываем только использованный бонус
             oid = await _insert_order(c, tg_id, p, grams, total, 0, "balance", ship,
                                       bonus_part=bonus_part)
             await _ref_bonus(c, tg_id, total)
