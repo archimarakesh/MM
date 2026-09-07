@@ -2161,10 +2161,14 @@ function openCheckout() {
     `${curProduct.name} · ${curGrams} ${uShort(curProduct.unit)} · ${fmt(total)} ₴`;
   const sp = orderPaySplit(total);
   document.getElementById('coPays').innerHTML =
-    `<p class="note" style="grid-column:1/-1;margin:0">Оплата с баланса · реальными <b style="color:${sp.enough ? 'var(--gold-soft)' : 'var(--danger)'}">${fmt(sp.real)} ₴</b>`
-    + (sp.bonusUse ? ` + бонусом ${fmt(sp.bonusUse)} ₴` : '')
-    + (sp.enough ? '' : ` · не хватает реальных ${fmt(sp.realNeed - sp.real)} ₴`)
-    + `<br><span style="opacity:.75">Бонусом можно оплатить до ${sp.pct}% заказа</span></p>`;
+    `<div style="grid-column:1/-1">
+       <p class="note" style="margin:0 0 6px">Бонусами можно оплатить <b style="color:var(--gold-soft)">половину</b> заказа (${sp.pct}%). К оплате <b>${fmt(total)} ₴</b>:</p>
+       <div style="display:flex;gap:8px">
+         <div class="ref-stat" style="flex:1;padding:9px 10px"><b style="font-size:14px;color:var(--gold-soft)">🎁 ${fmt(sp.bonusUse)} ₴</b><span>бонусом</span></div>
+         <div class="ref-stat" style="flex:1;padding:9px 10px"><b style="font-size:14px;color:${sp.enough ? 'var(--txt)' : 'var(--danger)'}">💵 ${fmt(sp.realNeed)} ₴</b><span>реальными</span></div>
+       </div>
+       ${sp.enough ? '' : `<p class="note" style="margin:6px 0 0;color:var(--danger)">Не хватает реальных ${fmt(sp.realNeed - sp.real)} ₴ — пополните баланс</p>`}
+     </div>`;
   document.getElementById('coExtra').innerHTML = sp.enough ? '' :
     `<a class="btn btn-ghost" style="text-decoration:none;margin-bottom:6px" onclick="closeSheets(true);go('topup')">Пополнить баланс</a>`;
   openSheet('checkout');
