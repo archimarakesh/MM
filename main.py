@@ -1102,6 +1102,7 @@ async def _snap(uid: int) -> dict:
                            and bool(bot and BONUS_CHAT_ID))
     snap["bonus_amount"] = BONUS_AMOUNT
     snap["min_withdraw"] = db.MIN_WITHDRAW
+    snap["bonus_pay_pct"] = db.BONUS_PAY_MAX_PCT   # бонусом до N% покупки
     snap["card_auto"] = paydome.enabled()
     snap["card_fee"] = CARD_FEE_PCT if paydome.enabled() else 0
     # ссылка «вернуться в казино» с токеном: казино не спросит пин повторно

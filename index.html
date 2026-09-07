@@ -2144,17 +2144,28 @@ function pickWh(i) {
   document.getElementById('coNPList').innerHTML = '';
   haptic('light');
 }
+// сколько реальных средств нужно на заказ: бонусом (locked) — не больше N%
+function orderPaySplit(total) {
+  const pct = S.bonus_pay_pct != null ? S.bonus_pay_pct : 50;
+  const real = S.withdrawable != null ? S.withdrawable : S.balance;
+  const locked = Math.max(0, S.balance - real);
+  const bonusUse = Math.min(locked, Math.floor(total * pct / 100));
+  const realNeed = total - bonusUse;
+  return { pct, real, bonusUse, realNeed, enough: real >= realNeed };
+}
 function openCheckout() {
   resetCheckoutAddr();
   const total = priceFor(curProduct, curGrams);
   payMethod = 'balance';
   document.getElementById('coSummary').textContent =
     `${curProduct.name} · ${curGrams} ${uShort(curProduct.unit)} · ${fmt(total)} ₴`;
-  const enough = S.balance >= total;
+  const sp = orderPaySplit(total);
   document.getElementById('coPays').innerHTML =
-    `<p class="note" style="grid-column:1/-1;margin:0">Оплата с баланса · доступно <b style="color:${enough ? 'var(--gold-soft)' : 'var(--danger)'}">${fmt(S.balance)} ₴</b>` +
-    (enough ? '' : ` · не хватает ${fmt(total - S.balance)} ₴`) + `</p>`;
-  document.getElementById('coExtra').innerHTML = enough ? '' :
+    `<p class="note" style="grid-column:1/-1;margin:0">Оплата с баланса · реальными <b style="color:${sp.enough ? 'var(--gold-soft)' : 'var(--danger)'}">${fmt(sp.real)} ₴</b>`
+    + (sp.bonusUse ? ` + бонусом ${fmt(sp.bonusUse)} ₴` : '')
+    + (sp.enough ? '' : ` · не хватает реальных ${fmt(sp.realNeed - sp.real)} ₴`)
+    + `<br><span style="opacity:.75">Бонусом можно оплатить до ${sp.pct}% заказа</span></p>`;
+  document.getElementById('coExtra').innerHTML = sp.enough ? '' :
     `<a class="btn btn-ghost" style="text-decoration:none;margin-bottom:6px" onclick="closeSheets(true);go('topup')">Пополнить баланс</a>`;
   openSheet('checkout');
 }
@@ -2168,7 +2179,11 @@ async function placeOrder() {
   const ship = { name, phone, city, np };
   if (coCitySel) ship.city_ref = coCitySel.ref;
   if (coWhSel) { ship.branch = coWhSel.desc; ship.wh_ref = coWhSel.ref; ship.postomat = coWhSel.postomat; }
-  if (S.balance < total) { toast('Недостаточно средств — пополните баланс'); closeSheets(true); return go('topup'); }
+  const sp = orderPaySplit(total);
+  if (!sp.enough) {
+    toast(`Бонусом можно оплатить до ${sp.pct}% — нужно реальными ${fmt(sp.realNeed)} ₴`);
+    closeSheets(true); return go('topup');
+  }
   if (API.ok) {
     let d;
     try { d = await API.call('/api/order', { product_id: curProduct.id, product_name: curProduct.name, grams: curGrams, pay: 'balance', ship }); }
