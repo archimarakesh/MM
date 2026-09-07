@@ -2171,11 +2171,17 @@ async def buy_share(tg_id: int, plan_id: int, pct: int) -> dict:
                 raise ValueError(f"Свободно только {avail}% — выберите долю меньше"
                                  if avail > 0 else "Все доли выкуплены")
         invested = round(p["price"] * pct / 100)
-        u = await c.fetchrow("SELECT balance FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
-        if u["balance"] < invested:
-            raise ValueError("Недостаточно средств — пополните баланс")
+        u = await c.fetchrow(
+            "SELECT balance, locked FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        # E-grow — только за РЕАЛЬНЫЕ (выводимые) средства, бонусом нельзя
+        withdrawable = int(u["balance"]) - int(u["locked"] or 0)
+        if withdrawable < invested:
+            raise ValueError(
+                "E-grow — только за реальные средства (не бонусами). "
+                f"Нужно {invested} ₴ реальными, доступно {max(0, withdrawable)} ₴")
         profit = _plan_stages(p)[p["stage"]]["p"]
         payout = invested + round(invested * profit / 100)
+        # списываем из выводимых — locked (бонус) не трогаем
         await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", invested, tg_id)
         await c.execute("UPDATE grow_plans SET sold_pct=sold_pct+$2 WHERE id=$1", plan_id, pct)
         await c.execute("""
