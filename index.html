@@ -3200,6 +3200,7 @@ function renderEgrow() {
         <div class="ref-stat" style="padding:9px 10px"><b style="font-size:14px">${fmt(cost)} ₴</b><span>вход · ${pct}%</span></div>
         <div class="ref-stat" style="padding:9px 10px"><b style="font-size:14px;color:var(--gold-soft)">${fmt(payout)} ₴</b><span>выплата</span></div>
       </div>
+      <p class="note" style="margin:0 0 8px;opacity:.8">💵 Только за реальные средства (не бонусами)</p>
       <button class="btn btn-gold" onclick="buyShare(${p.id})">Купить ${pct}% за ${fmt(cost)} ₴
         <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4-3.2-7-8-7 0 4.5 3.2 7 8 7z"/></svg></span>
       </button>` : `<a class="btn btn-ghost" style="text-decoration:none;color:var(--warn)" href="${ADMIN_CHAT}" target="_blank" rel="noopener">Все доли выкуплены — написать админу</a>`}`}
@@ -3215,8 +3216,10 @@ async function buyShare(planId) {
   if (!API.ok) return toast('Доступно после подключения сервера');
   const p = PLANS.find(x => x.id === planId);
   const pct = selPct[planId] || 10;
-  if (p && S.balance < Math.round(p.price * pct / 100)) {
-    toast('Недостаточно средств — пополняем баланс');
+  // E-grow — только за реальные (выводимые) средства, бонусом нельзя
+  const real = S.withdrawable != null ? S.withdrawable : S.balance;
+  if (p && real < Math.round(p.price * pct / 100)) {
+    toast('E-grow — только за реальные средства (не бонусами)');
     return go('topup');
   }
   try { applySnapshot(await API.call('/api/grow/buy', { plan_id: planId, pct })); }
