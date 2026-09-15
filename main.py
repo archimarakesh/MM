@@ -333,8 +333,10 @@ async def _settle(inv: dict, txid: str) -> bool:
     if not res:
         return False
     if res["order_code"]:
+        cb = int(res.get("cashback") or 0)
         await notify(res["user_id"],
-                     f"✅ Заказ <b>{res['order_code']}</b> оплачен — принят в работу.")
+                     f"✅ Заказ <b>{res['order_code']}</b> оплачен — принят в работу."
+                     + (f"\n💰 Кэшбэк <b>+{cb} ₴</b> бонусом на баланс." if cb else ""))
         await notify(ADMIN_ID,
                      f"₿ <b>Заказ {res['order_code']} оплачен криптой</b> "
                      f"({inv['amount_crypto']} {CRYPTO[inv['currency']]['label']} = {res['amount']} ₴). "
@@ -2510,8 +2512,10 @@ async def api_admin_order(request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     if res["approved"]:
+        cb = int(res.get("cashback") or 0)
         await notify(res["user_id"],
-                     f"✅ Оплата заказа <b>{res['code']}</b> подтверждена — принят в работу.")
+                     f"✅ Оплата заказа <b>{res['code']}</b> подтверждена — принят в работу."
+                     + (f"\n💰 Кэшбэк <b>+{cb} ₴</b> бонусом на баланс." if cb else ""))
         await _drain_ref_notify()      # реферальные с подтверждённой картой оплаты
     else:
         await notify(res["user_id"],

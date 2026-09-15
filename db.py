@@ -48,6 +48,30 @@ BONUS_WAGER_X = int(os.getenv("BONUS_WAGER_X", "15") or 15)
 BONUS_MAX_BET = int(os.getenv("BONUS_MAX_BET", "100") or 100)
 # бонусом (locked) можно оплатить не больше этого % покупки — остальное реальными
 BONUS_PAY_MAX_PCT = max(0, min(100, int(os.getenv("BONUS_PAY_MAX_PCT", "50") or 50)))
+# Кэшбэк-программа: оборот РЕАЛЬНЫХ трат за скользящие 12 мес → % кэшбэка, который
+# возвращается БОНУСОМ на счёт с каждой покупки. Пороги (₴, %); настраивается через
+# CASHBACK_TIERS="5000:3,10000:5,...". По умолчанию 7 ступеней 3→20% до 100k.
+def _parse_cashback_tiers(raw: str) -> list:
+    out = []
+    for part in str(raw or "").split(","):
+        part = part.strip()
+        if ":" in part:
+            th, pct = part.split(":", 1)
+            if th.strip().isdigit() and pct.strip().isdigit():
+                out.append((int(th), int(pct)))
+    return sorted(out)
+CASHBACK_TIERS = _parse_cashback_tiers(os.getenv("CASHBACK_TIERS", "")) or [
+    (5000, 3), (10000, 5), (20000, 8), (35000, 11),
+    (55000, 14), (75000, 17), (100000, 20)]
+
+
+def cashback_pct(spend: int) -> int:
+    """% кэшбэка по обороту (реальными) за 12 мес."""
+    p = 0
+    for th, pct in CASHBACK_TIERS:
+        if spend >= th:
+            p = pct
+    return p
 SEED_PRODUCTS = [
     ("Golden Reserve", "Флагманская позиция", "🏆", "ХИТ", 120),
     ("Black Label", "Тёмная классика", "🖤", "", 95),
@@ -153,6 +177,8 @@ async def init():
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_status INT;
             -- сколько из суммы заказа покрыто бонусами (locked) — для бухгалтерии
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS bonus_part BIGINT NOT NULL DEFAULT 0;
+            -- кэшбэк, начисленный бонусом за этот заказ (для истории/чека)
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashback BIGINT NOT NULL DEFAULT 0;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_status_text TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_eta TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS np_arrival TEXT;
@@ -698,6 +724,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "payments": await payments_history(tg_id, c),
         "grow_plans": await get_grow_plans(conn=c),
         "shares": await user_shares(tg_id, c),
+        "cashback": await user_cashback(tg_id, c),
     }
 
 
@@ -839,12 +866,55 @@ async def _insert_order(c, tg_id, p, grams, total, status, pay, ship,
         int(bonus_part), (p["unit"] or "g"))
 
 
+async def user_cashback(tg_id: int, conn=None) -> dict:
+    """Статус кэшбэка: оборот РЕАЛЬНЫХ трат (total − бонусная часть) по оплаченным
+    заказам за скользящие 12 мес, текущий % и порог следующего уровня."""
+    if conn is None:
+        async with _pool.acquire() as c:
+            return await user_cashback(tg_id, c)
+    c = conn
+    spend = int(await c.fetchval("""
+        SELECT COALESCE(SUM(total - bonus_part), 0) FROM orders
+        WHERE user_id=$1 AND status >= 0
+          AND created >= now() - interval '365 days'
+    """, tg_id) or 0)
+    pct = cashback_pct(spend)
+    nxt = next(((th, p) for th, p in CASHBACK_TIERS if spend < th), None)
+    return {
+        "spend": spend, "pct": pct,
+        "next_at": (nxt[0] if nxt else None),
+        "next_pct": (nxt[1] if nxt else None),
+        "max_pct": CASHBACK_TIERS[-1][1] if CASHBACK_TIERS else 0,
+        "tiers": [{"at": th, "pct": p} for th, p in CASHBACK_TIERS],
+    }
+
+
+async def _apply_cashback(c, tg_id: int, real_amount: int, order_id: int) -> int:
+    """Начисляет кэшбэк БОНУСОМ (locked + вейджер ×BONUS_WAGER_X, как остальные
+    бонусы) за реальную часть покупки, по текущему уровню игрока. Возвращает
+    сумму кэшбэка (0 — если уровень 0 или нечего начислять)."""
+    if real_amount <= 0:
+        return 0
+    cb = await user_cashback(tg_id, c)
+    amount = round(real_amount * cb["pct"] / 100)
+    if amount <= 0:
+        return 0
+    await c.execute(f"""
+        UPDATE users SET balance=balance+$1, locked=locked+$1,
+            wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X}
+        WHERE tg_id=$2
+    """, amount, tg_id)
+    await c.execute("UPDATE orders SET cashback=$2 WHERE id=$1", order_id, amount)
+    return amount
+
+
 async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
                        ship: dict, receipt: str | None = None) -> dict:
     """Оплата с баланса (сразу оплачен) или картой (квитанция на проверку)."""
     async with _pool.acquire() as c, c.transaction():
         p, total = await _order_product_total(c, product_id, grams, lock=True)
         u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        cash = 0
         if pay == "balance":
             if u["balance"] < total:
                 raise ValueError("Недостаточно средств — пополните баланс")
@@ -864,6 +934,8 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
             oid = await _insert_order(c, tg_id, p, grams, total, 0, "balance", ship,
                                       bonus_part=bonus_part)
             await _ref_bonus(c, tg_id, total)
+            # кэшбэк бонусом за РЕАЛЬНУЮ часть покупки (бонусами оплаченное не в счёт)
+            cash = await _apply_cashback(c, tg_id, total - bonus_part, oid)
         elif pay == "card":
             await _guard_pending_orders(c, tg_id)
             oid = await _insert_order(c, tg_id, p, grams, total, -1, "card", ship, receipt)
@@ -875,6 +947,7 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
         snap["order_total"] = total
         snap["order_product"] = p["name"]
         snap["order_grams"] = grams
+        snap["order_cashback"] = cash
         return snap
 
 
@@ -912,13 +985,17 @@ async def order_decide(order_code: str, approve: bool) -> dict:
         o = await c.fetchrow("SELECT * FROM orders WHERE id=$1 AND status=-1 FOR UPDATE", oid)
         if not o:
             raise ValueError("Заказ не найден или уже обработан")
+        cash = 0
         if approve:
             await c.execute("UPDATE orders SET status=0 WHERE id=$1", oid)
             await _ref_bonus(c, o["user_id"], o["total"])
+            # оплата картой — 100% реальными, кэшбэк со всей суммы
+            cash = await _apply_cashback(c, o["user_id"], int(o["total"] or 0), oid)
         else:
             await c.execute("UPDATE orders SET status=-2 WHERE id=$1", oid)
             await _restock(c, o["product_id"], o["grams"])
-        return {"user_id": o["user_id"], "code": order_code, "approved": approve}
+        return {"user_id": o["user_id"], "code": order_code, "approved": approve,
+                "cashback": cash}
 
 
 async def delete_order(order_code: str) -> dict:
@@ -1576,6 +1653,9 @@ async def invoice_paid(inv_id: int, txid: str) -> dict | None:
                 "UPDATE orders SET status=0 WHERE id=$1 AND status=-1", inv["order_id"])
             if upd.endswith("1"):
                 await _ref_bonus(c, inv["user_id"], inv["amount_uah"])
+                # оплата криптой — 100% реальными, кэшбэк со всей суммы
+                res["cashback"] = await _apply_cashback(
+                    c, inv["user_id"], int(inv["amount_uah"] or 0), inv["order_id"])
             res["order_code"] = f"MM-{inv['order_id'] + ORDER_CODE_BASE}"
         else:
             await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
