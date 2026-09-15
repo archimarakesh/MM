@@ -122,6 +122,8 @@ PROMO_POSTS = [
      "🏆 Розыгрыш определит <b>3 победителей</b>: 5000 / 2500 / 1000 ₴\n\n"
      "Участие — в разделе <b>«Рулетка»</b> в приложении 👇"),
 ]
+# пост рулетки постим только при активном розыгрыше (см. promo_poster)
+PROMO_ROULETTE_PATH = "promo/roulette.png"
 # общий секрет с внешними сервисами (казино и т.п.). Пусто — кошелёк наружу закрыт
 WALLET_TOKEN = os.getenv("WALLET_TOKEN", "")
 CARD_MIN = 200               # пополнение картой — от 200 ₴, меньше только криптой
@@ -503,6 +505,12 @@ async def promo_poster():
                 await db.set_kv("last_promo", slot_key)
                 continue        # слотов больше, чем постов — этот пустой
             path, caption = PROMO_POSTS[idx]
+            # Промо рулетки (розыгрыша) шлём только когда розыгрыш реально запущен —
+            # иначе люди идут в пустой раздел. Слот при этом «сгорает» (не постим).
+            if path == PROMO_ROULETTE_PATH and not await db.lottery_open_round():
+                await db.set_kv("last_promo", slot_key)
+                log.info("Промо рулетки пропущено: розыгрыш не активен (%s)", slot_key)
+                continue
             if os.path.exists(path):
                 await publish_promo([(path, caption)])
                 await db.set_kv("last_promo", slot_key)
