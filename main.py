@@ -2419,10 +2419,20 @@ async def api_admin_data(request: Request):
         "withdrawals": await db.admin_withdrawals(),
         "orders": await db.admin_orders(),
         "sales": await db.sales_stats(),
+        "sales_periods": await db.sales_periods(),
         "grow_stats": await db.grow_stats(),
         "promos": await db.admin_promos(),
         "deposit_bonus": await db.deposit_bonus_state(),
     }
+
+
+@app.post("/api/admin/sales")
+async def api_admin_sales(request: Request):
+    """Бухгалтерия за выбранный период: 'all' / 'YYYY' / 'YYYY-MM'."""
+    admin_user(request)
+    b = await request.json()
+    period = str(b.get("period", "all") or "all")
+    return {"sales": await db.sales_stats(period)}
 
 
 @app.post("/api/admin/product")

@@ -1328,25 +1328,53 @@ async def mark_bonus_part(order_code: str, amount: int | None) -> dict:
     return {"total": r["total"], "bonus_part": r["bonus_part"]}
 
 
-async def sales_stats() -> dict:
+def _sales_period_filter(period: str):
+    """Разбирает период фильтра статистики в SQL-фрагмент по дате заказа (created,
+    в киевском времени). Возвращает (sql_фрагмент, аргументы). Формат периода:
+    'all' — всё время; 'YYYY' — год; 'YYYY-MM' — месяц. Любой мусор → всё время."""
+    period = (period or "all").strip()
+    if period != "all" and len(period) == 7 and period[4] == "-" \
+            and period[:4].isdigit() and period[5:].isdigit():
+        return (" AND to_char(created AT TIME ZONE 'Europe/Kyiv','YYYY-MM') = $1", [period])
+    if period != "all" and len(period) == 4 and period.isdigit():
+        return (" AND to_char(created AT TIME ZONE 'Europe/Kyiv','YYYY') = $1", [period])
+    return ("", [])
+
+
+async def sales_periods() -> dict:
+    """Периоды, доступные для фильтра статистики: месяцы и годы, в которых есть
+    проданные заказы (status>=1). Для селектора в админке."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("""
+            SELECT DISTINCT to_char(created AT TIME ZONE 'Europe/Kyiv','YYYY-MM') AS ym
+            FROM orders WHERE status >= 1 ORDER BY ym DESC
+        """)
+    months = [r["ym"] for r in rows if r["ym"]]
+    years = sorted({m[:4] for m in months}, reverse=True)
+    return {"months": months, "years": years}
+
+
+async def sales_stats(period: str = "all") -> dict:
     """Бухгалтерия продаж. Заказ считается проданным с момента, как его взяли
     в работу (статус 1+): заказ оплачен ещё на статусе 0, а «в работе» — уже
     подтверждённая продажа, ждать ТТН для учёта не нужно. Бонусные оплаты (промо,
     приветственные) учитываются отдельно: это не живые деньги. Чистая прибыль =
-    реальная выручка минус комиссия на вывод и минус фикс-расход на каждую посылку."""
+    реальная выручка минус комиссия на вывод и минус фикс-расход на каждую посылку.
+    period фильтрует по дате заказа: 'all' / 'YYYY' / 'YYYY-MM'."""
+    flt, args = _sales_period_filter(period)
     async with _pool.acquire() as c:
         await _auto_deliver(c)
-        tot = await c.fetchrow("""
+        tot = await c.fetchrow(f"""
             SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
                    COALESCE(SUM(grams),0) AS grams,
                    COALESCE(SUM(bonus_part),0) AS bonus
-            FROM orders WHERE status >= 1
-        """)
-        by = await c.fetch("""
+            FROM orders WHERE status >= 1{flt}
+        """, *args)
+        by = await c.fetch(f"""
             SELECT product, COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
                    COALESCE(SUM(grams),0) AS grams
-            FROM orders WHERE status >= 1 GROUP BY product ORDER BY revenue DESC LIMIT 20
-        """)
+            FROM orders WHERE status >= 1{flt} GROUP BY product ORDER BY revenue DESC LIMIT 20
+        """, *args)
     revenue, bonus = int(tot["revenue"]), int(tot["bonus"])
     real = revenue - bonus
     fee = round(real * WITHDRAW_FEE_PCT / 100)
@@ -1357,6 +1385,7 @@ async def sales_stats() -> dict:
         "fee_pct": WITHDRAW_FEE_PCT, "fee": fee,
         "parcel_cost": PARCEL_COST, "shipping": shipping,
         "profit": real - fee - shipping,
+        "period": (period or "all").strip() or "all",
         "by_product": [{"product": b["product"], "cnt": b["cnt"],
                         "revenue": int(b["revenue"]), "grams": int(b["grams"])} for b in by],
     }

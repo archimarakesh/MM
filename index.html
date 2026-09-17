@@ -3399,6 +3399,25 @@ async function openAdmin() {
   go('admin');
   renderAdmin(adminTab || 'products');
 }
+const RU_MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+function salesPeriodLabel(p) {
+  if (!p || p === 'all') return 'всё время';
+  if (p.length === 4) return p + ' год';
+  const [y, m] = p.split('-');
+  return (RU_MONTHS[(+m) - 1] || m) + ' ' + y;
+}
+function salesPeriodOptions(sel) {
+  const sp = (AD && AD.sales_periods) || { months: [], years: [] };
+  let o = `<option value="all"${sel === 'all' ? ' selected' : ''}>Всё время</option>`;
+  (sp.years || []).forEach(y => { o += `<option value="${y}"${sel === y ? ' selected' : ''}>${y} год</option>`; });
+  (sp.months || []).forEach(m => { o += `<option value="${m}"${sel === m ? ' selected' : ''}>${salesPeriodLabel(m)}</option>`; });
+  return o;
+}
+async function changeSalesPeriod(p) {
+  try { const r = await API.call('/api/admin/sales', { period: p }); AD.sales = r.sales; }
+  catch (e) { return toast(e.message); }
+  if (adminTab === 'orders') renderAdmin('orders');
+}
 function renderAdmin(tab) {
   adminTab = tab;
   // точка = требует действий: заказ проверить/взять в работу, оплата на проверке
@@ -3457,7 +3476,11 @@ function renderAdmin(tab) {
     const sa = AD.sales || {};
     const salesStats = `
       <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
-        <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:15px">Бухгалтерия</h2><span>${sa.count || 0} посыл. · с момента ТТН</span></div>
+        <div class="section-head" style="margin:0 0 11px">
+          <h2 style="font-size:15px">Бухгалтерия</h2>
+          <select class="mini-input" style="width:auto;padding:6px 9px;font-size:12px" onchange="changeSalesPeriod(this.value)">${salesPeriodOptions(sa.period || 'all')}</select>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin:-4px 0 10px">${sa.count || 0} продаж · ${salesPeriodLabel(sa.period || 'all')}</div>
         <div class="admin-stats">
           <div><b>${fmt(sa.revenue || 0)} ₴</b><span>выручка всего · ${fmt(sa.grams || 0)} г</span></div>
           <div><b style="color:var(--gold-soft)">${fmt(sa.real || 0)} ₴</b><span>реальными деньгами</span></div>
