@@ -119,7 +119,8 @@ PROMO_POSTS = [
      "призы на баланс.\n\n"
      "🎁 <b>100 ₴</b> приветственный бонус — гарантированно каждому\n"
      "👥 <b>+50 ₴</b> за каждого друга (3 друга = +150 ₴)\n"
-     "🏆 Розыгрыш определит <b>3 победителей</b>: 5000 / 2500 / 1000 ₴\n\n"
+     "🏆 Розыгрыш определит <b>5 победителей</b>: 3000 / 2000 / 1500 / 1000 / 500 ₴\n\n"
+     "🔁 Каждую неделю — новый круг! Успей позвать друзей.\n"
      "Участие — в разделе <b>«Рулетка»</b> в приложении 👇"),
 ]
 # пост рулетки постим только при активном розыгрыше (см. promo_poster)
@@ -894,13 +895,41 @@ async def _lottery_prenotify(rnd: dict) -> None:
     log.info("Лотерея: разослано напоминание по кругу #%s (%s чел.)", rnd["id"], len(ids))
 
 
+async def _lottery_autostart() -> None:
+    """Автоцикл розыгрыша: неделя идёт розыгрыш, неделя перерыв — сам, без админки.
+    Открытого круга нет и перерыв (BREAK_DAYS) с прошлой жеребьёвки истёк →
+    запускаем новый круг на ROUND_DAYS дней. Первый круг стартует сразу."""
+    if not (lottery.AUTO and LOTTERY_ENABLED):
+        return
+    if await db.lottery_open_round():
+        return                                   # круг уже идёт — ничего не делаем
+    now = datetime.now(KYIV)
+    last = await db.lottery_last_finished()
+    if last is not None:
+        drawn = last.get("drawn_at")
+        if drawn is not None and (now - drawn) < timedelta(days=lottery.BREAK_DAYS):
+            return                               # перерыв ещё не закончился
+    prizes = lottery.AUTO_PRIZES
+    # дедлайн ВСЕГДА в 22:00 по Киеву в последний день круга
+    deadline = (now + timedelta(days=lottery.ROUND_DAYS)).replace(
+        hour=22, minute=0, second=0, microsecond=0)
+    await db.lottery_start(deadline, ",".join(map(str, prizes)))
+    if ADMIN_ID:
+        await notify(ADMIN_ID,
+                     f"🎰 Авто-розыгрыш запущен. Жеребьёвка {deadline.strftime('%d.%m в 22:00')}. "
+                     "Призы: " + " · ".join(f"{p} ₴" for p in prizes))
+    await ws_broadcast({"t": "lottery_start"})   # обновить открытые приложения
+    log.info("Лотерея: авто-старт круга, дедлайн %s", deadline.isoformat())
+
+
 async def lottery_ticker():
-    """Каждые 30с: за час до дедлайна — напоминание участникам; по дедлайну —
-    розыгрыш. Сам круг не создаём — его запускают вручную из админки."""
+    """Каждые 30с: автоцикл (неделя розыгрыш / неделя перерыв); за час до дедлайна —
+    напоминание участникам; по дедлайну — розыгрыш."""
     await asyncio.sleep(5)
     while True:
         try:
             if LOTTERY_ENABLED:
+                await _lottery_autostart()
                 rnd = await db.lottery_open_round()
                 dl = rnd.get("deadline") if rnd else None
                 if dl:
@@ -1790,6 +1819,9 @@ async def _admin_lottery_snapshot() -> dict:
         "stats": stats,
         "defaults": {"days": lottery.DAYS, "prizes": lottery.PRIZES,
                      "per_ticket": lottery.PER_TICKET},
+        "auto": {"on": bool(lottery.AUTO and LOTTERY_ENABLED),
+                 "round_days": lottery.ROUND_DAYS, "break_days": lottery.BREAK_DAYS,
+                 "prizes": lottery.AUTO_PRIZES},
         "last": last_out,
     }
 
