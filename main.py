@@ -830,6 +830,25 @@ async def broadcast_all(text: str, photo: str = None, button: tuple = None) -> i
 
 
 # ── розыгрыш (лотерея): выплаты и авто-жеребьёвка по таймеру ──────────────────
+_PLACE_ICON = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+
+def _place_icon(place: int) -> str:
+    """Значок места: медали за 1-3, цифры за 4-10, дальше «N место»."""
+    return _PLACE_ICON[place - 1] if 1 <= place <= len(_PLACE_ICON) else f"{place}-е"
+
+
+def _prizes_block(prizes) -> str:
+    """Красивый столбик призов по местам для сообщений бота."""
+    return "\n".join(f"{_place_icon(i + 1)} <b>{fmt_uah(p)} ₴</b>"
+                     for i, p in enumerate(prizes))
+
+
+def fmt_uah(n) -> str:
+    """Разряды пробелом: 3000 → «3 000». Мелкая косметика для сумм."""
+    return f"{int(n):,}".replace(",", " ")
+
+
 async def _lottery_pay(round_id: int, place: int, uid: int, prize: int) -> None:
     """Идемпотентное начисление приза как НЕВЫВОДИМОГО бонуса (locked + вейджер)."""
     try:
@@ -862,15 +881,25 @@ async def _run_lottery_draw(rnd: dict) -> None:
         except Exception:
             log.exception("Лотерея: аватар победителя не получен")
         await notify(w["user_id"],
-                     f"🎉 <b>Розыгрыш Magic Market!</b>\n"
-                     f"Ваше число <b>{w['number']:05d}</b> взяло <b>{w['place']} место</b> — "
-                     f"приз <b>{w['prize']} ₴</b> зачислен бонусом на баланс.\n"
-                     "Бонус нельзя вывести напрямую — его можно потратить в магазине "
-                     "или отыграть в казино.")
+                     f"{_place_icon(w['place'])} <b>Вы в призах Рулетки!</b>\n\n"
+                     f"Ваше число <b>№{w['number']:05d}</b> заняло "
+                     f"<b>{w['place']}-е место</b> из {len(prizes)}.\n"
+                     f"🎁 Приз <b>{fmt_uah(w['prize'])} ₴</b> уже зачислен на баланс бонусом.\n\n"
+                     "Бонус не выводится напрямую — потратьте его в магазине "
+                     "или отыграйте в казино. Спасибо, что зовёте друзей! 🔥")
     await ws_broadcast({"t": "lottery_draw", "round": rnd["id"]})
     if ADMIN_ID:
-        top = " · ".join(f"{w['place']}м {w['prize']}₴" for w in winners) or "нет участников"
-        await notify(ADMIN_ID, f"🎰 Розыгрыш #{rnd['id']} проведён: {top}")
+        if winners:
+            body = "\n".join(
+                f"{_place_icon(w['place'])} {w.get('name') or 'участник'} · "
+                f"№{w['number']:05d} — <b>{fmt_uah(w['prize'])} ₴</b>" for w in winners)
+            fund = fmt_uah(sum(int(w["prize"]) for w in winners))
+            msg = (f"🎰 <b>Розыгрыш #{rnd['id']} проведён!</b>\n\n{body}\n\n"
+                   f"💰 Выдано призов: <b>{fund} ₴</b> · победителей: {len(winners)}")
+        else:
+            msg = (f"🎰 <b>Розыгрыш #{rnd['id']} проведён</b>\n\n"
+                   "В этот раз участников не было — призы не разыгрывались.")
+        await notify(ADMIN_ID, msg)
     log.info("Лотерея: круг #%s разыгран, победителей %s", rnd["id"], len(winners))
 
 
@@ -882,10 +911,11 @@ async def _lottery_prenotify(rnd: dict) -> None:
     dl = rnd.get("deadline")
     tstr = dl.astimezone(KYIV).strftime("%H:%M") if dl else "22:00"
     prizes = lottery._parse_prizes(rnd.get("prizes")) or lottery.PRIZES
-    ptxt = " / ".join(str(p) for p in prizes)
-    text = ("⏰ <b>Через час — розыгрыш Magic Market!</b>\n"
-            f"Сегодня в <b>{tstr}</b> определим победителей. Призы на баланс: <b>{ptxt} ₴</b>.\n"
-            "Открой раздел «Рулетка» в приложении, чтобы посмотреть жеребьёвку вживую 🎰")
+    text = ("⏰ <b>Через час — розыгрыш Рулетки!</b>\n\n"
+            f"Сегодня в <b>{tstr}</b> определим победителей.\n"
+            f"💰 Призовой фонд <b>{fmt_uah(sum(prizes))} ₴</b> на {len(prizes)} мест:\n"
+            f"{_prizes_block(prizes)}\n\n"
+            "Открой раздел «Рулетка» в приложении — жеребьёвку видно вживую 🎰")
     ids = await db.lottery_participant_ids(rnd["id"])
     for uid in ids:
         await notify(uid, text)
@@ -916,8 +946,11 @@ async def _lottery_autostart() -> None:
     await db.lottery_start(deadline, ",".join(map(str, prizes)))
     if ADMIN_ID:
         await notify(ADMIN_ID,
-                     f"🎰 Авто-розыгрыш запущен. Жеребьёвка {deadline.strftime('%d.%m в 22:00')}. "
-                     "Призы: " + " · ".join(f"{p} ₴" for p in prizes))
+                     "🎰 <b>Новая Рулетка запущена!</b>  <i>авто</i>\n\n"
+                     f"🗓 Жеребьёвка — <b>{deadline.strftime('%d.%m в 22:00')}</b>\n"
+                     f"💰 Призовой фонд <b>{fmt_uah(sum(prizes))} ₴</b> на {len(prizes)} мест:\n"
+                     f"{_prizes_block(prizes)}\n\n"
+                     "🔁 Автоцикл: новый круг стартует каждую неделю.")
     await ws_broadcast({"t": "lottery_start"})   # обновить открытые приложения
     log.info("Лотерея: авто-старт круга, дедлайн %s", deadline.isoformat())
 
@@ -1850,8 +1883,11 @@ async def api_admin_lottery_start(request: Request):
         hour=22, minute=0, second=0, microsecond=0)
     await db.lottery_start(deadline, ",".join(map(str, prizes)))
     if ADMIN_ID:
-        await notify(ADMIN_ID, f"🎰 Розыгрыш запущен. Жеребьёвка {deadline.strftime('%d.%m в 22:00')}. "
-                     "Призы: " + " · ".join(f"{p} ₴" for p in prizes))
+        await notify(ADMIN_ID,
+                     "🎰 <b>Рулетка запущена!</b>\n\n"
+                     f"🗓 Жеребьёвка — <b>{deadline.strftime('%d.%m в 22:00')}</b>\n"
+                     f"💰 Призовой фонд <b>{fmt_uah(sum(prizes))} ₴</b> на {len(prizes)} мест:\n"
+                     f"{_prizes_block(prizes)}")
     await ws_broadcast({"t": "lottery_start"})   # обновить открытые приложения
     return await _admin_lottery_snapshot()
 
