@@ -11,8 +11,8 @@ log = logging.getLogger("award-img")
 
 BASE = os.path.join("promo", "award_base.png")
 FONT = os.path.join("fonts", "Manrope.ttf")
-ROWS_Y = [530, 618, 706]     # верх строки, как в шаблоне
-ROW_H = 76
+ROWS_Y = [466, 548, 630, 712, 794]   # верх строки, как в шаблоне (5 мест)
+ROW_H = 70
 NAME_X = 190                 # правее медали
 NAME_MAX_W = 470             # до колонки с суммой
 NAME_COLOR = (232, 201, 106)
@@ -45,7 +45,7 @@ def render(winners: list, out_path: str) -> str | None:
             font.set_variation_by_name("ExtraBold")   # шрифт вариативный
         except Exception:
             pass
-        for w in winners[:3]:
+        for w in winners[:len(ROWS_Y)]:
             i = int(w.get("place", 0)) - 1
             if not 0 <= i < len(ROWS_Y):
                 continue

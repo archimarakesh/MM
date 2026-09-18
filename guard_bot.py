@@ -27,13 +27,13 @@ import db
 import quiz_bank as qb
 
 KYIV = ZoneInfo("Europe/Kyiv")
-ACTIVITY_PRIZES = [400, 300, 200]   # призы за 1-3 место, ₴ на баланс (бонусные, как приветственные)
+ACTIVITY_PRIZES = [500, 400, 300, 200, 100]   # призы за 1-5 место, ₴ на баланс (бонусные, как приветственные)
 ACTIVITY_HOUR = 12                  # понедельник, по Киеву
 CONTEST_TIMES = os.getenv("CONTEST_TIMES", "11:00,19:00")   # баннер конкурса, по Киеву
 CONTEST_BANNER = os.path.join("promo", "contest.png")
 CONTEST_CAPTION = ("🏆 <b>Конкурс активности</b>\n"
-                   "Топ-3 самых активных в чате за неделю получают "
-                   "<b>400 / 300 / 200 ₴</b> на баланс магазина.\n"
+                   "Топ-5 самых активных в чате за неделю получают "
+                   "<b>500 / 400 / 300 / 200 / 100 ₴</b> на баланс магазина.\n"
                    "Итоги — каждый понедельник в 12:00. <b>/top</b> — текущий рейтинг.")
 
 logging.basicConfig(level=logging.INFO)
@@ -1024,11 +1024,12 @@ async def run(notify=None, on_ban=None, on_unban=None):
                 await asyncio.sleep(300)
 
     async def announce_winners(winners, start, end):
-        medals = ["🥇", "🥈", "🥉"]
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         lines = [f"🏆 <b>Самые активные за неделю</b> "
                  f"({start.strftime('%d.%m')}–{end.strftime('%d.%m')})", ""]
         for w in winners:
-            lines.append(f"{medals[w['place'] - 1]} <b>{_esc(w['name'])}</b> — "
+            mark = medals[w['place'] - 1] if 1 <= w['place'] <= len(medals) else f"{w['place']}."
+            lines.append(f"{mark} <b>{_esc(w['name'])}</b> — "
                          f"<b>{w['amount']} ₴</b> на баланс "
                          f"<i>({w['points']} сообщ., дней в чате: {w['days']})</i>")
         lines += ["", "Бонус уже на балансе — можно потратить в магазине.",
