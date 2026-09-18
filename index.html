@@ -1244,7 +1244,7 @@ const TIERS = [
 ];
 const WEIGHTS = [2, 5, 10, 25, 50, 100];
 const MIN_GRAMS = 2;
-const MAX_GRAMS = 100;
+const MAX_GRAMS = 100000;   // верхнего лимита нет — цифра лишь предохранитель, ограничивает наличие
 // единица измерения: 'g' — граммы (вес), 'pc' — штуки (поштучный товар)
 const uShort = u => u === 'pc' ? 'шт' : 'г';        // короткий суффикс: 5 г / 5 шт
 const uWord = u => u === 'pc' ? 'шт' : 'грамм';     // слово: минимум 2 грамма / 2 шт
@@ -2028,7 +2028,7 @@ function renderProductSheet() {
         </div>
       </div>
     </div>
-    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">${p.unit === 'pc' ? 'Количество' : 'Вес'} · от ${uMin(p)} до ${MAX_GRAMS} ${uShort(p.unit)}</label>
+    <label style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2);margin:0 4px">${p.unit === 'pc' ? 'Количество' : 'Вес'} · от ${uMin(p)} ${uShort(p.unit)}${p.stock != null ? ` · в наличии ${p.stock}` : ''}</label>
     <div class="weight-chips">
       ${qtyPresets(p).map(w => `<div class="wchip ${w === curGrams ? 'sel' : ''}" data-w="${w}" onclick="setGrams(${w})">${w} ${uShort(p.unit)}</div>`).join('')}
     </div>
@@ -2039,7 +2039,7 @@ function renderProductSheet() {
     </div>
     <a class="ref-link" style="margin:0 0 14px;justify-content:center;text-decoration:none" href="${ADMIN_CHAT}" target="_blank" rel="noopener">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><path d="M4 18v-7a8 8 0 0 1 16 0v7"/><path d="M20 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM4 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H4z"/></svg>
-      <span>Нужно больше ${MAX_GRAMS} ${uShort(p.unit)}? Напишите админу</span>
+      <span>Нужен крупный опт? Напишите админу</span>
     </a>
     <div class="tier-table" id="tierTable"></div>
     <div class="total-row"><span id="totalGrams"></span><b id="totalSum"></b></div>
