@@ -2590,7 +2590,7 @@ async def member_tracking_since(chat_id: int):
         """, chat_id)
 
 
-# ── награды чата (викторина, реф-гонка) ──────────────────────────────────────
+# ── награды чата (викторина, бонус за активность) ────────────────────────────
 async def chat_reward(user_id: int, name: str, amount: int) -> None:
     """Начислить бонус участнику чата в баланс (в locked — как приз, без вывода).
     Заводим счёт, если человек ещё не открывал приложение."""
@@ -2661,46 +2661,6 @@ async def quiz_reset_theme_cycle() -> None:
     """Круг тем пройден — начинаем заново (снова доступны все темы)."""
     async with _pool.acquire() as c:
         await c.execute("DELETE FROM quiz_used_themes")
-
-
-async def ref_race_activated(week_start, week_end) -> list:
-    """Приглашённые, АКТИВИРОВАВШИЕСЯ за неделю (забрали приветственный бонус —
-    запись в bonus_claims). По одной строке на друга + данные пригласившего.
-    Подписку каждого проверяет уже бот (getChatMember) — здесь только БД."""
-    async with _pool.acquire() as c:
-        rows = await c.fetch("""
-            SELECT u.ref_by AS referrer_id, u.tg_id AS friend_id,
-                   ref.name AS name, ref.username AS username
-            FROM users u
-            JOIN bonus_claims bc ON bc.user_id = u.tg_id
-            LEFT JOIN users ref  ON ref.tg_id = u.ref_by
-            WHERE u.ref_by IS NOT NULL
-              AND bc.created >= $1 AND bc.created < $2
-        """, week_start, week_end)
-    return [{"referrer_id": r["referrer_id"], "friend_id": r["friend_id"],
-             "name": r["name"] or "участник", "username": r["username"]} for r in rows]
-
-
-async def ref_race_award_record(week_start, user_id: int, cnt: int, prize: int,
-                                place: int = 1) -> bool:
-    """Идемпотентно за неделю начисляет приз призёру места `place` (1/2/3) и
-    фиксирует запись. True — приз начислен сейчас; False — это место за эту
-    неделю уже награждали."""
-    async with _pool.acquire() as c, c.transaction():
-        if await c.fetchval(
-                "SELECT 1 FROM ref_race_awards WHERE week_start=$1 AND place=$2",
-                week_start, place):
-            return False
-        await c.execute("INSERT INTO users(tg_id) VALUES($1) "
-                        "ON CONFLICT (tg_id) DO NOTHING", user_id)
-        await c.execute(f"UPDATE users SET balance=balance+$1, locked=locked+$1, "
-                        f"wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X} "
-                        f"WHERE tg_id=$2", prize, user_id)
-        await c.execute("""
-            INSERT INTO ref_race_awards(week_start, user_id, cnt, amount, place)
-            VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING
-        """, week_start, user_id, cnt, prize, place)
-    return True
 
 
 # ── общий кошелёк для внешних сервисов ───────────────────────────────────────

@@ -3687,8 +3687,10 @@ async function renderAdminLottery() {
   const dt = s => s ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
   const def = d.defaults || { days: 7, prizes: [3000, 2000, 1500, 1000, 500], per_ticket: 3 };
   const au = d.auto || {};
+  const cycleTxt = au.break_days ? `${au.round_days || 7} дн. розыгрыш → ${au.break_days} дн. перерыв, и снова`
+    : `каждую неделю (${au.round_days || 7} дн.), без перерыва — новый круг сразу после жеребьёвки`;
   const autoNote = au.on ? `<div class="bezel" style="margin-bottom:12px"><div class="bezel-core" style="padding:12px 14px">
-        <div style="font-size:12.5px;line-height:1.6;color:var(--muted)">🔁 <b style="color:var(--gold-soft)">Автоцикл включён</b>: ${au.round_days || 7} дн. розыгрыш → ${au.break_days || 7} дн. перерыв, и снова — сам, без запуска вручную.
+        <div style="font-size:12.5px;line-height:1.6;color:var(--muted)">🔁 <b style="color:var(--gold-soft)">Автоцикл включён</b>: ${cycleTxt} — сам, без запуска вручную.
         Призы цикла: <b style="color:var(--txt)">${(au.prizes || []).map(p => fmt(p)).join(' · ')} ₴</b>. Ручной запуск ниже — на случай нестандартного круга.</div>
       </div></div>` : '';
   const testBtn = `<button class="btn btn-ghost" style="margin-top:10px" onclick="lotDemoDraw()">🎬 Тестовый прогон анимации</button>
@@ -3715,7 +3717,7 @@ async function renderAdminLottery() {
       ${testBtn}${last}`;
   } else {
     b.innerHTML = autoNote + `
-      <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>${au.on ? ' (идёт неделя перерыва — следующий круг стартует автоматически)' : ''}. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Можно запустить круг вручную: задайте срок и призы и нажмите «Запустить». Жеребьёвка пройдёт <b>в последний день в 22:00</b> (Киев), а участникам придёт напоминание за час.</p>
+      <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>${au.on ? (au.break_days ? ' (идёт неделя перерыва — следующий круг стартует автоматически)' : ' (следующий круг стартует автоматически в течение минуты)') : ''}. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Можно запустить круг вручную: задайте срок и призы и нажмите «Запустить». Жеребьёвка пройдёт <b>в последний день в 22:00</b> (Киев), а участникам придёт напоминание за час.</p>
       <div class="field"><label>Длительность, дней</label><input id="lotDays" inputmode="numeric" value="${def.days}"></div>
       <div class="field"><label>Призы через запятую (1-е, 2-е, 3-е…), ₴</label><input id="lotPrizes" value="${(def.prizes || []).join(',')}"></div>
       <p class="note" style="margin:2px 0 10px">Одно число даётся за каждые ${def.per_ticket} приглашённых. Приз — за каждое выигравшее число.</p>
