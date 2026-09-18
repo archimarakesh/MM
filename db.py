@@ -29,7 +29,9 @@ DEFAULT_TIERS = [
     {"from": 1, "k": 1.00}, {"from": 10, "k": 0.90}, {"from": 25, "k": 0.80},
     {"from": 50, "k": 0.70}, {"from": 100, "k": 0.60},
 ]
-MAX_GRAMS = 100
+# Верхнего лимита на количество нет — ограничивает только наличие (stock) товара.
+# MAX_GRAMS остаётся высоким предохранителем от абсурдных/переполняющих значений.
+MAX_GRAMS = int(os.getenv("MAX_GRAMS", "100000") or 100000)
 MIN_GRAMS = 2             # минимальная покупка, грамм
 MAX_PHOTO_LEN = 400_000   # ~300 КБ картинки в base64
 MAX_PHOTOS = 4
@@ -825,8 +827,10 @@ async def _order_product_total(c, product_id: int, grams: int, lock: bool = Fals
         raise ValueError("Товар не найден")
     lo = int(p["min_qty"] if p["min_qty"] is not None else MIN_GRAMS)
     unit_word = "шт" if (p["unit"] or "g") == "pc" else "грамм"
-    if not lo <= grams <= MAX_GRAMS:
-        raise ValueError(f"Количество — от {lo} до {MAX_GRAMS} {unit_word}")
+    if grams < lo:
+        raise ValueError(f"Минимум — {lo} {unit_word}")
+    if grams > MAX_GRAMS:
+        raise ValueError("Слишком большое количество")
     if p["stock"] is not None and grams > p["stock"]:
         raise ValueError("Такого количества нет в наличии — напишите админу")
     return p, price_for(_product_row(p, {}), grams)
