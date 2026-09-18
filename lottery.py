@@ -19,10 +19,10 @@ PER_TICKET = int(os.getenv("LOTTERY_PER_TICKET", "3") or 3)
 # длительность одного круга в днях (таймер)
 DAYS = int(os.getenv("LOTTERY_DAYS", "7") or 7)
 
-# ── автоцикл: неделя розыгрыша / неделя перерыва (стартует сам, без админки) ──
+# ── автоцикл: розыгрыш каждую неделю, без перерыва (стартует сам, без админки) ──
 AUTO = os.getenv("LOTTERY_AUTO", "1") != "0"
-ROUND_DAYS = int(os.getenv("LOTTERY_ROUND_DAYS", "7") or 7)   # активная неделя
-BREAK_DAYS = int(os.getenv("LOTTERY_BREAK_DAYS", "7") or 7)   # неделя перерыва
+ROUND_DAYS = int(os.getenv("LOTTERY_ROUND_DAYS", "7") or 7)     # длительность круга
+BREAK_DAYS = int(os.getenv("LOTTERY_BREAK_DAYS", "0") or 0)     # 0 = без перерыва, новый круг сразу
 
 
 def _parse_prizes(raw: str) -> list[int]:
