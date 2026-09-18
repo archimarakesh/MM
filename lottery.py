@@ -17,7 +17,12 @@ import os
 # сколько подтверждённых рефералов даёт одно число (билет)
 PER_TICKET = int(os.getenv("LOTTERY_PER_TICKET", "3") or 3)
 # длительность одного круга в днях (таймер)
-DAYS = int(os.getenv("LOTTERY_DAYS", "14") or 14)
+DAYS = int(os.getenv("LOTTERY_DAYS", "7") or 7)
+
+# ── автоцикл: неделя розыгрыша / неделя перерыва (стартует сам, без админки) ──
+AUTO = os.getenv("LOTTERY_AUTO", "1") != "0"
+ROUND_DAYS = int(os.getenv("LOTTERY_ROUND_DAYS", "7") or 7)   # активная неделя
+BREAK_DAYS = int(os.getenv("LOTTERY_BREAK_DAYS", "7") or 7)   # неделя перерыва
 
 
 def _parse_prizes(raw: str) -> list[int]:
@@ -29,9 +34,12 @@ def _parse_prizes(raw: str) -> list[int]:
     return out
 
 
-# призовые места сверху вниз (1-е, 2-е, 3-е …)
-PRIZES = _parse_prizes(os.getenv("LOTTERY_PRIZES", "5000,2500,1000")) or [5000, 2500, 1000]
+# призовые места сверху вниз (1-е, 2-е, 3-е …). Фонд 8000 ₴ на 5 мест.
+PRIZES = _parse_prizes(os.getenv("LOTTERY_PRIZES", "3000,2000,1500,1000,500")) \
+    or [3000, 2000, 1500, 1000, 500]
 PRIZES_STR = ",".join(map(str, PRIZES))
+# призы автоцикла (по умолчанию те же 8000 ₴ на 5 мест)
+AUTO_PRIZES = _parse_prizes(os.getenv("LOTTERY_AUTO_PRIZES", "")) or list(PRIZES)
 
 
 def tickets_for(confirmed: int) -> int:

@@ -1533,10 +1533,13 @@ function renderLottery() {
 }
 function lotPodium(prizes) {
   const order = [1, 0, 2], places = ['2 место', '1 место', '3 место'], cls = ['p2', 'p1', 'p3'];
-  return `<div class="lot-podium">` + order.map((idx, i) => {
+  const podium = `<div class="lot-podium">` + order.map((idx, i) => {
     if (prizes[idx] == null) return '';
     return `<div class="lot-pz ${cls[i]}"><div class="disc"><div><div class="amt">${fmt(prizes[idx])}</div><div class="cur">₴</div></div></div><div class="plc">${places[i]}</div></div>`;
   }).join('') + `</div>`;
+  // призы за 4-е место и ниже — отдельной строкой под пьедесталом
+  const extras = (prizes || []).slice(3).map((p, i) => `<b>${i + 4}-е</b> ${fmt(p)} ₴`).join(' · ');
+  return podium + (extras ? `<div class="lot-hint" style="text-align:center;margin-top:8px">и ${extras}</div>` : '');
 }
 function renderLotDraw() {
   const me = LOT.me, st = LOT.stats, need = me.need || 3;
@@ -1615,7 +1618,7 @@ function renderLotTasks() {
 }
 function lotShareRef() {
   haptic('medium'); const url = LOT?.ref_link || ''; if (!url) return;
-  const text = '🎰 Розыгрыш в Magic Market! Забери 100 ₴ приветственный бонус и участвуй в лотерее — призы до 5000 ₴ на баланс.';
+  const text = '🎰 Розыгрыш в Magic Market! Забери 100 ₴ приветственный бонус и участвуй в лотерее — призы до 3000 ₴ на баланс.';
   const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
   if (tg?.openTelegramLink) tg.openTelegramLink(share); else window.open(share, '_blank');
 }
@@ -1835,9 +1838,11 @@ function lotDemoDraw() {
   lotResumeAudio();
   const r5 = () => Math.floor(10000 + Math.random() * 90000);
   const demo = { round: 0, winners: [
-    { place: 1, number: r5(), prize: 5000, name: 'Вы', is_me: true, avatar: (tg?.initDataUnsafe?.user?.photo_url || null) },
-    { place: 2, number: r5(), prize: 2500, name: 'Игрок №2', is_me: false, avatar: null },
-    { place: 3, number: r5(), prize: 1000, name: 'Игрок №3', is_me: false, avatar: null },
+    { place: 1, number: r5(), prize: 3000, name: 'Вы', is_me: true, avatar: (tg?.initDataUnsafe?.user?.photo_url || null) },
+    { place: 2, number: r5(), prize: 2000, name: 'Игрок №2', is_me: false, avatar: null },
+    { place: 3, number: r5(), prize: 1500, name: 'Игрок №3', is_me: false, avatar: null },
+    { place: 4, number: r5(), prize: 1000, name: 'Игрок №4', is_me: false, avatar: null },
+    { place: 5, number: r5(), prize: 500, name: 'Игрок №5', is_me: false, avatar: null },
   ]};
   window.__lotDemo = true;
   playLotDraw(demo);
@@ -3680,7 +3685,12 @@ async function renderAdminLottery() {
   catch (e) { if (adminTab === 'lottery') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; return; }
   if (adminTab !== 'lottery') return;
   const dt = s => s ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
-  const def = d.defaults || { days: 14, prizes: [5000, 2500, 1000], per_ticket: 3 };
+  const def = d.defaults || { days: 7, prizes: [3000, 2000, 1500, 1000, 500], per_ticket: 3 };
+  const au = d.auto || {};
+  const autoNote = au.on ? `<div class="bezel" style="margin-bottom:12px"><div class="bezel-core" style="padding:12px 14px">
+        <div style="font-size:12.5px;line-height:1.6;color:var(--muted)">🔁 <b style="color:var(--gold-soft)">Автоцикл включён</b>: ${au.round_days || 7} дн. розыгрыш → ${au.break_days || 7} дн. перерыв, и снова — сам, без запуска вручную.
+        Призы цикла: <b style="color:var(--txt)">${(au.prizes || []).map(p => fmt(p)).join(' · ')} ₴</b>. Ручной запуск ниже — на случай нестандартного круга.</div>
+      </div></div>` : '';
   const testBtn = `<button class="btn btn-ghost" style="margin-top:10px" onclick="lotDemoDraw()">🎬 Тестовый прогон анимации</button>
       <p class="note" style="margin:6px 0 0">Демо-жеребьёвка со звуком и аватаром — без начислений и без влияния на реальный розыгрыш.</p>`;
   let last = '';
@@ -3690,13 +3700,13 @@ async function renderAdminLottery() {
   }
   if (d.running) {
     const r = d.round;
-    b.innerHTML = `
+    b.innerHTML = autoNote + `
       <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
         <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:15px">Розыгрыш идёт</h2><span>до ${dt(r.deadline)}</span></div>
         <div class="admin-stats">
           <div><b>${fmt(d.stats.participants)}</b><span>участников</span></div>
           <div><b>${fmt(d.stats.tickets)}</b><span>чисел в игре</span></div>
-          <div><b style="color:var(--gold-soft)">${(r.prizes || []).map(p => fmt(p)).join(' · ')} ₴</b><span>призы (1-2-3 место)</span></div>
+          <div><b style="color:var(--gold-soft)">${(r.prizes || []).map(p => fmt(p)).join(' · ')} ₴</b><span>призы по местам</span></div>
         </div>
       </div></div>
       <p class="note" style="margin:0 0 10px">Отсчёт идёт, рефералы засчитываются. Можно провести розыгрыш прямо сейчас (иначе он пройдёт сам в момент дедлайна) или отменить круг без розыгрыша.</p>
@@ -3704,8 +3714,8 @@ async function renderAdminLottery() {
       <button class="btn btn-ghost" style="margin-top:10px" onclick="lotAdminCancel()">Отменить круг (без розыгрыша)</button>
       ${testBtn}${last}`;
   } else {
-    b.innerHTML = `
-      <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Задайте срок и призы и нажмите «Запустить». Жеребьёвка пройдёт <b>в последний день в 22:00</b> (Киев), а участникам придёт напоминание за час.</p>
+    b.innerHTML = autoNote + `
+      <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>${au.on ? ' (идёт неделя перерыва — следующий круг стартует автоматически)' : ''}. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Можно запустить круг вручную: задайте срок и призы и нажмите «Запустить». Жеребьёвка пройдёт <b>в последний день в 22:00</b> (Киев), а участникам придёт напоминание за час.</p>
       <div class="field"><label>Длительность, дней</label><input id="lotDays" inputmode="numeric" value="${def.days}"></div>
       <div class="field"><label>Призы через запятую (1-е, 2-е, 3-е…), ₴</label><input id="lotPrizes" value="${(def.prizes || []).join(',')}"></div>
       <p class="note" style="margin:2px 0 10px">Одно число даётся за каждые ${def.per_ticket} приглашённых. Приз — за каждое выигравшее число.</p>
