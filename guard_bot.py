@@ -884,12 +884,10 @@ async def run(notify=None, on_ban=None, on_unban=None):
         if not rows:
             await message.answer("На этой неделе очков пока никто не набрал.")
             return
-        medals = ["🥇", "🥈", "🥉"]
         lines = [f"🏆 <b>Топ активных за неделю</b> (с {start.strftime('%d.%m')})", ""]
         for i, r in enumerate(rows):
-            mark = medals[i] if i < 3 else f"{i + 1}."
             prize = f" · <b>{ACTIVITY_PRIZES[i]} ₴</b>" if i < len(ACTIVITY_PRIZES) else ""
-            lines.append(f"{mark} {_esc(r['name'])} — {r['score']} очк.{prize}")
+            lines.append(f"{i + 1}. {_esc(r['name'])} — {r['score']} очк.{prize}")
         lines += ["", "Награждение — в понедельник в 12:00. Считаются содержательные "
                       "сообщения; флуд и нарушения снижают счёт."]
         await message.answer("\n".join(lines), parse_mode="HTML")
@@ -1024,12 +1022,10 @@ async def run(notify=None, on_ban=None, on_unban=None):
                 await asyncio.sleep(300)
 
     async def announce_winners(winners, start, end):
-        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         lines = [f"🏆 <b>Самые активные за неделю</b> "
                  f"({start.strftime('%d.%m')}–{end.strftime('%d.%m')})", ""]
         for w in winners:
-            mark = medals[w['place'] - 1] if 1 <= w['place'] <= len(medals) else f"{w['place']}."
-            lines.append(f"{mark} <b>{_esc(w['name'])}</b> — "
+            lines.append(f"{w['place']}. <b>{_esc(w['name'])}</b> — "
                          f"<b>{w['amount']} ₴</b> на баланс "
                          f"<i>({w['points']} сообщ., дней в чате: {w['days']})</i>")
         lines += ["", "Бонус уже на балансе — можно потратить в магазине.",
@@ -1240,9 +1236,8 @@ async def run(notify=None, on_ban=None, on_unban=None):
                         await db.chat_reward(win_id, names[win_id], QUIZ_WIN_PRIZE)
                     except Exception:
                         log.exception("Викторина: приз победителю не начислен")
-                medals = ["🥇", "🥈", "🥉"]
                 board = "\n".join(
-                    f"{medals[i] if i < 3 else f'{i+1}.'} {_esc(names[u])} — {sc} прав."
+                    f"{i + 1}. {_esc(names[u])} — {sc} прав."
                     for i, (u, sc) in enumerate(order))
                 tail = ("🧪 Тест окончен — призы не начислялись."
                         if dry else f"👑 Победитель дня: <b>{_esc(names[win_id])}</b> "

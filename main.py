@@ -830,17 +830,9 @@ async def broadcast_all(text: str, photo: str = None, button: tuple = None) -> i
 
 
 # ── розыгрыш (лотерея): выплаты и авто-жеребьёвка по таймеру ──────────────────
-_PLACE_ICON = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-
-
-def _place_icon(place: int) -> str:
-    """Значок места: медали за 1-3, цифры за 4-10, дальше «N место»."""
-    return _PLACE_ICON[place - 1] if 1 <= place <= len(_PLACE_ICON) else f"{place}-е"
-
-
 def _prizes_block(prizes) -> str:
-    """Красивый столбик призов по местам для сообщений бота."""
-    return "\n".join(f"{_place_icon(i + 1)} <b>{fmt_uah(p)} ₴</b>"
+    """Столбик призов по местам для сообщений бота: «1 место — 500 ₴»."""
+    return "\n".join(f"{i + 1} место — <b>{fmt_uah(p)} ₴</b>"
                      for i, p in enumerate(prizes))
 
 
@@ -881,7 +873,7 @@ async def _run_lottery_draw(rnd: dict) -> None:
         except Exception:
             log.exception("Лотерея: аватар победителя не получен")
         await notify(w["user_id"],
-                     f"{_place_icon(w['place'])} <b>Вы в призах Рулетки!</b>\n\n"
+                     f"🎉 <b>Вы в призах Рулетки!</b>\n\n"
                      f"Ваше число <b>№{w['number']:05d}</b> заняло "
                      f"<b>{w['place']}-е место</b> из {len(prizes)}.\n"
                      f"🎁 Приз <b>{fmt_uah(w['prize'])} ₴</b> уже зачислен на баланс бонусом.\n\n"
@@ -891,7 +883,7 @@ async def _run_lottery_draw(rnd: dict) -> None:
     if ADMIN_ID:
         if winners:
             body = "\n".join(
-                f"{_place_icon(w['place'])} {w.get('name') or 'участник'} · "
+                f"{w['place']}. {w.get('name') or 'участник'} · "
                 f"№{w['number']:05d} — <b>{fmt_uah(w['prize'])} ₴</b>" for w in winners)
             fund = fmt_uah(sum(int(w["prize"]) for w in winners))
             msg = (f"🎰 <b>Розыгрыш #{rnd['id']} проведён!</b>\n\n{body}\n\n"
