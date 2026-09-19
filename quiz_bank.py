@@ -477,6 +477,22 @@ THEMES = {
     ]},
 }
 
+# Дополнительный банк (~100 вопросов на тему) — расширяет темы, если модуль есть.
+# Пропускаем вопросы с уже существующим текстом, чтобы не было дублей.
+try:
+    from quiz_extra import MORE as _MORE
+    for _k, _qs in _MORE.items():
+        if _k not in THEMES:
+            continue
+        _seen = {x[0].strip().lower() for x in THEMES[_k]["questions"]}
+        for _q in _qs:
+            _key = _q[0].strip().lower()
+            if _key not in _seen:
+                THEMES[_k]["questions"].append(_q)
+                _seen.add(_key)
+except Exception:
+    pass
+
 # «Всё подряд» — тема-микс: вопросы собираются из всех остальных
 MIXED_KEY = "mixed"
 MIXED_TITLE = "Всё подряд"
