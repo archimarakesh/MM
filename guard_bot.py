@@ -558,16 +558,17 @@ async def run(notify=None, on_ban=None, on_unban=None):
     async def cmd_chatid(message: Message):
         await message.answer(f"ID этого чата: <code>{message.chat.id}</code>", parse_mode="HTML")
 
-    @dp.message(Command("quiz", "викторина"))
-    async def cmd_quiz(message: Message):
-        """Остаток свежих (не задававшихся) вопросов по темам — только владельцу."""
+    @dp.message(Command("quizleft", "остаток", "викторины"))
+    async def cmd_quizleft(message: Message):
+        """Сколько викторин ещё осталось до сброса — остаток свежих (не
+        задававшихся) вопросов по темам. Только владельцу."""
         if message.from_user.id != GUARD_ADMIN_ID:
             return
         try:
             used = await db.quiz_used_themes()
         except Exception:
             used = set()
-        lines, total_left = ["🧠 <b>Остаток вопросов</b> (ещё не задавались):"], 0
+        lines, total_left = ["🧠 <b>Сколько викторин осталось</b>", ""], 0
         for key in qb.theme_keys():
             title, emoji = qb.theme_meta(key)
             qs = qb.theme_questions(key)
@@ -579,11 +580,14 @@ async def run(notify=None, on_ban=None, on_unban=None):
             total_left += left
             days = left // QUIZ_QUESTIONS if QUIZ_QUESTIONS else 0
             lines.append(
-                f"{emoji} {_esc(title)}: <b>{left}</b> из {len(qs)}"
-                + (f" · ~{days} викт." if days else " · на подходе сброс")
-                + (" ✓пройдена в круге" if key in used else ""))
-        lines.append(f"\nВсего свежих: <b>{total_left}</b> · по {QUIZ_QUESTIONS} вопр./день. "
-                     f"Когда в теме кончаются — круг по ней сбрасывается автоматически.")
+                f"{emoji} {_esc(title)}: <b>{left}</b> из {len(qs)} вопр."
+                + (f" · хватит на <b>~{days}</b> викт." if days else " · скоро сброс")
+                + (" · ✓ прошла в этом круге тем" if key in used else ""))
+        total_quiz = total_left // QUIZ_QUESTIONS if QUIZ_QUESTIONS else 0
+        lines.append(f"\n📊 Всего свежих вопросов: <b>{total_left}</b> — это примерно "
+                     f"<b>{total_quiz}</b> викторин по {QUIZ_QUESTIONS} вопросов.")
+        lines.append("Когда в теме кончаются свежие вопросы — она сбрасывается "
+                     "и вопросы могут повторяться. Пополнить банк — в quiz_bank.py.")
         await message.answer("\n".join(lines), parse_mode="HTML")
 
     @dp.message(Command("rules", "правила"))
