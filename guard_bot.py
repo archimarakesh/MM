@@ -82,8 +82,8 @@ RIDDLE_PRIZE = int(os.getenv("RIDDLE_PRIZE", "50") or 50)       # приз за 
 RIDDLE_PER_DAY = int(os.getenv("RIDDLE_PER_DAY", "3") or 3)     # сколько загадок в день
 RIDDLE_OPEN_SEC = int(os.getenv("RIDDLE_OPEN_SEC", str(15 * 60)) or 15 * 60)  # окно на разгадку
 RIDDLE_HINT_SEC = int(os.getenv("RIDDLE_HINT_SEC", str(7 * 60)) or 7 * 60)    # когда давать подсказку
-RIDDLE_START = os.getenv("RIDDLE_START", "11:00")              # окно публикаций: начало
-RIDDLE_END = os.getenv("RIDDLE_END", "22:00")                  # окно публикаций: конец
+RIDDLE_START = os.getenv("RIDDLE_START", "09:00")              # окно публикаций: начало
+RIDDLE_END = os.getenv("RIDDLE_END", "23:00")                  # окно публикаций: конец
 
 RULES_TEXT = (
     "📜 <b>Правила Magic Market</b>\n\n"
