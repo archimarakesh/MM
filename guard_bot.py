@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 import award_image
 import db
 import quiz_bank as qb
+import riddle_bank as rb
 
 KYIV = ZoneInfo("Europe/Kyiv")
 ACTIVITY_PRIZES = [500, 400, 300, 200, 100]   # призы за 1-5 место, ₴ на баланс (бонусные, как приветственные)
@@ -74,6 +75,16 @@ QUIZ_POLL_SEC = int(os.getenv("QUIZ_POLL_SEC", str(10 * 60)) or 10 * 60)  # го
 QUIZ_Q_SEC = int(os.getenv("QUIZ_Q_SEC", "150") or 150)     # время на вопрос
 # сначала показываем текст вопроса, через QUIZ_READ_SEC сек — опрос с вариантами
 QUIZ_READ_SEC = int(os.getenv("QUIZ_READ_SEC", "5") or 5)
+
+# ── загадки в чате (бот ловит ответ текстом) ────────────────────────────────
+RIDDLE_ENABLED = os.getenv("RIDDLE_ENABLED", "1") not in ("0", "false", "")
+RIDDLE_PRIZE = int(os.getenv("RIDDLE_PRIZE", "50") or 50)       # приз за верный ответ, ₴
+RIDDLE_PER_DAY = int(os.getenv("RIDDLE_PER_DAY", "3") or 3)     # сколько загадок в день
+RIDDLE_OPEN_SEC = int(os.getenv("RIDDLE_OPEN_SEC", str(15 * 60)) or 15 * 60)  # окно на разгадку
+RIDDLE_HINT_SEC = int(os.getenv("RIDDLE_HINT_SEC", str(7 * 60)) or 7 * 60)    # когда давать подсказку
+RIDDLE_START = os.getenv("RIDDLE_START", "11:00")              # окно публикаций: начало
+RIDDLE_END = os.getenv("RIDDLE_END", "22:00")                  # окно публикаций: конец
+
 RULES_TEXT = (
     "📜 <b>Правила Magic Market</b>\n\n"
     "1. Только 18+. Уважайте участников — без оскорблений, токсичности и разжигания.\n"
@@ -1284,6 +1295,165 @@ async def run(notify=None, on_ban=None, on_unban=None):
                 log.exception("Ошибка викторины")
                 await asyncio.sleep(300)
 
+    # ── загадки: бот кидает загадку, первый угадавший в чате берёт приз ──────
+    riddle_state = {"active": False, "solved": False, "answers": [],
+                    "answer": None, "chat": None}
+    riddle_busy = {"on": False}
+
+    def _riddle_hint(answer: str) -> str:
+        a = (answer or "").strip()
+        first = a[0].upper() if a else "?"
+        return f"ответ из <b>{len(a)}</b> букв, начинается на «<b>{_esc(first)}</b>»"
+
+    async def pick_riddle(dry=False):
+        try:
+            used = await db.riddle_used_ids()
+        except Exception:
+            used = set()
+        pool = [(rb.rid(t), t, a) for (t, a) in rb.RIDDLES]
+        fresh = [x for x in pool if x[0] not in used]
+        if not fresh:                                  # круг пройден — начинаем заново
+            if not dry:
+                try:
+                    await db.riddle_reset_cycle()
+                except Exception:
+                    log.exception("Загадки: сброс круга не удался")
+            fresh = pool
+        rid_, text, answers = random.choice(fresh)
+        if not dry:
+            try:
+                await db.riddle_mark_used(rid_)
+            except Exception:
+                log.exception("Загадки: пометка использованной не удалась")
+        return rid_, text, answers
+
+    async def run_riddle(dry=False, chat=None):
+        if riddle_busy["on"]:
+            return
+        _, text, answers = await pick_riddle(dry=dry)
+        canonical = answers[0]
+        target = chat or (int(RULES_CHAT_ID) if RULES_CHAT_ID else None)
+        if not target:
+            return
+        riddle_busy["on"] = True
+        if not dry:
+            riddle_state.update({"active": True, "solved": False, "answers": answers,
+                                 "answer": canonical, "chat": target})
+        try:
+            head = "🧪 <b>Тест загадки</b> (приз не начисляется)\n\n" if dry else ""
+            await bot.send_message(
+                target,
+                head + f"🧩 <b>Загадка</b> — за верный ответ <b>+{RIDDLE_PRIZE} ₴</b> на баланс!\n\n"
+                f"{_esc(text)}\n\n"
+                "<i>Пиши ответ прямо в чат — первый угадавший забирает приз.</i>",
+                parse_mode="HTML")
+            await asyncio.sleep(8 if dry else RIDDLE_HINT_SEC)
+            if dry or (riddle_state["active"] and not riddle_state["solved"]):
+                await bot.send_message(target, f"💡 Подсказка: {_riddle_hint(canonical)}",
+                                       parse_mode="HTML")
+            await asyncio.sleep(8 if dry else max(0, RIDDLE_OPEN_SEC - RIDDLE_HINT_SEC))
+            if dry:
+                await bot.send_message(target, f"✅ Ответ был: <b>{_esc(canonical)}</b> (тест окончен).",
+                                       parse_mode="HTML")
+            elif riddle_state["active"] and not riddle_state["solved"]:
+                await bot.send_message(
+                    target,
+                    f"⏰ Время вышло! Никто не разгадал.\nПравильный ответ: <b>{_esc(canonical)}</b>",
+                    parse_mode="HTML")
+        except Exception:
+            log.exception("Загадки: ошибка проведения")
+        finally:
+            if not dry:
+                riddle_state["active"] = False
+            riddle_busy["on"] = False
+
+    def _riddle_day_slots(day):
+        """RIDDLE_PER_DAY разных минут в окне [RIDDLE_START..RIDDLE_END], не ближе
+        60 мин друг к другу и не рядом с викториной. Детерминированы по дате —
+        стабильны в течение дня (переживают рестарт), но каждый день новые."""
+        try:
+            sh, sm = map(int, RIDDLE_START.split(":"))
+            eh, em = map(int, RIDDLE_END.split(":"))
+            lo, hi = sh * 60 + sm, eh * 60 + em
+        except ValueError:
+            lo, hi = 11 * 60, 22 * 60
+        try:
+            qh, qm = map(int, QUIZ_TIME.split(":"))
+            quiz_min = qh * 60 + qm
+        except ValueError:
+            quiz_min = 18 * 60
+        rnd = random.Random("riddle-" + day.isoformat())
+        picks = []
+        for _ in range(2000):
+            if len(picks) >= RIDDLE_PER_DAY:
+                break
+            m = rnd.randint(lo, hi)
+            if any(abs(m - p) < 60 for p in picks):
+                continue
+            if QUIZ_ENABLED and abs(m - quiz_min) < 40:
+                continue
+            picks.append(m)
+        picks.sort()
+        return picks
+
+    async def riddle_scheduler():
+        if not (RULES_CHAT_ID and RIDDLE_ENABLED):
+            log.info("Загадки выключены (нет чата или RIDDLE_ENABLED=0)")
+            return
+        await asyncio.sleep(20)
+        while True:
+            try:
+                now = datetime.now(KYIV)
+                day = now.date()
+                nxt_slot = None
+                for i, mins in enumerate(_riddle_day_slots(day)):
+                    t = now.replace(hour=mins // 60, minute=mins % 60, second=0, microsecond=0)
+                    if t > now:
+                        nxt_slot = (i, t)
+                        break
+                if nxt_slot is None:                    # на сегодня всё — ждём новый день
+                    nxt = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+                    await asyncio.sleep(max(30, (nxt - now).total_seconds()))
+                    continue
+                i, t = nxt_slot
+                await asyncio.sleep(max(5, (t - now).total_seconds()))
+                if await db.riddle_claim_slot(day, i):  # защита от повторного запуска
+                    await run_riddle()
+            except Exception:
+                log.exception("Ошибка планировщика загадок")
+                await asyncio.sleep(300)
+
+    @dp.message(Command("riddle", "загадка"))
+    async def cmd_riddle(message: Message):
+        """Ручной запуск загадки — только владелец. В ЛС — тест без начисления."""
+        if message.from_user.id != GUARD_ADMIN_ID:
+            return
+        if message.chat.type == "private":
+            await message.answer("🧪 Тест загадки здесь, в ЛС (без приза).")
+            asyncio.create_task(run_riddle(dry=True, chat=message.chat.id))
+        else:
+            if riddle_state["active"]:
+                await message.answer("Загадка уже идёт 🙂")
+                return
+            await message.answer("Запускаю загадку в чате 🧩")
+            asyncio.create_task(run_riddle())
+
+    @dp.message(Command("riddleleft", "загадки"))
+    async def cmd_riddleleft(message: Message):
+        """Сколько загадок осталось в текущем круге — только владельцу."""
+        if message.from_user.id != GUARD_ADMIN_ID:
+            return
+        try:
+            used = len(await db.riddle_used_ids())
+        except Exception:
+            used = 0
+        total = rb.count()
+        await message.answer(
+            f"🧩 <b>Загадки</b>\nВсего в банке: <b>{total}</b>\n"
+            f"Задано в этом круге: <b>{used}</b>\nОсталось свежих: <b>{max(0, total - used)}</b>\n"
+            f"Когда круг пройден — загадки начинают повторяться. Приз за ответ: {RIDDLE_PRIZE} ₴.",
+            parse_mode="HTML")
+
     @dp.message(Command("quiz", "викторина"))
     async def cmd_quiz(message: Message):
         """Ручной запуск викторины — только админ.
@@ -1331,6 +1501,24 @@ async def run(notify=None, on_ban=None, on_unban=None):
         # по-прежнему не касается
         if uid != GUARD_ADMIN_ID:
             await track_activity(uid, message.from_user.full_name, message)
+        # загадка: первый угадавший (кроме владельца) забирает приз
+        if riddle_state["active"] and not riddle_state["solved"] and message.text \
+                and uid != GUARD_ADMIN_ID and rb.matches(message.text, riddle_state["answers"]):
+            riddle_state["solved"] = True
+            riddle_state["active"] = False
+            try:
+                await db.chat_reward(uid, message.from_user.full_name, RIDDLE_PRIZE)
+            except Exception:
+                log.exception("Загадки: приз не начислен")
+            try:
+                await bot.send_message(
+                    riddle_state["chat"] or message.chat.id,
+                    f"🎉 <b>{_esc(message.from_user.full_name)}</b> разгадал(а) загадку!\n"
+                    f"Ответ: <b>{_esc(riddle_state['answer'])}</b> · <b>+{RIDDLE_PRIZE} ₴</b> на баланс.",
+                    parse_mode="HTML")
+            except Exception:
+                log.exception("Загадки: анонс победителя не отправлен")
+            return
         if await is_admin(message.chat.id, uid):
             return
         key = (message.chat.id, uid)
@@ -1447,6 +1635,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
     contest = asyncio.create_task(contest_poster())
     snaps = asyncio.create_task(snapshot_loop())
     quiz = asyncio.create_task(quiz_scheduler())
+    riddles = asyncio.create_task(riddle_scheduler())
     await initial_snapshot()
     # chat_member нужно запросить явно: aiogram включит его в allowed_updates,
     # только если тип обновления зарегистрирован (у нас есть @dp.chat_member)
@@ -1461,6 +1650,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
         contest.cancel()
         snaps.cancel()
         quiz.cancel()
+        riddles.cancel()
 
 
 if __name__ == "__main__":

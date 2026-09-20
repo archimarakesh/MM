@@ -392,6 +392,16 @@ async def init():
             CREATE TABLE IF NOT EXISTS quiz_used_themes(
                 theme   TEXT PRIMARY KEY,
                 used_at TIMESTAMPTZ NOT NULL DEFAULT now());
+            -- загадки: какие уже задавали в текущем круге (идут по кругу)
+            CREATE TABLE IF NOT EXISTS riddle_used(
+                rid     TEXT PRIMARY KEY,
+                used_at TIMESTAMPTZ NOT NULL DEFAULT now());
+            -- слоты загадок: (день, номер слота) — защита от повторного запуска
+            CREATE TABLE IF NOT EXISTS riddle_slots(
+                day   DATE NOT NULL,
+                slot  INT  NOT NULL,
+                fired TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY(day, slot));
             -- недельная реферальная гонка: один победитель за неделю
             CREATE TABLE IF NOT EXISTS ref_race_awards(
                 week_start DATE   PRIMARY KEY,
@@ -2661,6 +2671,36 @@ async def quiz_reset_theme_cycle() -> None:
     """Круг тем пройден — начинаем заново (снова доступны все темы)."""
     async with _pool.acquire() as c:
         await c.execute("DELETE FROM quiz_used_themes")
+
+
+# ── загадки в чате ───────────────────────────────────────────────────────────
+async def riddle_used_ids() -> set:
+    """id загадок, уже заданных в текущем круге (их пропускаем при выборе)."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch("SELECT rid FROM riddle_used")
+    return {r["rid"] for r in rows}
+
+
+async def riddle_mark_used(rid: str) -> None:
+    async with _pool.acquire() as c:
+        await c.execute("INSERT INTO riddle_used(rid) VALUES($1) "
+                        "ON CONFLICT (rid) DO NOTHING", rid)
+
+
+async def riddle_reset_cycle() -> None:
+    """Круг загадок пройден — начинаем заново (снова доступны все загадки)."""
+    async with _pool.acquire() as c:
+        await c.execute("DELETE FROM riddle_used")
+
+
+async def riddle_claim_slot(day, slot: int) -> bool:
+    """Резервирует слот загадки на день. True — слот наш (можно постить),
+    False — этот слот уже отработан (защита от дублей при рестарте)."""
+    async with _pool.acquire() as c:
+        got = await c.fetchval(
+            "INSERT INTO riddle_slots(day, slot) VALUES($1,$2) "
+            "ON CONFLICT (day, slot) DO NOTHING RETURNING slot", day, slot)
+    return got is not None
 
 
 # ── общий кошелёк для внешних сервисов ───────────────────────────────────────
