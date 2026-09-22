@@ -2162,6 +2162,7 @@ function orderPaySplit(total) {
   return { pct, real, bonusUse, realNeed, enough: real >= realNeed };
 }
 function openCheckout() {
+  clearPendingOrder();
   resetCheckoutAddr();
   const total = priceFor(curProduct, curGrams);
   payMethod = 'balance';
@@ -2193,7 +2194,8 @@ async function placeOrder() {
   if (coWhSel) { ship.branch = coWhSel.desc; ship.wh_ref = coWhSel.ref; ship.postomat = coWhSel.postomat; }
   const sp = orderPaySplit(total);
   if (!sp.enough) {
-    toast(`Бонусом можно оплатить до ${sp.pct}% — нужно реальными ${fmt(sp.realNeed)} ₴`);
+    savePendingOrder(ship);
+    toast(`Бонусом можно оплатить до ${sp.pct}% — нужно реальными ${fmt(sp.realNeed)} ₴. Пополните — оформим заказ автоматически`);
     closeSheets(true); return go('topup');
   }
   if (API.ok) {
@@ -2467,6 +2469,41 @@ function syncBalance() {
 }
 let tuMethod = '', tuReceipt = '', INV = null, invTimer = null, invPoll = null;
 let CARD = null, cardTimer = null, cardPoll = null;
+const PENDING_ORDER_KEY = 'mm_pending_order', PENDING_ORDER_TTL = 30 * 60 * 1000;
+function savePendingOrder(ship) {
+  try {
+    sessionStorage.setItem(PENDING_ORDER_KEY, JSON.stringify({
+      product_id: curProduct.id, product_name: curProduct.name, grams: curGrams, ship, ts: Date.now(),
+    }));
+  } catch (e) {}
+}
+function loadPendingOrder() {
+  try {
+    const raw = sessionStorage.getItem(PENDING_ORDER_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (!p || Date.now() - p.ts > PENDING_ORDER_TTL) { clearPendingOrder(); return null; }
+    return p;
+  } catch (e) { return null; }
+}
+function clearPendingOrder() {
+  try { sessionStorage.removeItem(PENDING_ORDER_KEY); } catch (e) {}
+}
+/* После пополнения баланса — если человек ушёл в пополнение из-за нехватки средств
+   на конкретный заказ, дооформляем этот заказ сами, без повторного нажатия. */
+async function tryCompletePendingOrder() {
+  const p = loadPendingOrder();
+  if (!p || !API.ok) return false;
+  let d;
+  try { d = await API.call('/api/order', { product_id: p.product_id, product_name: p.product_name, grams: p.grams, pay: 'balance', ship: p.ship }); }
+  catch (e) { return false; } /* реальных всё ещё не хватает — оставляем pending, попробуем при следующем пополнении */
+  clearPendingOrder();
+  applySnapshot(d);
+  closeSheets(true); haptic('medium');
+  toast(d.order_cashback ? `Заказ оформлен ✦ Кэшбэк +${fmt(d.order_cashback)} ₴ бонусом` : 'Заказ оформлен ✦');
+  go('history');
+  return true;
+}
 let RATES = {}, RDISP = {}, ratesTs = 0;   // курсы для предпросмотра суммы в крипте
 async function loadRates(force) {
   if (!API.ok) return;
@@ -2679,6 +2716,7 @@ async function checkInvoice(manual) {
         toast(`Заказ ${wasOrder} оплачен ✅`);
         go('history');
       } else {
+        if (await tryCompletePendingOrder()) return;
         if (document.getElementById('view-topup').classList.contains('active')) renderTopup();
         toast('Оплата получена — баланс пополнен ✅');
       }
@@ -2721,8 +2759,10 @@ async function checkCardPay(manual) {
     if (r.paid) {
       CARD = false; clearInterval(cardPoll);
       await serverSync();
+      haptic('medium');
+      if (await tryCompletePendingOrder()) return;
       if (document.getElementById('view-topup').classList.contains('active')) renderTopup();
-      haptic('medium'); toast('Оплата картой получена — баланс пополнен ✅');
+      toast('Оплата картой получена — баланс пополнен ✅');
     } else if (manual) {
       toast('Оплата пока не поступила — обычно до пары минут');
     }
