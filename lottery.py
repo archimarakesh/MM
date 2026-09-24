@@ -19,8 +19,10 @@ PER_TICKET = int(os.getenv("LOTTERY_PER_TICKET", "3") or 3)
 # длительность одного круга в днях (таймер)
 DAYS = int(os.getenv("LOTTERY_DAYS", "7") or 7)
 
-# ── автоцикл: розыгрыш каждую неделю, без перерыва (стартует сам, без админки) ──
-AUTO = os.getenv("LOTTERY_AUTO", "1") != "0"
+# ── автоцикл: раньше стартовал сам каждую неделю, без админки.
+#    Выключен по умолчанию (упала популярность) — круги теперь только вручную из админки.
+#    Вернуть автозапуск: LOTTERY_AUTO=1 в переменных окружения. ──
+AUTO = os.getenv("LOTTERY_AUTO", "0") != "0"
 ROUND_DAYS = int(os.getenv("LOTTERY_ROUND_DAYS", "7") or 7)     # длительность круга
 BREAK_DAYS = int(os.getenv("LOTTERY_BREAK_DAYS", "0") or 0)     # 0 = без перерыва, новый круг сразу
 
