@@ -1329,8 +1329,12 @@ async def api_order(request: Request):
     u = tg_user(request)
     b = await request.json()
     ship = dict(b.get("ship") or {})
-    ship_txt = (f"{esc(ship.get('name'))} · {esc(ship.get('phone'))}\n"
-                f"{esc(ship.get('city'))}, НП №{esc(ship.get('np'))}")
+    if ship.get("method") == "taxi":
+        ship_txt = (f"{esc(ship.get('name'))} · {esc(ship.get('phone'))}\n"
+                    f"🚕 Такси, {esc(ship.get('city') or 'Днепр')}: {esc(ship.get('address'))}")
+    else:
+        ship_txt = (f"{esc(ship.get('name'))} · {esc(ship.get('phone'))}\n"
+                    f"{esc(ship.get('city'))}, НП №{esc(ship.get('np'))}")
     product_id, grams = pint(b.get("product_id")), pint(b.get("grams"))
     # оплата заказа — только с баланса (пополнить баланс можно любым способом)
     try:
@@ -2631,6 +2635,36 @@ async def api_admin_work(request: Request):
         raise HTTPException(400, str(e))
     await notify(res["user_id"], f"🛠 Заказ <b>{res['code']}</b> принят в работу — собираем.")
     return {"orders": await db.admin_orders()}
+
+
+@app.post("/api/admin/order/deliver")
+async def api_admin_order_deliver(request: Request):
+    """Админ вручную закрывает заказ такси на «Получен» — нет автотрекинга,
+    как у Новой Почты."""
+    admin_user(request)
+    b = await request.json()
+    try:
+        res = await db.admin_deliver_order(str(b.get("order", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await notify(res["user_id"],
+                 f"🎉 Заказ <b>{res['code']}</b> получен! Будем рады вашей оценке ★ в «Истории».")
+    return {"orders": await db.admin_orders()}
+
+
+@app.post("/api/order/received")
+async def api_order_received(request: Request):
+    """Покупатель сам подтверждает получение заказа такси."""
+    u = tg_user(request)
+    b = await request.json()
+    order = str(b.get("order", ""))
+    try:
+        snap = await db.confirm_order_received(u["id"], order)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if ADMIN_ID:
+        await notify(ADMIN_ID, f"📬 Заказ {order} отмечен покупателем как полученный (такси).")
+    return snap
 
 
 @app.post("/api/admin/reviews")
