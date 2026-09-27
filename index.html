@@ -977,18 +977,30 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
   <p class="sheet-sub" id="coSummary"></p>
   <div class="field"><label>Имя и фамилия</label><input id="coName" placeholder="Иван Иванов"></div>
   <div class="field"><label>Телефон</label><input id="coPhone" inputmode="tel" placeholder="+380"></div>
-  <div class="field np-ac"><label>Город</label>
-    <input id="coCity" placeholder="Начните вводить город" autocomplete="off" oninput="onCityInput()">
-    <div class="ac-list" id="coCityList"></div>
-  </div>
-  <div class="field np-ac"><label>Отделение / почтомат Новой Почты</label>
-    <div class="np-kind" id="coKind">
-      <div class="wchip sel" data-k="" onclick="setKind('', this)">Все</div>
-      <div class="wchip" data-k="branch" onclick="setKind('branch', this)">Отделения</div>
-      <div class="wchip" data-k="postomat" onclick="setKind('postomat', this)">Почтоматы</div>
+  <div class="field"><label>Способ доставки</label>
+    <div class="np-kind" id="coMethod">
+      <div class="wchip sel" data-m="np" onclick="setMethod('np', this)">Новая Почта</div>
+      <div class="wchip" data-m="taxi" onclick="setMethod('taxi', this)">🚕 Такси (Днепр)</div>
     </div>
-    <input id="coNP" placeholder="№ отделения или почтомат" autocomplete="off" oninput="onNPInput()">
-    <div class="ac-list" id="coNPList"></div>
+  </div>
+  <div id="coNPBlock">
+    <div class="field np-ac"><label>Город</label>
+      <input id="coCity" placeholder="Начните вводить город" autocomplete="off" oninput="onCityInput()">
+      <div class="ac-list" id="coCityList"></div>
+    </div>
+    <div class="field np-ac"><label>Отделение / почтомат Новой Почты</label>
+      <div class="np-kind" id="coKind">
+        <div class="wchip sel" data-k="" onclick="setKind('', this)">Все</div>
+        <div class="wchip" data-k="branch" onclick="setKind('branch', this)">Отделения</div>
+        <div class="wchip" data-k="postomat" onclick="setKind('postomat', this)">Почтоматы</div>
+      </div>
+      <input id="coNP" placeholder="№ отделения или почтомат" autocomplete="off" oninput="onNPInput()">
+      <div class="ac-list" id="coNPList"></div>
+    </div>
+  </div>
+  <div class="field" id="coTaxiBlock" hidden>
+    <label>Адрес доставки — только г. Днепр</label>
+    <input id="coAddr" placeholder="Улица, дом, квартира/подъезд">
   </div>
   <div class="field"><label>Оплата</label>
     <div class="pay-opts" id="coPays"></div>
@@ -997,7 +1009,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
   <button class="btn btn-gold" onclick="placeOrder()">Подтвердить заказ
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
   </button>
-  <p class="note">После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.</p>
+  <p class="note" id="coFoot">После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.</p>
 </div>
 
 <div class="sheet" id="sheet-bonus">
@@ -2093,15 +2105,29 @@ let payMethod = 'balance';
 const CARD_MIN = 200;     // минимум для пополнения картой (меньше — только крипта)
 const CARD_LIMIT = 30000; // лимит оплаты картой при пополнении
 /* ── выбор адреса из справочника Новой Почты ── */
-let coCitySel = null, coWhSel = null, coKind = '', coCityRes = [], coWhRes = [], npTimer = null;
+let coCitySel = null, coWhSel = null, coKind = '', coCityRes = [], coWhRes = [], npTimer = null, coMethod = 'np';
 function resetCheckoutAddr() {
-  coCitySel = coWhSel = null; coKind = ''; coCityRes = []; coWhRes = [];
+  coCitySel = coWhSel = null; coKind = ''; coCityRes = []; coWhRes = []; coMethod = 'np';
   const c = document.getElementById('coCity'), n = document.getElementById('coNP');
   c.value = '';
   n.value = ''; n.placeholder = '№ отделения или почтомат';
   document.getElementById('coCityList').innerHTML = '';
   document.getElementById('coNPList').innerHTML = '';
+  document.getElementById('coAddr').value = '';
   document.querySelectorAll('#coKind .wchip').forEach(x => x.classList.toggle('sel', x.dataset.k === ''));
+  document.querySelectorAll('#coMethod .wchip').forEach(x => x.classList.toggle('sel', x.dataset.m === 'np'));
+  document.getElementById('coNPBlock').hidden = false;
+  document.getElementById('coTaxiBlock').hidden = true;
+  document.getElementById('coFoot').textContent = 'После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.';
+}
+function setMethod(m, el) {
+  coMethod = m;
+  document.querySelectorAll('#coMethod .wchip').forEach(x => x.classList.toggle('sel', x === el));
+  document.getElementById('coNPBlock').hidden = m === 'taxi';
+  document.getElementById('coTaxiBlock').hidden = m !== 'taxi';
+  document.getElementById('coFoot').textContent = m === 'taxi'
+    ? 'После подтверждения заказ появится в «Истории». С вами свяжутся, чтобы согласовать доставку такси.'
+    : 'После подтверждения заказ появится в «Истории». ТТН Новой Почты придёт после отправки.';
 }
 const acDebounce = fn => { clearTimeout(npTimer); npTimer = setTimeout(fn, 300); };
 function onCityInput() {
@@ -2184,13 +2210,20 @@ function openCheckout() {
 async function placeOrder() {
   const name = document.getElementById('coName').value.trim();
   const phone = document.getElementById('coPhone').value.trim();
-  const city = coCitySel ? coCitySel.name : document.getElementById('coCity').value.trim();
-  const np = coWhSel ? String(coWhSel.number) : document.getElementById('coNP').value.trim();
-  if (!name || !phone || !city || !np) return toast('Заполните все поля доставки');
+  let ship;
+  if (coMethod === 'taxi') {
+    const address = document.getElementById('coAddr').value.trim();
+    if (!name || !phone || !address) return toast('Заполните все поля доставки');
+    ship = { method: 'taxi', name, phone, city: 'Днепр', address };
+  } else {
+    const city = coCitySel ? coCitySel.name : document.getElementById('coCity').value.trim();
+    const np = coWhSel ? String(coWhSel.number) : document.getElementById('coNP').value.trim();
+    if (!name || !phone || !city || !np) return toast('Заполните все поля доставки');
+    ship = { method: 'np', name, phone, city, np };
+    if (coCitySel) ship.city_ref = coCitySel.ref;
+    if (coWhSel) { ship.branch = coWhSel.desc; ship.wh_ref = coWhSel.ref; ship.postomat = coWhSel.postomat; }
+  }
   const total = priceFor(curProduct, curGrams);
-  const ship = { name, phone, city, np };
-  if (coCitySel) ship.city_ref = coCitySel.ref;
-  if (coWhSel) { ship.branch = coWhSel.desc; ship.wh_ref = coWhSel.ref; ship.postomat = coWhSel.postomat; }
   const sp = orderPaySplit(total);
   if (!sp.enough) {
     toast(`Бонусом можно оплатить до ${sp.pct}% — нужно реальными ${fmt(sp.realNeed)} ₴`);
@@ -2277,7 +2310,7 @@ function renderOrderBody(i) {
       ${STATUSES.map((s, k) => `
         <div class="tl-step ${k <= o.status ? 'done' : ''}">
           <div class="tl-dot"></div>
-          <div><span>${s}</span>${k === 2 && o.ttn ? `<small>Новая Почта</small>` : ''}</div>
+          <div><span>${s}</span>${k === 2 && o.ttn ? `<small>${o.ship && o.ship.method === 'taxi' ? 'Такси' : 'Новая Почта'}</small>` : ''}</div>
         </div>`).join('')}
     </div>` : `
     <p class="note" style="margin-bottom:10px">${o.status === -1
@@ -2288,21 +2321,34 @@ function renderOrderBody(i) {
       <span>⏳ Компенсация за задержку (бонус)</span>
       <b style="color:var(--gold-soft)">+${fmt(o.delay_paid * 50)} ₴ · ${o.delay_paid} сут</b>
     </div>` : ''}
-    ${o.ttn ? `
+    ${o.ttn ? (o.ship && o.ship.method === 'taxi' ? (/^https?:\/\//i.test(o.ttn) ? `
+    <div class="ttn">
+      <span>🚕 Поездка в пути</span>
+      <b style="display:flex;align-items:center;gap:6px">Ссылка от водителя</b>
+    </div>
+    <a class="btn btn-ghost" style="text-decoration:none;margin-top:8px;padding:11px" href="${esc(o.ttn)}" target="_blank" rel="noopener">Отследить поездку ↗</a>` : `
+    <div class="ttn" style="cursor:pointer" onclick="copyText('${esc(o.ttn)}')">
+      <span>Номер заказа такси · нажмите, чтобы скопировать</span>
+      <b style="display:flex;align-items:center;gap:6px">${esc(o.ttn)}
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </b>
+    </div>`) : `
     <div class="ttn" style="cursor:pointer" onclick="copyText('${o.ttn}')">
       <span>ТТН Новой Почты · нажмите, чтобы скопировать</span>
       <b style="display:flex;align-items:center;gap:6px">${o.ttn}
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       </b>
     </div>
-    <a class="btn btn-ghost" style="text-decoration:none;margin-top:8px;padding:11px" href="https://novaposhta.ua/tracking/?cargo_number=${o.ttn}" target="_blank" rel="noopener">Отследить на сайте Новой Почты ↗</a>` : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`}
+    <a class="btn btn-ghost" style="text-decoration:none;margin-top:8px;padding:11px" href="https://novaposhta.ua/tracking/?cargo_number=${o.ttn}" target="_blank" rel="noopener">Отследить на сайте Новой Почты ↗</a>`) : (o.ship && o.ship.method === 'taxi'
+      ? `<p class="note">Такси приедет по указанному адресу — с вами свяжутся, чтобы согласовать время.</p>`
+      : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`)}
     ${o.status === 2 && (o.np_status_text || o.np_eta || o.np_arrival) ? `
     <div class="np-live">
       ${o.np_status_text ? `<div class="np-row"><span>Статус Новой Почты</span><b>${esc(o.np_status_text)}</b></div>` : ''}
       ${o.np_eta ? `<div class="np-row"><span>Ожидаемая дата</span><b>${npDate(o.np_eta)}</b></div>` : ''}
       ${o.np_arrival ? `<div class="np-row"><span>Прибыло в отделение</span><b style="color:var(--gold-soft)">${npDate(o.np_arrival)}</b></div>` : ''}
     </div>` : ''}
-    ${o.ship ? `<p class="note">Получатель: ${esc(o.ship.name)} · ${esc(o.ship.city)}, отд. ${esc(o.ship.np)}</p>` : ''}
+    ${o.ship ? `<p class="note">Получатель: ${esc(o.ship.name)} · ${o.ship.method === 'taxi' ? `🚕 ${esc(o.ship.city || 'Днепр')}, ${esc(o.ship.address)}` : `${esc(o.ship.city)}, отд. ${esc(o.ship.np)}`}</p>` : ''}
     ${o.status === 3 ? `
       <div class="hr"></div>
       <div style="text-align:center;padding-bottom:6px">
@@ -3538,11 +3584,14 @@ function renderAdmin(tab) {
         ${o.status === 0 ? `<button class="btn btn-ghost" style="margin-top:10px;padding:11px" onclick="workOrder('${o.id}')">🛠 Взять в работу</button>` : ''}
         ${o.delay_paid > 0 ? `<p class="note" style="margin-top:8px;color:var(--lose)">⏳ Просрочка отправки: ${o.delay_paid} сут · компенсировано покупателю ${fmt(o.delay_paid * 50)} ₴${o.status === 1 ? ' · капает каждую полночь до ТТН' : ''}</p>` : ''}
         ${o.ttn && !ttnEditing.has(o.id) ? `
-          <div class="ttn" style="cursor:pointer" onclick="editTtn('${o.id}')" title="Нажмите, чтобы изменить ТТН">
-            <span>ТТН</span><b style="display:flex;align-items:center;gap:7px">${o.ttn} <span style="font-size:11px;opacity:.55">✏️</span></b>
+          <div class="ttn" style="cursor:pointer" onclick="editTtn('${o.id}')" title="Нажмите, чтобы изменить">
+            <span>${o.ship && o.ship.method === 'taxi' ? '🚕 Такси' : 'ТТН'}</span>
+            <b style="display:flex;align-items:center;gap:7px">${o.ship && o.ship.method === 'taxi' && /^https?:\/\//i.test(o.ttn)
+              ? `<a href="${esc(o.ttn)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--gold-soft);text-decoration:underline">Ссылка на поездку ↗</a>`
+              : esc(o.ttn)} <span style="font-size:11px;opacity:.55">✏️</span></b>
           </div>` : o.ttn || o.status >= 0 ? `
           <div style="display:flex;gap:8px;margin-top:10px">
-            <input class="mini-input" id="ttn-${o.id}" placeholder="ТТН Новой Почты → статус «В пути»" inputmode="numeric" style="flex:1" value="${o.ttn || ''}">
+            <input class="mini-input" id="ttn-${o.id}" placeholder="${o.ship && o.ship.method === 'taxi' ? 'Ссылка на поездку Uklon → статус «В пути»' : 'ТТН Новой Почты → статус «В пути»'}" ${o.ship && o.ship.method === 'taxi' ? '' : 'inputmode="numeric"'} style="flex:1" value="${o.ttn || ''}">
             <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
             ${o.ttn ? `<button class="btn btn-ghost" style="width:auto;padding:11px 14px;font-size:12.5px" onclick="cancelTtn('${o.id}')">✕</button>` : ''}
           </div>` : ''}
@@ -4203,8 +4252,14 @@ function shipChips(s) {
     chips.push(['Фамилия', parts[parts.length - 1]]);
   } else if (parts.length) chips.push(['Имя', parts[0]]);
   if (s.phone) chips.push(['Телефон', s.phone]);
-  if (s.city) chips.push(['Город', s.city]);
-  if (s.np) chips.push([s.postomat ? 'Почтомат №' : 'Отделение №', String(s.np)]);
+  if (s.method === 'taxi') {
+    chips.push(['Доставка', '🚕 Такси']);
+    if (s.city) chips.push(['Город', s.city]);
+    if (s.address) chips.push(['Адрес', s.address]);
+  } else {
+    if (s.city) chips.push(['Город', s.city]);
+    if (s.np) chips.push([s.postomat ? 'Почтомат №' : 'Отделение №', String(s.np)]);
+  }
   return `<div class="cp-row">${chips.map(([l, v]) => `
     <div class="cp-chip" data-v="${esc(v)}" onclick="copyText(this.dataset.v)"><span>${l}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
 }
