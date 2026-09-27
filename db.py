@@ -1552,14 +1552,56 @@ async def compensate_delayed_orders(amount: int) -> list:
 
 
 async def shipped_orders() -> list:
-    """Заказы «В пути» с ТТН — для трекера Новой Почты."""
+    """Заказы «В пути» с ТТН, доставка Новой Почтой — для трекера Новой Почты.
+    Заказы такси исключены: у них нет ТТН Новой Почты, отслеживаются иначе
+    (ссылка от водителя + подтверждение вручную)."""
     async with _pool.acquire() as c:
         rows = await c.fetch(
             "SELECT id, user_id, ttn, np_status FROM orders "
-            "WHERE status=2 AND ttn IS NOT NULL LIMIT 100")
+            "WHERE status=2 AND ttn IS NOT NULL "
+            "AND (ship IS NULL OR ship::jsonb->>'method' IS DISTINCT FROM 'taxi') LIMIT 100")
     return [{"id": r["id"], "user_id": r["user_id"], "ttn": r["ttn"],
              "np_status": r["np_status"],
              "code": f"MM-{r['id'] + ORDER_CODE_BASE}"} for r in rows]
+
+
+async def admin_deliver_order(order_code: str) -> dict:
+    """Админ вручную отмечает заказ такси полученным — для этого способа
+    доставки нет автотрекинга статуса, как у Новой Почты."""
+    try:
+        oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
+    except (IndexError, ValueError):
+        raise ValueError("Неверный номер заказа")
+    async with _pool.acquire() as c:
+        o = await c.fetchrow(
+            "UPDATE orders SET status=3, ship=NULL, received_at=COALESCE(received_at, now()) "
+            "WHERE id=$1 AND status=2 RETURNING user_id", oid)
+        if not o:
+            raise ValueError("Заказ не найден или не «в пути»")
+        return {"user_id": o["user_id"], "code": order_code}
+
+
+async def confirm_order_received(tg_id: int, order_code: str) -> dict:
+    """Покупатель сам подтверждает получение — доступно только для доставки
+    такси (для Новой Почты статус выставляется автоматически трекером)."""
+    try:
+        oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
+    except (IndexError, ValueError):
+        raise ValueError("Неверный номер заказа")
+    async with _pool.acquire() as c, c.transaction():
+        o = await c.fetchrow(
+            "SELECT * FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE", oid, tg_id)
+        if not o:
+            raise ValueError("Заказ не найден")
+        if o["status"] != 2:
+            raise ValueError("Заказ ещё не «в пути»")
+        ship = json.loads(o["ship"]) if o["ship"] else {}
+        if ship.get("method") != "taxi":
+            raise ValueError("Доступно только для доставки такси")
+        await c.execute(
+            "UPDATE orders SET status=3, ship=NULL, received_at=COALESCE(received_at, now()) "
+            "WHERE id=$1", oid)
+        return await snapshot(tg_id, c)
 
 
 async def update_order_np(oid: int, code, text: str, eta: str, arrival: str):

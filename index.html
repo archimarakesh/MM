@@ -2342,6 +2342,7 @@ function renderOrderBody(i) {
     <a class="btn btn-ghost" style="text-decoration:none;margin-top:8px;padding:11px" href="https://novaposhta.ua/tracking/?cargo_number=${o.ttn}" target="_blank" rel="noopener">Отследить на сайте Новой Почты ↗</a>`) : (o.ship && o.ship.method === 'taxi'
       ? `<p class="note">Такси приедет по указанному адресу — с вами свяжутся, чтобы согласовать время.</p>`
       : `<p class="note">ТТН появится после передачи посылки в отделение.</p>`)}
+    ${o.status === 2 && o.ship && o.ship.method === 'taxi' ? `<button class="btn btn-gold" style="margin-top:10px" onclick="confirmReceived()">✅ Я получил заказ</button>` : ''}
     ${o.status === 2 && (o.np_status_text || o.np_eta || o.np_arrival) ? `
     <div class="np-live">
       ${o.np_status_text ? `<div class="np-row"><span>Статус Новой Почты</span><b>${esc(o.np_status_text)}</b></div>` : ''}
@@ -2398,6 +2399,23 @@ async function rateOrder(n) {
   const ta = document.getElementById('revText');
   if (ta && draft != null) ta.value = draft;
   toast('Спасибо за оценку ★');
+}
+async function confirmReceived() {
+  const o = S.orders[curOrderIdx];
+  if (!o) return;
+  lotConfirm('Подтвердить получение заказа?', async () => {
+    haptic('medium');
+    if (API.ok) {
+      try { applySnapshot(await API.call('/api/order/received', { order: o.id })); }
+      catch (e) { return toast(e.message); }
+      curOrderIdx = Math.max(0, S.orders.findIndex(x => x.id === o.id));
+    } else {
+      o.status = 3; save();
+    }
+    renderOrderBody(curOrderIdx);
+    renderOrders();
+    toast('Спасибо! Заказ отмечен полученным ✅');
+  });
 }
 async function submitReview() {
   const o = S.orders[curOrderIdx];
@@ -3595,6 +3613,7 @@ function renderAdmin(tab) {
             <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
             ${o.ttn ? `<button class="btn btn-ghost" style="width:auto;padding:11px 14px;font-size:12.5px" onclick="cancelTtn('${o.id}')">✕</button>` : ''}
           </div>` : ''}
+        ${o.status === 2 && o.ship && o.ship.method === 'taxi' ? `<button class="btn btn-gold" style="margin-top:10px;padding:11px" onclick="deliverOrder('${o.id}')">✅ Доставлено</button>` : ''}
         <button class="btn btn-ghost" style="margin-top:10px;padding:10px;font-size:12.5px;color:var(--danger)" onclick="delOrder('${o.id}')">${orderDelArmed.has(o.id) ? '✕ Точно удалить? Нажмите ещё раз' : 'Удалить заказ'}</button>
       </div></div>`).join('') : '<div class="empty" style="padding:20px"><p>Активных заказов нет</p></div>';
     b.innerHTML = salesStats + cards
@@ -4058,6 +4077,12 @@ async function workOrder(code) {
   try { AD.orders = (await API.call('/api/admin/work', { order: code })).orders; }
   catch (e) { return toast(e.message); }
   haptic('medium'); toast('Заказ в работе 🛠');
+  renderAdmin('orders');
+}
+async function deliverOrder(code) {
+  try { AD.orders = (await API.call('/api/admin/order/deliver', { order: code })).orders; }
+  catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Заказ отмечен полученным ✅');
   renderAdmin('orders');
 }
 async function decideOrder(code, approve) {
