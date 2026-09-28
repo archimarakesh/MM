@@ -2027,6 +2027,37 @@ async def admin_reset_pin(tg_id: int) -> dict:
     return {"ok": True, "had_pin": had_pin}
 
 
+async def admin_set_balance(tg_id: int, real: int, bonus: int, wager: int) -> dict:
+    """Ручная правка баланса пользователя из админки: реальная (выводимая) и
+    бонусная (locked) части задаются раздельно, плюс остаток вейджера на
+    бонусную часть. Пишет строку в wallet_ops (kind='admin'), чтобы журнал
+    кошелька и сводка движения средств не разъехались с users.balance/locked —
+    так же, как любое другое начисление/списание."""
+    real = max(0, int(real or 0))
+    bonus = max(0, int(bonus or 0))
+    wager = max(0, int(wager or 0)) if bonus > 0 else 0
+    new_balance = real + bonus
+    async with _pool.acquire() as c, c.transaction():
+        u = await c.fetchrow(
+            "SELECT balance, locked FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
+        if not u:
+            raise ValueError("Пользователь не найден")
+        prev_balance = int(u["balance"] or 0)
+        prev_locked = int(u["locked"] or 0)
+        delta = new_balance - prev_balance
+        real_delta = (new_balance - bonus) - (prev_balance - prev_locked)
+        await c.execute(
+            "UPDATE users SET balance=$1, locked=$2, wager_req=$3 WHERE tg_id=$4",
+            new_balance, bonus, wager, tg_id)
+        op_id = f"admin-{tg_id}-{int(time.time() * 1000)}-{secrets.token_hex(3)}"
+        await c.execute("""
+            INSERT INTO wallet_ops(op_id, user_id, delta, kind, ref, balance_after, real_delta)
+            VALUES($1,$2,$3,'admin',$4,$5,$6)
+        """, op_id, tg_id, delta, "правка баланса админом", new_balance, real_delta)
+    return {"balance": new_balance, "locked": bonus, "withdrawable": real, "wager_req": wager}
+
+
+
 # ── PayDome: авто-карта для пополнения ───────────────────────────────────────
 CARD_PAY_TTL = 30 * 60  # 30 минут на оплату карты
 

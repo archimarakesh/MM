@@ -2461,6 +2461,22 @@ async def api_admin_reset_pin(request: Request):
         raise HTTPException(404, str(e))
 
 
+@app.post("/api/admin/set-balance")
+async def api_admin_set_balance(request: Request):
+    """Ручная правка баланса пользователя из админки — реальная и бонусная
+    части раздельно."""
+    admin_user(request)
+    b = await request.json()
+    uid = pint(b.get("id"))
+    if uid <= 0:
+        raise HTTPException(400, "Неверный пользователь")
+    try:
+        return await db.admin_set_balance(
+            uid, pint(b.get("real")), pint(b.get("bonus")), pint(b.get("wager")))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 @app.post("/api/referrals")
 async def api_referrals(request: Request):
     """Подробности реф-программы клиента: сплит казино/покупки + свои рефералы
