@@ -4461,6 +4461,7 @@ async function resetPin(id) {
   if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
   else if (confirm(msg)) go();
 }
+let auSearchTimer = null;
 function toggleBalEdit(id) {
   if (balEditing.has(id)) balEditing.delete(id); else balEditing.add(id);
   adminUserOpen(id);
