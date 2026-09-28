@@ -4324,6 +4324,7 @@ async function loadDoneOrders() {
       </div></div>`).join('') : '<p class="note">Выполненных заказов пока нет</p>');
 }
 const ttnEditing = new Set();
+const balEditing = new Set();
 function editTtn(code) {
   ttnEditing.add(code); haptic('light'); renderAdmin('orders');
   const inp = document.getElementById('ttn-' + code);
@@ -4460,7 +4461,25 @@ async function resetPin(id) {
   if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
   else if (confirm(msg)) go();
 }
-let auSearchTimer = null;
+function toggleBalEdit(id) {
+  if (balEditing.has(id)) balEditing.delete(id); else balEditing.add(id);
+  adminUserOpen(id);
+}
+async function saveBalance(id) {
+  const real = parseInt(document.getElementById('balReal').value, 10) || 0;
+  const bonus = parseInt(document.getElementById('balBonus').value, 10) || 0;
+  const wager = parseInt(document.getElementById('balWager').value, 10) || 0;
+  const msg = `Установить баланс ID ${id}:\n\nРеальный: ${real} ₴\nБонус: ${bonus} ₴\nВейджер: ${wager} ₴`;
+  const go = async () => {
+    try { await API.call('/api/admin/set-balance', { id, real, bonus, wager }); }
+    catch (e) { return toast(e.message); }
+    haptic('medium'); toast('Баланс обновлён ✏️');
+    balEditing.delete(id);
+    adminUserOpen(id);
+  };
+  if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) go(); });
+  else if (confirm(msg)) go();
+}
 function auEsc(s) { return String(s == null ? '' : s).replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch])); }
 function auDate(iso) { if (!iso) return ''; try { return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: '2-digit' }); } catch (e) { return ''; } }
 function renderAdminUsers() {
@@ -4576,7 +4595,21 @@ async function adminUserOpen(id) {
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="ref-ban${u.banned ? ' on' : ''}" onclick="banUser(${u.tg_id}, ${u.banned ? 'false' : 'true'}); setTimeout(()=>adminUserOpen(${u.tg_id}), 400)">${u.banned ? '♻ Разбанить' : '🚫 Забанить'}</button>
         ${(u.has_pin || u.pin_locked) ? `<button class="ref-ban" style="border-color:var(--gold-line);color:var(--gold-soft)" onclick="resetPin(${u.tg_id})">🔑 Сбросить пин</button>` : ''}
+        <button class="ref-ban" style="border-color:var(--gold-line);color:var(--gold-soft)" onclick="toggleBalEdit(${u.tg_id})">✏️ Баланс</button>
       </div>
+      ${balEditing.has(u.tg_id) ? `
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div class="field" style="flex:1;margin:0"><label>Реальный (к выводу), ₴</label><input class="mini-input" id="balReal" inputmode="numeric" value="${u.withdrawable}"></div>
+          <div class="field" style="flex:1;margin:0"><label>Бонус (не выводится), ₴</label><input class="mini-input" id="balBonus" inputmode="numeric" value="${u.locked}"></div>
+        </div>
+        <div class="field" style="margin:0 0 8px"><label>Вейджер — сколько ещё отыграть, ₴</label><input class="mini-input" id="balWager" inputmode="numeric" value="${u.wager_req}"></div>
+        <p class="note" style="margin:0 0 8px">Вейджер имеет смысл только если бонус &gt; 0 — иначе обнулится сам.</p>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveBalance(${u.tg_id})">Сохранить</button>
+          <button class="btn btn-ghost" style="width:auto;padding:11px 14px;font-size:12.5px" onclick="toggleBalEdit(${u.tg_id})">Отмена</button>
+        </div>
+      </div>` : ''}
     </div></div>
     ${auMoney(d.money)}
     <div style="margin-top:14px">
@@ -4590,7 +4623,7 @@ async function adminUserOpen(id) {
 }
 const AU_OP = {
   bet: ['🎲', 'Ставка'], win: ['🏆', 'Выигрыш'], bonus: ['🎁', 'Бонус (рейкбек)'],
-  freespin: ['🎰', 'Выигрыш фриспина'], referral: ['🤝', 'Реферал'],
+  freespin: ['🎰', 'Выигрыш фриспина'], referral: ['🤝', 'Реферал'], admin: ['✏️', 'Правка админом'],
 };
 let walOps = [];   // накопленные операции (для «показать ещё»)
 async function loadWalletLog(id, offset) {
