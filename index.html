@@ -1198,7 +1198,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <div class="field"><label>Кол-во кустов</label><input id="geSlots" inputmode="numeric" placeholder="например 96"></div>
   </div>
   <div class="field"><label>Сумма сбора для запуска, ₴</label><input id="geLaunchTarget" inputmode="numeric" placeholder="30000">
-    <small style="display:block;margin-top:5px;font-size:11px;color:var(--muted-2);line-height:1.4">Предпродажа: пока не соберут эту сумму, программа не запускается. Дедлайн сбора задаётся днями у стадии «Семечко» в таблице ниже (0 — без дедлайна, ждём сколько нужно). Если к дедлайну сумма не набралась — все вложения автоматически возвращаются на баланс, программа закрывается.</small>
+    <small style="display:block;margin-top:5px;font-size:11px;color:var(--muted-2);line-height:1.4">Стадия «Семечко» держится, пока не соберут эту сумму — потом стадии идут по дням (дни у «Семечко» в таблице ниже не используются).</small>
   </div>
   <div class="field"><label>Старт программы · предпродажа (необязательно)</label>
     <input type="datetime-local" id="geStart">
@@ -3298,8 +3298,6 @@ function launchProgress(p, enterP) {
   const target = p.launch_target || 30000, raised = Math.min(target, p.raised || 0);
   const remain = Math.max(0, target - raised);
   const prog = Math.min(100, Math.round(raised / target * 100));
-  const deadlineDays = planStages(p)[0]?.d || 0;
-  const deadlineAt = deadlineDays ? new Date(p.stage_at).getTime() + deadlineDays * DAY : null;
   return `
   <div class="presale">
     <div class="presale-top"><span>🚀 Сбор на запуск программы</span><b>${prog}%</b></div>
@@ -3313,10 +3311,6 @@ function launchProgress(p, enterP) {
     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:6px">
       <span>${fmt(raised)} ₴ собрано</span><span>цель ${fmt(target)} ₴</span>
     </div>
-    ${deadlineAt ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--warn);margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08)">
-      <span>⏳ дедлайн сбора</span><span>${cdSpan(new Date(deadlineAt).toISOString())}</span>
-    </div>
-    <p class="presale-sub" style="margin-top:6px">Не соберём к дедлайну — вложения автоматически вернутся на баланс.</p>` : ''}
   </div>
   <p class="note" style="margin:8px 0 10px">Вход по текущей ставке <b style="color:var(--gold-soft)">+${enterP}%</b> — самая выгодная, пока идёт сбор</p>`;
 }
@@ -3404,7 +3398,7 @@ function renderEgrow() {
         ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async">` : `<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:44px">🌱</div>`}
         <div class="grow-hero-scrim"></div>
         <div class="grow-hero-top">
-          <span class="grow-pill">${p.failed ? '↩️ Не набрано' : p.done ? '✓ Завершено' : `${STAGE_META[Math.min(p.stage, 5)][0]} ${STAGE_META[Math.min(p.stage, 5)][1]}`}</span>
+          <span class="grow-pill">${STAGE_META[Math.min(p.stage, 5)][0]} ${p.done ? 'Завершено' : STAGE_META[Math.min(p.stage, 5)][1]}</span>
           ${closed ? '' : `<span class="grow-pill gold">вход +${enterP}%</span>`}
         </div>
         <div class="grow-hero-bottom">
@@ -3432,8 +3426,7 @@ function renderEgrow() {
       </div>
       <p class="note" style="margin:0 0 10px">Полный цикл <b style="color:var(--txt)">${ts.reduce((a, s) => a + s.d, 0)} дн.</b> · отсчёт пойдёт с даты старта</p>`
       : p.stage === 0 && !p.done ? launchProgress(p, enterP)
-      : `<p class="note" style="margin:0 0 10px">${p.failed ? '↩️ Сбор не набрал нужную сумму к дедлайну — вложения возвращены на баланс'
-        : p.done ? 'Цикл завершён — урожай собран и выплачен'
+      : `<p class="note" style="margin:0 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
         : (() => { const ct = cycleTotals(ts, p.stage, p.stage_at, p.done); return `
         Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}<br>
         Полный цикл <b style="color:var(--txt)">${ct.total} дн.</b> · до выплаты осталось <b style="color:var(--gold-soft)">~${ct.left} дн.</b>`; })()}</p>`}
@@ -3444,10 +3437,10 @@ function renderEgrow() {
       <div class="grow-more"${open ? '' : ' hidden'}>
       <div class="tier-table" style="margin-bottom:12px">
         ${ts.map((s, k) => `<div class="tier-row ${k === p.stage && !p.done ? 'hit' : ''}">
-          <span>${STAGE_META[k][0]} ${STAGE_META[k][1]} · ${k === 0 ? `сбор ${fmt(p.launch_target || 30000)} ₴${s.d ? ` за ${s.d} дн.` : ''}` : s.d + ' дн.'}</span>
+          <span>${STAGE_META[k][0]} ${STAGE_META[k][1]} · ${k === 0 ? `сбор ${fmt(p.launch_target || 30000)} ₴` : s.d + ' дн.'}</span>
           <b>${k === 5 ? 'вход закрыт' : '+' + s.p + '%'}</b></div>`).join('')}
       </div>
-      ${closed ? `<button class="btn btn-ghost" disabled>${p.failed ? 'Сбор не набрался — закрыта' : p.done ? 'Программа завершена' : '🧺 Идёт сбор урожая — вход закрыт'}</button>` : `
+      ${closed ? `<button class="btn btn-ghost" disabled>${p.done ? 'Программа завершена' : '🧺 Идёт сбор урожая — вход закрыт'}</button>` : `
       <p class="note" style="margin:0 0 8px">Ваша доля куста (${fmt(p.price)} ₴ = 100%)${avail != null ? ` · свободно ${avail}%` : ''}</p>
       <div class="weight-chips" style="margin:0 0 12px">
         ${[10, 20, 30, 40, 50, 100].map(x => `<div class="wchip ${x === pct ? 'sel' : ''}" ${x > maxPct ? 'style="opacity:.3;pointer-events:none"' : ''} onclick="selShare(${p.id},${x})">${x}%</div>`).join('')}
@@ -4269,7 +4262,7 @@ function openGedit(id) {
     <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px;margin-bottom:8px;align-items:center">
       <span style="font-size:12px;color:var(--muted)">${STAGE_META[i][0]} ${STAGE_META[i][1]}</span>
       <div style="display:flex;align-items:center;gap:5px">
-        <input class="mini-input" id="gsD${i}" inputmode="numeric" value="${s.d}"><span style="font-size:11px;color:var(--muted-2)">${i === 0 ? 'дн дедлайн' : 'дн'}</span></div>
+        <input class="mini-input" id="gsD${i}" inputmode="numeric" value="${s.d}"><span style="font-size:11px;color:var(--muted-2)">дн</span></div>
       ${i === 5
         ? '<span style="font-size:11px;color:var(--muted-2);text-align:center">вход закрыт</span>'
         : `<div style="display:flex;align-items:center;gap:5px">
