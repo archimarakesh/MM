@@ -14,6 +14,7 @@ import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -125,6 +126,18 @@ PROMO_POSTS = [
 ]
 # пост рулетки постим только при активном розыгрыше (см. promo_poster)
 PROMO_ROULETTE_PATH = "promo/roulette.png"
+# личное напоминание про E-grow (не канал — ЛС всем пользователям бота):
+# раз в EGROW_REMINDER_DAYS дней, в случайное время внутри дневного окна
+EGROW_REMINDER_DAYS = int(os.getenv("EGROW_REMINDER_DAYS", "3") or 3)
+EGROW_REMINDER_HOUR_FROM = int(os.getenv("EGROW_REMINDER_HOUR_FROM", "10") or 10)
+EGROW_REMINDER_HOUR_TO = int(os.getenv("EGROW_REMINDER_HOUR_TO", "21") or 21)
+EGROW_REMINDER_TEXT = (
+    "🌱 <b>E-grow работает!</b>\n\n"
+    "Вложись в долю куста и получай процент к урожаю — чем раньше вход, тем выше "
+    "доходность. Может, прямо сейчас идёт сбор на запуск новой программы — самое "
+    "время зайти.\n\n"
+    "Загляни в раздел <b>E-grow</b> в приложении 👇"
+)
 # общий секрет с внешними сервисами (казино и т.п.). Пусто — кошелёк наружу закрыт
 WALLET_TOKEN = os.getenv("WALLET_TOKEN", "")
 CARD_MIN = 200               # пополнение картой — от 200 ₴, меньше только криптой
@@ -584,6 +597,40 @@ async def grow_harvester():
             log.exception("Ошибка стадий E-growing")
         await asyncio.sleep(300)
 
+
+async def egrow_reminder():
+    """Личное напоминание в бота (ЛС всем, не канал) про E-grow: раз в
+    EGROW_REMINDER_DAYS дней, в случайное время внутри дневного окна
+    [EGROW_REMINDER_HOUR_FROM, EGROW_REMINDER_HOUR_TO)."""
+    if not bot:
+        return
+    while True:
+        try:
+            now = datetime.now(KYIV)
+            raw = await db.get_kv("egrow_reminder_next_at")
+            nxt = datetime.fromisoformat(raw) if raw else None
+            if nxt and nxt.tzinfo is None:
+                nxt = nxt.replace(tzinfo=KYIV)
+            if nxt is None or nxt <= now:
+                if nxt is not None:
+                    sent = await broadcast_all(
+                        EGROW_REMINDER_TEXT, button=("🌱 Открыть E-grow", PROMO_BUTTON_URL))
+                    log.info("Напоминание E-grow отправлено: %s получателей", sent)
+                    base_day = (now + timedelta(days=EGROW_REMINDER_DAYS)).date()
+                else:
+                    base_day = now.date()          # первый запуск — ближайшее окно
+                h = random.randint(EGROW_REMINDER_HOUR_FROM, EGROW_REMINDER_HOUR_TO - 1)
+                m = random.randint(0, 59)
+                nxt = datetime.combine(base_day, dtime(h, m), tzinfo=KYIV)
+                if nxt <= now:
+                    nxt += timedelta(days=1)
+                await db.set_kv("egrow_reminder_next_at", nxt.isoformat())
+                now = datetime.now(KYIV)
+            await asyncio.sleep(max(5, (nxt - now).total_seconds()))
+        except Exception:
+            log.exception("Ошибка напоминания E-grow")
+            await asyncio.sleep(300)
+
 # ── бот ──────────────────────────────────────────────────────────────────────
 bot = dp = None
 if BOT_TOKEN:
@@ -1025,6 +1072,7 @@ async def lifespan(_: FastAPI):
     tracker = asyncio.create_task(np_tracker())
     harvester = asyncio.create_task(grow_harvester())
     poster = asyncio.create_task(promo_poster())
+    egrow_reminder_task = asyncio.create_task(egrow_reminder())
     # guard-бот ловит ручной бан в чате/канале и зеркалит его в универсальный
     # бан (флаг в БД + бан во всех остальных местах) — «где бы ни забанил, банится везде»
     guard = asyncio.create_task(guard_bot.run(notify, on_ban=apply_ban, on_unban=apply_unban))
@@ -1036,6 +1084,7 @@ async def lifespan(_: FastAPI):
     tracker.cancel()
     harvester.cancel()
     poster.cancel()
+    egrow_reminder_task.cancel()
     guard.cancel()
     card_task.cancel()
     delay_task.cancel()
