@@ -275,6 +275,7 @@ async def init():
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS done BOOLEAN NOT NULL DEFAULT false;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ NOT NULL DEFAULT now();
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS launch_target BIGINT NOT NULL DEFAULT 30000;
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS failed BOOLEAN NOT NULL DEFAULT false;
             CREATE TABLE IF NOT EXISTS grow_photos(
                 id      BIGSERIAL PRIMARY KEY,
                 plan_id BIGINT NOT NULL,
@@ -2198,7 +2199,7 @@ def _plan_row(r) -> dict:
         "stages": _plan_stages(r),
         "stage": r["stage"], "stage_at": r["stage_at"].isoformat(),
         "start_at": r["start_at"].isoformat(),
-        "sold_pct": r["sold_pct"], "done": r["done"],
+        "sold_pct": r["sold_pct"], "done": r["done"], "failed": r["failed"],
         "raised": round(r["price"] * r["sold_pct"] / 100),
         "launch_target": r["launch_target"],
         "active": r["active"],
@@ -2414,6 +2415,21 @@ async def _payout_plan(c, plan_id: int) -> list:
     return [{"user_id": r["user_id"], "name": name, "payout": r["payout"]} for r in rows]
 
 
+async def _refund_plan(c, plan_id: int) -> list:
+    """Сбор не набрал сумму к дедлайну — возврат всех вложений, программа закрывается
+    как несостоявшаяся (как при ручном удалении программы, но без её удаления)."""
+    rows = await c.fetch(
+        "SELECT * FROM shares WHERE plan_id=$1 AND status=0 FOR UPDATE", plan_id)
+    name = await c.fetchval("SELECT name FROM grow_plans WHERE id=$1", plan_id)
+    for r in rows:
+        await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
+                        r["invested"], r["user_id"])
+    await c.execute("DELETE FROM shares WHERE plan_id=$1 AND status=0", plan_id)
+    await c.execute(
+        "UPDATE grow_plans SET done=true, failed=true, stage_at=now() WHERE id=$1", plan_id)
+    return [{"user_id": r["user_id"], "name": name, "amount": r["invested"]} for r in rows]
+
+
 async def set_grow_stage(plan_id: int, stage: int) -> list:
     """Ручное переключение стадии админом.
     stage 0..5 — просто ставит стадию; stage 6 — завершить сбор и выплатить."""
@@ -2431,9 +2447,12 @@ async def set_grow_stage(plan_id: int, stage: int) -> list:
 
 
 async def advance_grow_stages() -> list:
-    """Авто-смена стадий. Стадия 0 («Семечко») — окно сбора вложений: ждёт
-    GROW_LAUNCH_TARGET ₴ суммарных вложений вместо таймера, дальше — по дням,
-    как раньше. Выплаты — когда стадия сбора урожая закончилась."""
+    """Авто-смена стадий. Стадия 0 («Семечко») — окно сбора вложений (предпродажа):
+    ждёт launch_target ₴ суммарных вложений вместо таймера. Дни, указанные для
+    стадии «Семечко», работают как дедлайн сбора (0 — без дедлайна, ждём сколько
+    нужно): если к дедлайну сумму не набрали — все вложения возвращаются на
+    баланс и программа закрывается как несостоявшаяся. Дальше стадии идут по
+    дням, как раньше. Выплаты — когда стадия сбора урожая закончилась."""
     notes = []
     async with _pool.acquire() as c, c.transaction():
         plans = await c.fetch(
@@ -2447,7 +2466,10 @@ async def advance_grow_stages() -> list:
                 raised = round(p["price"] * p["sold_pct"] / 100)
                 target = p["launch_target"] or GROW_LAUNCH_TARGET
                 if raised < target:
-                    continue  # ждём вложений — по дням стадию 0 не двигаем
+                    deadline_days = max(0, stages[0]["d"])
+                    if deadline_days > 0 and now - at >= timedelta(days=deadline_days):
+                        notes += [{**r, "kind": "failed"} for r in await _refund_plan(c, p["id"])]
+                    continue  # ждём вложений или дедлайн — по дням стадию 0 иначе не двигаем
                 stage, at, changed, launched = 1, now, True, True
             while True:
                 dur = timedelta(days=max(0, stages[stage]["d"]))
