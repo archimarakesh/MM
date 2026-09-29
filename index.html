@@ -330,32 +330,9 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 .grow-card:active{transform:scale(.985)}
 .grow-card.gold-glow{box-shadow:0 0.5rem 1.75rem rgba(212,175,55,.09)}
 .grow-card.closed-card{opacity:.7;filter:saturate(.7)}
-.grow-hero{position:relative;aspect-ratio:16/10;border-radius:1rem;overflow:hidden;margin-bottom:0.75rem}
-.grow-hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .6s var(--ease)}
-.grow-card:active .grow-hero img{transform:scale(1.045)}
-.grow-hero-scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,4,2,0) 32%,rgba(8,6,3,.94) 100%)}
-.grow-hero-top{position:absolute;top:0.625rem;left:0.625rem;right:0.625rem;display:flex;justify-content:space-between;gap:0.5rem}
-.grow-pill{font-size:0.65625rem;font-weight:800;padding:0.28125rem 0.5625rem;border-radius:99px;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
-  background:rgba(10,8,5,.55);border:0.0625rem solid rgba(255,255,255,.12);color:var(--txt);letter-spacing:.02em;white-space:nowrap}
-.grow-pill.gold{background:linear-gradient(135deg,#f0d47a,#c9971d);color:#140f03;border-color:transparent;box-shadow:0 0.25rem 0.75rem rgba(212,175,55,.3)}
-.grow-hero-bottom{position:absolute;left:0.8125rem;right:0.8125rem;bottom:0.625rem}
-.grow-hero-bottom h3{font-size:1.09375rem;font-weight:800;color:#fff;text-shadow:0 0.125rem 0.5rem rgba(0,0,0,.6)}
-.grow-hero-bottom .gen{font-size:0.71875rem;font-weight:700;color:var(--gold-soft);margin-top:0.125rem;text-shadow:0 0.0625rem 0.375rem rgba(0,0,0,.7)}
-.stage-track{position:relative;margin:0.75rem 0 0.5rem;padding:0 0.125rem}
-.stage-track-line{position:absolute;top:0.875rem;left:0.875rem;right:0.875rem;height:0.125rem;background:rgba(255,255,255,.08);border-radius:99px}
-.stage-track-fill{height:100%;background:linear-gradient(90deg,#c9971d,#f0d47a);border-radius:99px;transition:width .8s var(--ease)}
-.stage-track-dots{position:relative;display:flex;justify-content:space-between}
-.stage-dot{width:1.75rem;height:1.75rem;border-radius:50%;display:grid;place-items:center;font-size:0.9375rem;
-  background:var(--card);border:0.0625rem solid var(--line);cursor:pointer;position:relative;z-index:1;transition:all .3s var(--ease)}
-.stage-dot.done{border-color:rgba(212,175,55,.35);background:rgba(212,175,55,.12);opacity:.85}
-.stage-dot.cur{border-color:var(--gold);background:linear-gradient(135deg,#f0d47a,#c9971d);
-  box-shadow:0 0 0 0.25rem rgba(212,175,55,.16);transform:scale(1.18);animation:stageBreathe 2.4s ease-in-out infinite}
-.stage-dot.todo{opacity:.35}
-.stage-dot:active{transform:scale(.85)!important}
 .grow-bar-fill{transition:width 1.1s cubic-bezier(.16,1,.3,1)}
 .grow-bar-fill.pulse{animation:growPulse .6s var(--ease)}
 @keyframes growPulse{0%{filter:brightness(1)}40%{filter:brightness(1.55)}100%{filter:brightness(1)}}
-@keyframes stageBreathe{0%,100%{transform:scale(1.18)}50%{transform:scale(1.32)}}
 .grow-skel{border-radius:var(--r-lg);overflow:hidden;margin-bottom:0.875rem;height:11.25rem;
   background:linear-gradient(100deg,rgba(255,255,255,.03) 30%,rgba(255,255,255,.08) 45%,rgba(255,255,255,.03) 60%);
   background-size:200% 100%;animation:growShimmer 1.4s ease-in-out infinite}
@@ -3300,41 +3277,6 @@ function showLaunchToast(name) {
   haptic('medium');
   setTimeout(() => el.remove(), 3500);
 }
-function launchProgress(p, enterP) {
-  const target = p.launch_target || 30000, raised = Math.min(target, p.raised || 0);
-  const remain = Math.max(0, target - raised);
-  const prog = Math.min(100, Math.round(raised / target * 100));
-  return `
-  <div class="presale">
-    <div class="presale-top"><span>🚀 Сбор на запуск программы</span><b>${prog}%</b></div>
-    <div style="font-size:26px;font-weight:800;color:var(--gold-soft);margin:8px 0 2px;text-align:center;font-variant-numeric:tabular-nums">
-      ${remain > 0 ? fmt(remain) + ' ₴' : '🎉 Цель собрана'}
-    </div>
-    <p class="presale-sub" style="text-align:center;margin-top:0">${remain > 0 ? 'осталось собрать до запуска' : 'программа запускается — идут последние проверки'}</p>
-    <div style="height:10px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--line);overflow:hidden;margin-top:10px">
-      <div class="grow-bar-fill" data-plan-bar="${p.id}" data-val="${raised}" data-pct="${prog}" style="height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#c9971d,#f0d47a)"></div>
-    </div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:6px">
-      <span>${fmt(raised)} ₴ собрано</span><span>цель ${fmt(target)} ₴</span>
-    </div>
-  </div>
-  <p class="note" style="margin:8px 0 10px">Вход по текущей ставке <b style="color:var(--gold-soft)">+${enterP}%</b> — самая выгодная, пока идёт сбор</p>`;
-}
-function showStageInfo(meta, s, k) {
-  haptic('light');
-  toast(`${meta[0]} ${meta[1]} · ${k === 0 ? 'вход открыт на этапе сбора' : k === 5 ? 'сбор урожая — вход закрыт' : s.d + ' дн.'} · ${k === 5 ? 'выплата после сбора' : '+' + s.p + '%'}`);
-}
-function stepper(stage, done, stages) {
-  const list = stages || DEFAULT_STAGES;
-  const fillPct = done ? 100 : Math.round(stage / (STAGE_META.length - 1) * 100);
-  return `<div class="stage-track">
-    <div class="stage-track-line"><div class="stage-track-fill" style="width:${fillPct}%"></div></div>
-    <div class="stage-track-dots">
-      ${STAGE_META.map(([e, name], i) => `<span class="stage-dot ${done || i < stage ? 'done' : i === stage ? 'cur' : 'todo'}"
-        onclick="event.stopPropagation();showStageInfo(['${e}','${name}'],${JSON.stringify(list[i]).replace(/"/g, '&quot;')},${i})">${e}</span>`).join('')}
-    </div>
-  </div>`;
-}
 function renderEgrow() {
   /* мои доли */
   const my = document.getElementById('myGrows');
@@ -3399,26 +3341,30 @@ function renderEgrow() {
     const payout = cost + Math.round(cost * enterP / 100);
     const open = growOpen.has(p.id);
     const notStarted = planNotStarted(p);
+    const collecting = p.stage === 0 && !p.done && !notStarted;
+    const target = p.launch_target || 30000;
+    const raised = Math.min(target, p.raised || 0);
+    const prog = notStarted ? 0 : collecting ? Math.round(raised / target * 100) : cycleProgress(ts, p.stage, p.stage_at, p.done);
     return `<div class="bezel gold reveal grow-card gold-glow${closed ? ' closed-card' : ''}" style="margin-bottom:14px;transition-delay:${i * 50}ms"><div class="bezel-core" style="padding:14px">
-      <div class="grow-hero" style="background:${p.grad}">
-        ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async">` : `<div style="position:absolute;inset:0;display:grid;place-items:center;font-size:44px">🌱</div>`}
-        <div class="grow-hero-scrim"></div>
-        <div class="grow-hero-top">
-          <span class="grow-pill">${STAGE_META[Math.min(p.stage, 5)][0]} ${p.done ? 'Завершено' : STAGE_META[Math.min(p.stage, 5)][1]}</span>
-          ${closed ? '' : `<span class="grow-pill gold">вход +${enterP}%</span>`}
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="width:72px;height:72px;flex:none;border-radius:12px;overflow:hidden;position:relative;background:${p.grad}">
+          ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:28px">🌱</div>`}
         </div>
-        <div class="grow-hero-bottom">
-          <h3>${p.name}</h3>
-          ${p.genetics ? `<div class="gen">🧬 ${p.genetics}</div>` : ''}
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+            <h3 style="font-size:15px;font-weight:800;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</h3>
+            ${closed ? '' : `<b style="color:var(--gold-soft);font-size:13px;flex:none">вход +${enterP}%</b>`}
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">${STAGE_META[Math.min(p.stage, 5)][0]} ${p.done ? 'Завершено' : STAGE_META[Math.min(p.stage, 5)][1]}${p.genetics ? ` · ${p.genetics}` : ''}</div>
+          ${p.investors ? `<div style="display:flex;gap:6px;font-size:10.5px;color:var(--muted);margin-top:6px">
+            <span>👥 ${p.investors} ${plInvestors(p.investors)}</span><span style="opacity:.4">·</span><span>вложено <b style="color:var(--gold-soft)">${fmt(p.raised)} ₴</b></span>
+          </div>` : ''}
         </div>
       </div>
-      ${p.sub ? `<p style="font-size:12px;color:var(--muted);margin:2px 0 4px;line-height:1.5">${p.sub}</p>` : ''}
-      ${p.investors ? `<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px;color:var(--muted)">
-        <span>👥 <b style="color:var(--txt)">${p.investors}</b> ${plInvestors(p.investors)}</span>
-        <span style="opacity:.4">·</span>
-        <span>всего вложено <b style="color:var(--gold-soft)">${fmt(p.raised)} ₴</b></span>
-      </div>` : ''}
-      ${stepper(p.stage, p.done, ts)}
+      <div style="height:6px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--line);overflow:hidden;margin-top:10px">
+        <div class="grow-bar-fill" data-plan-bar="${p.id}" data-val="${prog}" data-pct="${prog}" style="height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#c9971d,#f0d47a)"></div>
+      </div>
+      ${p.sub ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.5">${p.sub}</p>` : ''}
       ${p.live?.length ? `
       <p class="note" style="margin:6px 0 6px">📸 Живые фото · как выглядит куст</p>
       <div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px">
@@ -3435,9 +3381,9 @@ function renderEgrow() {
         <div class="presale-top"><span>⏳ До старта программы</span><b class="cd" data-until="${new Date(p.start_at).getTime()}">${fmtCountdown(new Date(p.start_at).getTime() - Date.now())}</b></div>
         <div class="presale-sub">🔥 Идёт предпродажа — зафиксируйте максимальный вход <b style="color:var(--gold-soft)">+${enterP}%</b></div>
       </div>
-      <p class="note" style="margin:0 0 10px">Полный цикл <b style="color:var(--txt)">${ts.reduce((a, s) => a + s.d, 0)} дн.</b> · отсчёт пойдёт с даты старта</p>`
-      : p.stage === 0 && !p.done ? launchProgress(p, enterP)
-      : `<p class="note" style="margin:0 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
+      <p class="note" style="margin:8px 0 10px">Полный цикл <b style="color:var(--txt)">${ts.reduce((a, s) => a + s.d, 0)} дн.</b> · отсчёт пойдёт с даты старта</p>`
+      : collecting ? `<p class="note" style="margin:8px 0 0">🚀 Идёт сбор вложений на запуск — ${prog}% собрано</p>`
+      : `<p class="note" style="margin:8px 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
         : (() => { const ct = cycleTotals(ts, p.stage, p.stage_at, p.done); return `
         Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}<br>
         Полный цикл <b style="color:var(--txt)">${ct.total} дн.</b> · до выплаты осталось <b style="color:var(--gold-soft)">~${ct.left} дн.</b>`; })()}</p>`}
@@ -3446,6 +3392,11 @@ function renderEgrow() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="grow-more"${open ? '' : ' hidden'}>
+      ${collecting ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
+        <div class="ref-stat" style="padding:8px 6px;text-align:center"><b style="font-size:13px">${fmt(raised)} ₴</b><span>собрано</span></div>
+        <div class="ref-stat" style="padding:8px 6px;text-align:center"><b style="font-size:13px">${p.investors || 0}</b><span>${plInvestors(p.investors || 0)}</span></div>
+        <div class="ref-stat" style="padding:8px 6px;text-align:center"><b style="font-size:13px;color:var(--gold-soft)">${fmt(target)} ₴</b><span>цель</span></div>
+      </div>` : ''}
       <div class="tier-table" style="margin-bottom:12px">
         ${ts.map((s, k) => `<div class="tier-row ${k === p.stage && !p.done ? 'hit' : ''}">
           <span>${STAGE_META[k][0]} ${STAGE_META[k][1]} · ${k === 0 ? `сбор ${fmt(p.launch_target || 30000)} ₴` : s.d + ' дн.'}</span>
