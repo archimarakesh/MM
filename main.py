@@ -2034,6 +2034,7 @@ async def api_grow_buy(request: Request):
     await notify(ADMIN_ID,
                  f"🌱 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) вложил "
                  f"<b>{invested} ₴</b> ({pct}%) в программу «{esc(plan_name or '—')}».")
+    await _drain_ref_notify()      # реферальный % рефереру с этого вложения
     # у всех, кто держит открытым E-grow, живой прогресс сбора обновится сам
     await ws_broadcast({"t": "grow_update"})
     return snap

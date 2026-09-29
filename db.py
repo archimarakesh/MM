@@ -2217,8 +2217,13 @@ async def get_grow_plans(include_inactive: bool = False, conn=None) -> list:
     for r in live:
         by_plan.setdefault(r["plan_id"], []).append(
             {"id": r["id"], "note": r["note"] or "", "created": r["created"].isoformat()})
+    # сколько человек всего вложилось в программу — для соц. доказательства на карточке
+    inv_rows = await c.fetch(
+        "SELECT plan_id, COUNT(DISTINCT user_id) AS n FROM shares GROUP BY plan_id")
+    investors = {r["plan_id"]: r["n"] for r in inv_rows}
     for p in plans:
         p["live"] = by_plan.get(p["id"], [])[:12]
+        p["investors"] = investors.get(p["id"], 0)
     return plans
 
 
@@ -2396,6 +2401,7 @@ async def buy_share(tg_id: int, plan_id: int, pct: int) -> dict:
             INSERT INTO shares(user_id, plan_id, pct, invested, profit_pct, payout, stage)
             VALUES($1,$2,$3,$4,$5,$6,$7)
         """, tg_id, plan_id, pct, invested, profit, payout, p["stage"])
+        await _ref_bonus(c, tg_id, invested)   # реферальный % — как с любой другой оплаты
         snap = await snapshot(tg_id, c)
         snap["bought_plan_name"] = p["name"]
         snap["bought_invested"] = invested
