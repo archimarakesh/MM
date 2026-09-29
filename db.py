@@ -2174,6 +2174,10 @@ GROW_STAGES_DEFAULT = [
     {"d": 20, "p": 15}, {"d": 28, "p": 8}, {"d": 14, "p": 0},
 ]
 HARVEST = 5  # на сборе урожая вход закрыт
+# стадия 0 («Семечко») — окно сбора вложений: длится не по дням, а до тех пор,
+# пока суммарно не вложат GROW_LAUNCH_TARGET ₴ — тогда программа «запускается»
+# и переходит на стадию 1. Дальше стадии идут по дням, как раньше.
+GROW_LAUNCH_TARGET = int(os.getenv("GROW_LAUNCH_TARGET", "30000") or 30000)
 
 
 def _plan_stages(r) -> list:
@@ -2193,6 +2197,8 @@ def _plan_row(r) -> dict:
         "stage": r["stage"], "stage_at": r["stage_at"].isoformat(),
         "start_at": r["start_at"].isoformat(),
         "sold_pct": r["sold_pct"], "done": r["done"],
+        "raised": round(r["price"] * r["sold_pct"] / 100),
+        "launch_target": GROW_LAUNCH_TARGET,
         "active": r["active"],
         "photo": bool(r["photo"]),
         "pv": len(r["photo"] or ""),
@@ -2326,7 +2332,8 @@ async def user_shares(tg_id: int, conn=None) -> list:
     c = conn or _pool
     rows = await c.fetch("""
         SELECT s.*, p.name AS plan_name, p.stage AS p_stage, p.stage_at AS p_stage_at,
-               p.stages AS p_stages, p.done AS p_done, p.start_at AS p_start_at
+               p.stages AS p_stages, p.done AS p_done, p.start_at AS p_start_at,
+               p.price AS p_price, p.sold_pct AS p_sold_pct
         FROM shares s LEFT JOIN grow_plans p ON p.id = s.plan_id
         WHERE s.user_id=$1 ORDER BY s.id DESC
     """, tg_id)
@@ -2346,6 +2353,8 @@ async def user_shares(tg_id: int, conn=None) -> list:
             "plan_stage_at": r["p_stage_at"].isoformat() if r["p_stage_at"] else None,
             "plan_start_at": r["p_start_at"].isoformat() if r["p_start_at"] else None,
             "plan_stages": st, "plan_done": bool(r["p_done"]),
+            "plan_raised": round((r["p_price"] or 0) * (r["p_sold_pct"] or 0) / 100),
+            "launch_target": GROW_LAUNCH_TARGET,
         })
     return out
 
@@ -2416,7 +2425,9 @@ async def set_grow_stage(plan_id: int, stage: int) -> list:
 
 
 async def advance_grow_stages() -> list:
-    """Авто-смена стадий по дням. Выплаты — когда стадия сбора урожая закончилась."""
+    """Авто-смена стадий. Стадия 0 («Семечко») — окно сбора вложений: ждёт
+    GROW_LAUNCH_TARGET ₴ суммарных вложений вместо таймера, дальше — по дням,
+    как раньше. Выплаты — когда стадия сбора урожая закончилась."""
     notes = []
     async with _pool.acquire() as c, c.transaction():
         plans = await c.fetch(
@@ -2426,6 +2437,11 @@ async def advance_grow_stages() -> list:
             stages = _plan_stages(p)
             stage, at = p["stage"], p["stage_at"]
             changed = finished = False
+            if stage == 0:
+                raised = round(p["price"] * p["sold_pct"] / 100)
+                if raised < GROW_LAUNCH_TARGET:
+                    continue  # ждём вложений — по дням стадию 0 не двигаем
+                stage, at, changed = 1, now, True
             while True:
                 dur = timedelta(days=max(0, stages[stage]["d"]))
                 if now - at < dur:
