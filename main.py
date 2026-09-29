@@ -2029,10 +2029,12 @@ async def api_grow_buy(request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
+    plan_name = snap.pop("bought_plan_name", None)
+    invested = snap.pop("bought_invested", 0)
     await notify(ADMIN_ID,
-                 f"🌱 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) купил долю "
-                 f"{pct}% в программе #{int(b.get('plan_id', 0))}.")
-    # у всех, кто держит открытым E-grow, живой прогресс сбора и лента вложений обновятся сами
+                 f"🌱 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) вложил "
+                 f"<b>{invested} ₴</b> ({pct}%) в программу «{esc(plan_name or '—')}».")
+    # у всех, кто держит открытым E-grow, живой прогресс сбора обновится сам
     await ws_broadcast({"t": "grow_update"})
     return snap
 
