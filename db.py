@@ -274,6 +274,7 @@ async def init():
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS sold_pct BIGINT NOT NULL DEFAULT 0;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS done BOOLEAN NOT NULL DEFAULT false;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ NOT NULL DEFAULT now();
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS launch_target BIGINT NOT NULL DEFAULT 30000;
             CREATE TABLE IF NOT EXISTS grow_photos(
                 id      BIGSERIAL PRIMARY KEY,
                 plan_id BIGINT NOT NULL,
@@ -2174,6 +2175,11 @@ GROW_STAGES_DEFAULT = [
     {"d": 20, "p": 15}, {"d": 28, "p": 8}, {"d": 14, "p": 0},
 ]
 HARVEST = 5  # на сборе урожая вход закрыт
+# стадия 0 («Семечко») — окно сбора вложений: длится не по дням, а до тех пор,
+# пока суммарно не вложат launch_target ₴ (задаётся при создании программы) —
+# тогда программа «запускается» и переходит на стадию 1. Дальше стадии идут
+# по дням, как раньше. GROW_LAUNCH_TARGET — дефолт для новых программ.
+GROW_LAUNCH_TARGET = int(os.getenv("GROW_LAUNCH_TARGET", "30000") or 30000)
 
 
 def _plan_stages(r) -> list:
@@ -2193,6 +2199,8 @@ def _plan_row(r) -> dict:
         "stage": r["stage"], "stage_at": r["stage_at"].isoformat(),
         "start_at": r["start_at"].isoformat(),
         "sold_pct": r["sold_pct"], "done": r["done"],
+        "raised": round(r["price"] * r["sold_pct"] / 100),
+        "launch_target": r["launch_target"],
         "active": r["active"],
         "photo": bool(r["photo"]),
         "pv": len(r["photo"] or ""),
@@ -2209,8 +2217,13 @@ async def get_grow_plans(include_inactive: bool = False, conn=None) -> list:
     for r in live:
         by_plan.setdefault(r["plan_id"], []).append(
             {"id": r["id"], "note": r["note"] or "", "created": r["created"].isoformat()})
+    # сколько человек всего вложилось в программу — для соц. доказательства на карточке
+    inv_rows = await c.fetch(
+        "SELECT plan_id, COUNT(DISTINCT user_id) AS n FROM shares GROUP BY plan_id")
+    investors = {r["plan_id"]: r["n"] for r in inv_rows}
     for p in plans:
         p["live"] = by_plan.get(p["id"], [])[:12]
+        p["investors"] = investors.get(p["id"], 0)
     return plans
 
 
@@ -2280,14 +2293,15 @@ async def save_grow_plan(d: dict) -> int:
             photo = json.dumps({"f": d["photo"], "t": _make_thumb(d["photo"])})
         slots = d.get("slots")
         slots = None if slots in (None, "") else max(0, int(slots))
+        launch_target = max(0, int(d.get("launch_target") or GROW_LAUNCH_TARGET))
         vals = (d["name"], d.get("sub", ""), str(d.get("genetics", "")).strip(),
                 photo, int(d["price"]), slots,
-                json.dumps(stages), bool(d.get("active", True)))
+                json.dumps(stages), bool(d.get("active", True)), launch_target)
         if d.get("id"):
             pid = int(d["id"])
             await c.execute("""
                 UPDATE grow_plans SET name=$2, sub=$3, genetics=$4, photo=$5, price=$6,
-                                      slots=$7, stages=$8, active=$9 WHERE id=$1
+                                      slots=$7, stages=$8, active=$9, launch_target=$10 WHERE id=$1
             """, pid, *vals)
             if start is not None:
                 # перепланирование старта: двигаем и отсчёт цикла, пока не пошли стадии
@@ -2302,8 +2316,8 @@ async def save_grow_plan(d: dict) -> int:
         s = start or datetime.now(timezone.utc)
         return await c.fetchval("""
             INSERT INTO grow_plans(name, sub, genetics, photo, price, slots, stages, active,
-                                   stage, stage_at, start_at, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8, 0, $9, $9,
+                                   launch_target, stage, stage_at, start_at, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9, 0, $10, $10,
                    COALESCE((SELECT MAX(pos)+1 FROM grow_plans), 0))
             RETURNING id
         """, *vals, s)
@@ -2326,7 +2340,8 @@ async def user_shares(tg_id: int, conn=None) -> list:
     c = conn or _pool
     rows = await c.fetch("""
         SELECT s.*, p.name AS plan_name, p.stage AS p_stage, p.stage_at AS p_stage_at,
-               p.stages AS p_stages, p.done AS p_done, p.start_at AS p_start_at
+               p.stages AS p_stages, p.done AS p_done, p.start_at AS p_start_at,
+               p.price AS p_price, p.sold_pct AS p_sold_pct, p.launch_target AS p_launch_target
         FROM shares s LEFT JOIN grow_plans p ON p.id = s.plan_id
         WHERE s.user_id=$1 ORDER BY s.id DESC
     """, tg_id)
@@ -2346,6 +2361,8 @@ async def user_shares(tg_id: int, conn=None) -> list:
             "plan_stage_at": r["p_stage_at"].isoformat() if r["p_stage_at"] else None,
             "plan_start_at": r["p_start_at"].isoformat() if r["p_start_at"] else None,
             "plan_stages": st, "plan_done": bool(r["p_done"]),
+            "plan_raised": round((r["p_price"] or 0) * (r["p_sold_pct"] or 0) / 100),
+            "launch_target": r["p_launch_target"] if r["p_launch_target"] is not None else GROW_LAUNCH_TARGET,
         })
     return out
 
@@ -2384,7 +2401,11 @@ async def buy_share(tg_id: int, plan_id: int, pct: int) -> dict:
             INSERT INTO shares(user_id, plan_id, pct, invested, profit_pct, payout, stage)
             VALUES($1,$2,$3,$4,$5,$6,$7)
         """, tg_id, plan_id, pct, invested, profit, payout, p["stage"])
-        return await snapshot(tg_id, c)
+        await _ref_bonus(c, tg_id, invested)   # реферальный % — как с любой другой оплаты
+        snap = await snapshot(tg_id, c)
+        snap["bought_plan_name"] = p["name"]
+        snap["bought_invested"] = invested
+        return snap
 
 
 async def _payout_plan(c, plan_id: int) -> list:
@@ -2416,7 +2437,9 @@ async def set_grow_stage(plan_id: int, stage: int) -> list:
 
 
 async def advance_grow_stages() -> list:
-    """Авто-смена стадий по дням. Выплаты — когда стадия сбора урожая закончилась."""
+    """Авто-смена стадий. Стадия 0 («Семечко») — окно сбора вложений: ждёт
+    GROW_LAUNCH_TARGET ₴ суммарных вложений вместо таймера, дальше — по дням,
+    как раньше. Выплаты — когда стадия сбора урожая закончилась."""
     notes = []
     async with _pool.acquire() as c, c.transaction():
         plans = await c.fetch(
@@ -2425,7 +2448,13 @@ async def advance_grow_stages() -> list:
         for p in plans:
             stages = _plan_stages(p)
             stage, at = p["stage"], p["stage_at"]
-            changed = finished = False
+            changed = finished = launched = False
+            if stage == 0:
+                raised = round(p["price"] * p["sold_pct"] / 100)
+                target = p["launch_target"] or GROW_LAUNCH_TARGET
+                if raised < target:
+                    continue  # ждём вложений — по дням стадию 0 не двигаем
+                stage, at, changed, launched = 1, now, True, True
             while True:
                 dur = timedelta(days=max(0, stages[stage]["d"]))
                 if now - at < dur:
@@ -2440,8 +2469,13 @@ async def advance_grow_stages() -> list:
                 await c.execute("""
                     UPDATE grow_plans SET stage=$2, stage_at=$3, done=$4 WHERE id=$1
                 """, p["id"], stage, at, finished)
+                if launched:
+                    investors = await c.fetch(
+                        "SELECT DISTINCT user_id FROM shares WHERE plan_id=$1 AND status=0", p["id"])
+                    notes += [{"kind": "launch", "plan_id": p["id"], "name": p["name"],
+                               "user_id": r["user_id"]} for r in investors]
                 if finished:
-                    notes += await _payout_plan(c, p["id"])
+                    notes += [{**n, "kind": "harvest"} for n in await _payout_plan(c, p["id"])]
     return notes
 
 

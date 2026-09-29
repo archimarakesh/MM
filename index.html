@@ -325,6 +325,28 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 .tier-row:last-child{border-bottom:none}
 .tier-row.hit{background:rgba(212,175,55,.09);color:var(--gold-soft)}
 .tier-row b{font-weight:700}
+/* E-grow: живая карточка программы */
+.grow-card{transition:transform .18s var(--ease),box-shadow .3s var(--ease)}
+.grow-card:active{transform:scale(.985)}
+.grow-card.gold-glow{box-shadow:0 0.5rem 1.75rem rgba(212,175,55,.09)}
+.grow-card.closed-card{opacity:.7;filter:saturate(.7)}
+.grow-bar-fill{transition:width 1.1s cubic-bezier(.16,1,.3,1)}
+.grow-bar-fill.pulse{animation:growPulse .6s var(--ease)}
+@keyframes growPulse{0%{filter:brightness(1)}40%{filter:brightness(1.55)}100%{filter:brightness(1)}}
+.grow-skel{border-radius:var(--r-lg);overflow:hidden;margin-bottom:0.875rem;height:11.25rem;
+  background:linear-gradient(100deg,rgba(255,255,255,.03) 30%,rgba(255,255,255,.08) 45%,rgba(255,255,255,.03) 60%);
+  background-size:200% 100%;animation:growShimmer 1.4s ease-in-out infinite}
+@keyframes growShimmer{0%{background-position:120% 0}100%{background-position:-20% 0}}
+.confetti-layer{position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden}
+.confetti-bit{position:absolute;top:-1.25rem;width:0.5rem;height:0.75rem;opacity:.95;
+  animation:confettiFall linear forwards;border-radius:0.125rem}
+@keyframes confettiFall{to{transform:translateY(110vh) rotate(600deg);opacity:0}}
+.launch-toast{position:fixed;left:50%;top:1rem;transform:translateX(-50%);z-index:9998;
+  background:linear-gradient(135deg,#1c1712,#241c12);border:0.0625rem solid rgba(212,175,55,.4);
+  border-radius:1rem;padding:0.75rem 1.125rem;display:flex;align-items:center;gap:0.5rem;
+  box-shadow:0 0.75rem 2rem rgba(0,0,0,.45);font-size:0.8125rem;font-weight:700;color:var(--txt);
+  animation:launchToastIn .45s var(--ease)}
+@keyframes launchToastIn{from{opacity:0;transform:translate(-50%,-0.75rem)}to{opacity:1;transform:translate(-50%,0)}}
 .total-row{display:flex;align-items:baseline;justify-content:space-between;margin:0.25rem 0.125rem 1rem}
 .total-row span{font-size:0.75rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)}
 .total-row b{font-size:1.5625rem;font-weight:800;color:var(--gold-soft);letter-spacing:-.02em}
@@ -1152,6 +1174,9 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <div class="field"><label>Цена куста (100%), ₴</label><input id="gePrice" inputmode="numeric" placeholder="10000"></div>
     <div class="field"><label>Кол-во кустов</label><input id="geSlots" inputmode="numeric" placeholder="например 96"></div>
   </div>
+  <div class="field"><label>Сумма сбора для запуска, ₴</label><input id="geLaunchTarget" inputmode="numeric" placeholder="30000">
+    <small style="display:block;margin-top:5px;font-size:11px;color:var(--muted-2);line-height:1.4">Стадия «Семечко» держится, пока не соберут эту сумму — потом стадии идут по дням (дни у «Семечко» в таблице ниже не используются).</small>
+  </div>
   <div class="field"><label>Старт программы · предпродажа (необязательно)</label>
     <input type="datetime-local" id="geStart">
     <small style="display:block;margin-top:5px;font-size:11px;color:var(--muted-2);line-height:1.4">Пусто — старт сразу. Дата в будущем: в E-growing показывается таймер обратного отсчёта, идёт предпродажа, отсчёт цикла начнётся с этой даты.</small>
@@ -1362,7 +1387,7 @@ function applySnapshot(d) {
   S.serverLockUntil = d.pin_locked_until ? new Date(d.pin_locked_until).getTime() : 0;
   maybeShowBonus();
   if (d.products) P = d.products.map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
-  if (d.grow_plans) PLANS = d.grow_plans.map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] }));
+  if (d.grow_plans) { PLANS = d.grow_plans.map((p, i) => ({ ...p, grad: GROW_GRADS[i % GROW_GRADS.length] })); plansLoaded = true; }
   if (d.shares) SHARES = d.shares;
   if (document.getElementById('view-egrow').classList.contains('active')) renderEgrow();
   if (d.payment) PAY = d.payment;
@@ -1979,6 +2004,8 @@ function tierLabel(ts, i, unit) { const u = uShort(unit); const lo = Math.max(ts
 const goodsList = () => P || PRODUCTS;
 const ADMIN_CHAT = 'https://t.me/magicmarket_boss';
 let SHARES = [], PLANS = [];   // мои доли и программы выращивания
+let plansLoaded = false;       // true после первого ответа с grow_plans — отличаем загрузку от пустого списка
+const growStageSeen = {};      // planId → последняя увиденная стадия, чтобы поймать момент запуска
 const GROW_GRADS = [
   'linear-gradient(140deg,#3a1224,#1c0610)', 'linear-gradient(140deg,#2e1a08,#160c04)',
   'linear-gradient(140deg,#123a1e,#06160c)', 'linear-gradient(140deg,#2a1236,#140620)',
@@ -2440,6 +2467,12 @@ function plReviews(n) {
   if (a === 1 && b !== 11) return 'отзыв';
   if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return 'отзыва';
   return 'отзывов';
+}
+function plInvestors(n) {
+  const a = n % 10, b = n % 100;
+  if (a === 1 && b !== 11) return 'инвестор';
+  if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return 'инвестора';
+  return 'инвесторов';
 }
 const AVA_GRADS = [['#f0d47a', '#c9971d'], ['#8ec5ff', '#3a6ea5'], ['#a0e8af', '#3f8f5a'],
   ['#f6a5c0', '#b85477'], ['#c9b3f5', '#6a4fb3'], ['#ffcf9e', '#c9741d']];
@@ -3204,10 +3237,45 @@ function armGrowCountdown() {
   if (growTick) { clearInterval(growTick); growTick = null; }
   if (document.querySelector('#view-egrow [data-until]')) { tickGrow(); growTick = setInterval(tickGrow, 1000); }
 }
-function stepper(stage, done) {
-  return `<div style="display:flex;justify-content:space-between;margin:10px 0 4px">
-    ${STAGE_META.map(([e], i) => `<span style="font-size:17px;opacity:${done || i < stage ? '.45' : i === stage ? '1' : '.22'};${i === stage && !done ? 'transform:scale(1.25)' : ''}">${e}</span>`).join('')}
-  </div>`;
+/* прогресс-бары сбора: плавная заливка при первом показе, пульс — когда сумма выросла */
+const growBarSeen = {};
+function armGrowBars() {
+  document.querySelectorAll('#view-egrow [data-plan-bar]').forEach(el => {
+    const id = el.dataset.planBar, val = +el.dataset.val, pct = +el.dataset.pct || 0;
+    if (!(id in growBarSeen)) {
+      requestAnimationFrame(() => requestAnimationFrame(() => { el.style.width = pct + '%'; }));
+    } else {
+      el.style.width = pct + '%';
+      if (val > growBarSeen[id]) {
+        el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
+      }
+    }
+    growBarSeen[id] = val;
+  });
+}
+const confettiColors = ['#e0b93a', '#f0d47a', '#c9971d', '#fff3c4', '#9c7a1a'];
+function fireConfetti() {
+  const layer = document.createElement('div');
+  layer.className = 'confetti-layer';
+  for (let i = 0; i < 26; i++) {
+    const bit = document.createElement('div');
+    bit.className = 'confetti-bit';
+    bit.style.left = Math.random() * 100 + '%';
+    bit.style.background = confettiColors[i % confettiColors.length];
+    bit.style.animationDuration = (1.6 + Math.random() * 1.2) + 's';
+    bit.style.animationDelay = (Math.random() * 0.4) + 's';
+    layer.appendChild(bit);
+  }
+  document.body.appendChild(layer);
+  setTimeout(() => layer.remove(), 3200);
+}
+function showLaunchToast(name) {
+  const el = document.createElement('div');
+  el.className = 'launch-toast';
+  el.innerHTML = `🚀 <span>«${auEsc ? auEsc(name) : name}» запущена!</span>`;
+  document.body.appendChild(el);
+  haptic('medium');
+  setTimeout(() => el.remove(), 3500);
 }
 function renderEgrow() {
   /* мои доли */
@@ -3220,11 +3288,15 @@ function renderEgrow() {
       active.map(s => {
         const st = s.plan_stage, meta = STAGE_META[Math.min(st, 5)];
         const ns = s.plan_start_at && new Date(s.plan_start_at).getTime() > Date.now();
-        const prog = ns ? 0 : cycleProgress(s.plan_stages, st, s.plan_stage_at, s.plan_done);
+        const collecting = !ns && st === 0 && !s.plan_done;
+        const target = s.launch_target || 30000, raised = Math.min(target, s.plan_raised || 0);
+        const remain = Math.max(0, target - raised);
+        const prog = ns ? 0 : collecting ? Math.round(raised / target * 100) : cycleProgress(s.plan_stages, st, s.plan_stage_at, s.plan_done);
         return `<div class="bezel gold reveal" style="margin-bottom:12px"><div class="bezel-core" style="padding:15px 16px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <b style="font-size:14.5px">${s.plan_name} · ${s.pct}%</b>
             ${ns ? '<span class="status st-wait">⏳ предпродажа</span>'
+                 : collecting ? '<span class="status st-wait">🚀 сбор на запуск</span>'
                  : `<span class="status ${st >= 5 ? 'st-done' : 'st-ship'}">${meta[1]} ${meta[0]}</span>`}
           </div>
           <div style="height:8px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--line);overflow:hidden;margin-top:10px">
@@ -3233,6 +3305,7 @@ function renderEgrow() {
           <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:8px">
             <span>вход ${fmt(s.invested)} ₴ (+${s.profit_pct}%)</span>
             <span>${ns ? `старт через ${cdSpan(s.plan_start_at)}`
+                       : collecting ? (remain > 0 ? `осталось собрать <b style="color:var(--gold-soft)">${fmt(remain)} ₴</b>` : 'цель собрана 🎉')
                        : `выплата <b style="color:var(--gold-soft)">${fmt(s.payout)} ₴</b> · ~через ${cycleTotals(s.plan_stages, s.plan_stage, s.plan_stage_at, s.plan_done).left} дн.`}</span>
           </div>
         </div></div>`;
@@ -3243,9 +3316,16 @@ function renderEgrow() {
   }
 
   /* программы */
+  PLANS.forEach(p => {
+    const prev = growStageSeen[p.id];
+    if (prev !== undefined && prev === 0 && p.stage >= 1) { fireConfetti(); showLaunchToast(p.name); }
+    growStageSeen[p.id] = p.stage;
+  });
   const el = document.getElementById('growPlans');
   if (!PLANS.length) {
-    el.innerHTML = `<div class="empty" style="padding:30px"><div class="e-ico">🌱</div><p>Программы скоро появятся.<br>Следите за анонсами в чате.</p></div>`;
+    el.innerHTML = plansLoaded
+      ? `<div class="empty" style="padding:30px"><div class="e-ico">🌱</div><p>Программы скоро появятся.<br>Следите за анонсами в чате.</p></div>`
+      : Array(2).fill('<div class="grow-skel"></div>').join('');
     return;
   }
   el.innerHTML = PLANS.map((p, i) => {
@@ -3261,17 +3341,30 @@ function renderEgrow() {
     const payout = cost + Math.round(cost * enterP / 100);
     const open = growOpen.has(p.id);
     const notStarted = planNotStarted(p);
-    return `<div class="bezel reveal" style="margin-bottom:14px;transition-delay:${i * 50}ms"><div class="bezel-core" style="padding:14px">
-      <div class="good-img" style="background:${p.grad};aspect-ratio:2/1;margin-bottom:10px">
-        ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : `<span style="font-size:40px">🌱</span>`}
+    const collecting = p.stage === 0 && !p.done && !notStarted;
+    const target = p.launch_target || 30000;
+    const raised = Math.min(target, p.raised || 0);
+    const prog = notStarted ? 0 : collecting ? Math.round(raised / target * 100) : cycleProgress(ts, p.stage, p.stage_at, p.done);
+    return `<div class="bezel gold reveal grow-card gold-glow${closed ? ' closed-card' : ''}" style="margin-bottom:14px;transition-delay:${i * 50}ms"><div class="bezel-core" style="padding:14px">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="width:72px;height:72px;flex:none;border-radius:12px;overflow:hidden;position:relative;background:${p.grad}">
+          ${p.photo ? `<img src="/growphoto/${p.id}?size=t&v=${p.pv || 0}" alt="" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:28px">🌱</div>`}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+            <h3 style="font-size:15px;font-weight:800;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</h3>
+            ${closed ? '' : `<b style="color:var(--gold-soft);font-size:13px;flex:none">вход +${enterP}%</b>`}
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">${STAGE_META[Math.min(p.stage, 5)][0]} ${p.done ? 'Завершено' : STAGE_META[Math.min(p.stage, 5)][1]}${p.genetics ? ` · ${p.genetics}` : ''}</div>
+          ${p.investors ? `<div style="display:flex;gap:6px;font-size:10.5px;color:var(--muted);margin-top:6px">
+            <span>👥 ${p.investors} ${plInvestors(p.investors)}</span><span style="opacity:.4">·</span><span>вложено <b style="color:var(--gold-soft)">${fmt(p.raised)} ₴</b></span>
+          </div>` : ''}
+        </div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <h3 style="font-size:16px;font-weight:800">${p.name}</h3>
-        ${closed ? '' : `<b style="color:var(--gold-soft);font-size:15px">вход +${enterP}%</b>`}
+      <div style="height:6px;border-radius:99px;background:rgba(255,255,255,.07);border:1px solid var(--line);overflow:hidden;margin-top:10px">
+        <div class="grow-bar-fill" data-plan-bar="${p.id}" data-val="${prog}" data-pct="${prog}" style="height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#c9971d,#f0d47a)"></div>
       </div>
-      ${p.genetics ? `<div style="font-size:11.5px;font-weight:600;color:var(--gold-soft);margin-top:3px">🧬 ${p.genetics}</div>` : ''}
-      ${p.sub ? `<p style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5">${p.sub}</p>` : ''}
-      ${stepper(p.stage, p.done)}
+      ${p.sub ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.5">${p.sub}</p>` : ''}
       ${p.live?.length ? `
       <p class="note" style="margin:6px 0 6px">📸 Живые фото · как выглядит куст</p>
       <div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px">
@@ -3288,8 +3381,9 @@ function renderEgrow() {
         <div class="presale-top"><span>⏳ До старта программы</span><b class="cd" data-until="${new Date(p.start_at).getTime()}">${fmtCountdown(new Date(p.start_at).getTime() - Date.now())}</b></div>
         <div class="presale-sub">🔥 Идёт предпродажа — зафиксируйте максимальный вход <b style="color:var(--gold-soft)">+${enterP}%</b></div>
       </div>
-      <p class="note" style="margin:0 0 10px">Полный цикл <b style="color:var(--txt)">${ts.reduce((a, s) => a + s.d, 0)} дн.</b> · отсчёт пойдёт с даты старта</p>`
-      : `<p class="note" style="margin:0 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
+      <p class="note" style="margin:8px 0 10px">Полный цикл <b style="color:var(--txt)">${ts.reduce((a, s) => a + s.d, 0)} дн.</b> · отсчёт пойдёт с даты старта</p>`
+      : collecting ? `<p class="note" style="margin:8px 0 0">🚀 Идёт сбор вложений на запуск — ${prog}% собрано</p>`
+      : `<p class="note" style="margin:8px 0 10px">${p.done ? 'Цикл завершён — урожай собран и выплачен'
         : (() => { const ct = cycleTotals(ts, p.stage, p.stage_at, p.done); return `
         Стадия: <b style="color:var(--txt)">${STAGE_META[p.stage][1]}</b>${p.stage < 5 ? ` · до следующей ~${stageDaysLeft(p)} дн.` : ' · выплата после окончания сбора'}<br>
         Полный цикл <b style="color:var(--txt)">${ct.total} дн.</b> · до выплаты осталось <b style="color:var(--gold-soft)">~${ct.left} дн.</b>`; })()}</p>`}
@@ -3298,9 +3392,14 @@ function renderEgrow() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="grow-more"${open ? '' : ' hidden'}>
+      ${collecting ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
+        <div class="ref-stat" style="padding:8px 6px;text-align:center"><b style="font-size:13px">${fmt(raised)} ₴</b><span>собрано</span></div>
+        <div class="ref-stat" style="padding:8px 6px;text-align:center"><b style="font-size:13px">${p.investors || 0}</b><span>${plInvestors(p.investors || 0)}</span></div>
+        <div class="ref-stat" style="padding:8px 6px;text-align:center"><b style="font-size:13px;color:var(--gold-soft)">${fmt(target)} ₴</b><span>цель</span></div>
+      </div>` : ''}
       <div class="tier-table" style="margin-bottom:12px">
         ${ts.map((s, k) => `<div class="tier-row ${k === p.stage && !p.done ? 'hit' : ''}">
-          <span>${STAGE_META[k][0]} ${STAGE_META[k][1]} · ${s.d} дн.</span>
+          <span>${STAGE_META[k][0]} ${STAGE_META[k][1]} · ${k === 0 ? `сбор ${fmt(p.launch_target || 30000)} ₴` : s.d + ' дн.'}</span>
           <b>${k === 5 ? 'вход закрыт' : '+' + s.p + '%'}</b></div>`).join('')}
       </div>
       ${closed ? `<button class="btn btn-ghost" disabled>${p.done ? 'Программа завершена' : '🧺 Идёт сбор урожая — вход закрыт'}</button>` : `
@@ -3322,6 +3421,7 @@ function renderEgrow() {
   }).join('');
   observeReveals();
   armGrowCountdown();
+  armGrowBars();
 }
 function toggleGrow(planId) { haptic('light'); growOpen.has(planId) ? growOpen.delete(planId) : growOpen.add(planId); renderEgrow(); }
 function selShare(planId, pct) { haptic('light'); selPct[planId] = pct; renderEgrow(); }
@@ -4117,6 +4217,7 @@ function openGedit(id) {
   document.getElementById('geSub').value = curGe?.sub || '';
   document.getElementById('gePrice').value = curGe?.price ?? '';
   document.getElementById('geSlots').value = curGe ? (curGe.slots ?? '') : '';
+  document.getElementById('geLaunchTarget').value = curGe ? (curGe.launch_target ?? '') : 30000;
   document.getElementById('geStart').value = (curGe && planNotStarted(curGe)) ? toLocalInput(curGe.start_at) : '';
   const ts = curGe ? planStages(curGe) : DEFAULT_STAGES;
   document.getElementById('geStages').innerHTML = ts.map((s, i) => `
@@ -4239,13 +4340,15 @@ async function saveGedit() {
     stages.push({ d, p: p || 0 });
   }
   const slotsRaw = document.getElementById('geSlots').value.trim();
+  const ltRaw = document.getElementById('geLaunchTarget').value.trim();
+  const launchTarget = ltRaw === '' ? 30000 : Math.max(0, parseInt(ltRaw, 10) || 0);
   const photo = gePhotoData === 'remove' ? null : (gePhotoData || (curGe ? 'keep' : null));
   try {
     const r = await API.call('/api/admin/grow', {
       id: curGe?.id || null, name,
       genetics: document.getElementById('geGenetics').value.trim(),
       sub: document.getElementById('geSub').value.trim(),
-      price, stages,
+      price, stages, launch_target: launchTarget,
       slots: slotsRaw === '' ? null : Math.max(0, parseInt(slotsRaw, 10) || 0),
       start_at: document.getElementById('geStart').value ? new Date(document.getElementById('geStart').value).toISOString() : null,
       active: geActiveVal, photo,

@@ -559,13 +559,27 @@ async def card_checker():
 
 
 async def grow_harvester():
-    """Раз в 5 минут двигает стадии программ по расписанию; на сборе — выплаты."""
+    """Раз в 5 минут двигает стадии программ: сбор вложений → запуск (по сумме),
+    дальше стадии по дням; на сборе урожая — выплаты."""
     while True:
         try:
-            for g in await db.advance_grow_stages():
-                await notify(g["user_id"],
-                             f"🧺 Урожай «{g['name']}» собран! "
-                             f"Выплата <b>{g['payout']} ₴</b> зачислена на баланс.")
+            notes = await db.advance_grow_stages()
+            launched_plans = set()
+            for g in notes:
+                if g["kind"] == "launch":
+                    launched_plans.add(g["plan_id"])
+                    await notify(g["user_id"],
+                                 f"🚀 Программа «{g['name']}» запущена — собрали нужную сумму! "
+                                 "Дальше рост идёт по стадиям.")
+                else:
+                    await notify(g["user_id"],
+                                 f"🧺 Урожай «{g['name']}» собран! "
+                                 f"Выплата <b>{g['payout']} ₴</b> зачислена на баланс.")
+            if notes:
+                # даже те, кто не вложился, видят живой прогресс и запуск программы
+                for pid in launched_plans:
+                    await ws_broadcast({"t": "grow_launch", "plan_id": pid})
+                await ws_broadcast({"t": "grow_update"})
         except Exception:
             log.exception("Ошибка стадий E-growing")
         await asyncio.sleep(300)
@@ -2015,9 +2029,14 @@ async def api_grow_buy(request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
+    plan_name = snap.pop("bought_plan_name", None)
+    invested = snap.pop("bought_invested", 0)
     await notify(ADMIN_ID,
-                 f"🌱 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) купил долю "
-                 f"{pct}% в программе #{int(b.get('plan_id', 0))}.")
+                 f"🌱 {esc(u.get('first_name'))} (@{esc(u.get('username') or '—')}) вложил "
+                 f"<b>{invested} ₴</b> ({pct}%) в программу «{esc(plan_name or '—')}».")
+    await _drain_ref_notify()      # реферальный % рефереру с этого вложения
+    # у всех, кто держит открытым E-grow, живой прогресс сбора обновится сам
+    await ws_broadcast({"t": "grow_update"})
     return snap
 
 
