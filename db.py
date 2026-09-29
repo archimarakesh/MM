@@ -274,6 +274,7 @@ async def init():
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS sold_pct BIGINT NOT NULL DEFAULT 0;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS done BOOLEAN NOT NULL DEFAULT false;
             ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ NOT NULL DEFAULT now();
+            ALTER TABLE grow_plans ADD COLUMN IF NOT EXISTS launch_target BIGINT NOT NULL DEFAULT 30000;
             CREATE TABLE IF NOT EXISTS grow_photos(
                 id      BIGSERIAL PRIMARY KEY,
                 plan_id BIGINT NOT NULL,
@@ -2175,8 +2176,9 @@ GROW_STAGES_DEFAULT = [
 ]
 HARVEST = 5  # на сборе урожая вход закрыт
 # стадия 0 («Семечко») — окно сбора вложений: длится не по дням, а до тех пор,
-# пока суммарно не вложат GROW_LAUNCH_TARGET ₴ — тогда программа «запускается»
-# и переходит на стадию 1. Дальше стадии идут по дням, как раньше.
+# пока суммарно не вложат launch_target ₴ (задаётся при создании программы) —
+# тогда программа «запускается» и переходит на стадию 1. Дальше стадии идут
+# по дням, как раньше. GROW_LAUNCH_TARGET — дефолт для новых программ.
 GROW_LAUNCH_TARGET = int(os.getenv("GROW_LAUNCH_TARGET", "30000") or 30000)
 
 
@@ -2198,7 +2200,7 @@ def _plan_row(r) -> dict:
         "start_at": r["start_at"].isoformat(),
         "sold_pct": r["sold_pct"], "done": r["done"],
         "raised": round(r["price"] * r["sold_pct"] / 100),
-        "launch_target": GROW_LAUNCH_TARGET,
+        "launch_target": r["launch_target"],
         "active": r["active"],
         "photo": bool(r["photo"]),
         "pv": len(r["photo"] or ""),
@@ -2299,14 +2301,15 @@ async def save_grow_plan(d: dict) -> int:
             photo = json.dumps({"f": d["photo"], "t": _make_thumb(d["photo"])})
         slots = d.get("slots")
         slots = None if slots in (None, "") else max(0, int(slots))
+        launch_target = max(0, int(d.get("launch_target") or GROW_LAUNCH_TARGET))
         vals = (d["name"], d.get("sub", ""), str(d.get("genetics", "")).strip(),
                 photo, int(d["price"]), slots,
-                json.dumps(stages), bool(d.get("active", True)))
+                json.dumps(stages), bool(d.get("active", True)), launch_target)
         if d.get("id"):
             pid = int(d["id"])
             await c.execute("""
                 UPDATE grow_plans SET name=$2, sub=$3, genetics=$4, photo=$5, price=$6,
-                                      slots=$7, stages=$8, active=$9 WHERE id=$1
+                                      slots=$7, stages=$8, active=$9, launch_target=$10 WHERE id=$1
             """, pid, *vals)
             if start is not None:
                 # перепланирование старта: двигаем и отсчёт цикла, пока не пошли стадии
@@ -2321,8 +2324,8 @@ async def save_grow_plan(d: dict) -> int:
         s = start or datetime.now(timezone.utc)
         return await c.fetchval("""
             INSERT INTO grow_plans(name, sub, genetics, photo, price, slots, stages, active,
-                                   stage, stage_at, start_at, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8, 0, $9, $9,
+                                   launch_target, stage, stage_at, start_at, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9, 0, $10, $10,
                    COALESCE((SELECT MAX(pos)+1 FROM grow_plans), 0))
             RETURNING id
         """, *vals, s)
@@ -2346,7 +2349,7 @@ async def user_shares(tg_id: int, conn=None) -> list:
     rows = await c.fetch("""
         SELECT s.*, p.name AS plan_name, p.stage AS p_stage, p.stage_at AS p_stage_at,
                p.stages AS p_stages, p.done AS p_done, p.start_at AS p_start_at,
-               p.price AS p_price, p.sold_pct AS p_sold_pct
+               p.price AS p_price, p.sold_pct AS p_sold_pct, p.launch_target AS p_launch_target
         FROM shares s LEFT JOIN grow_plans p ON p.id = s.plan_id
         WHERE s.user_id=$1 ORDER BY s.id DESC
     """, tg_id)
@@ -2367,7 +2370,7 @@ async def user_shares(tg_id: int, conn=None) -> list:
             "plan_start_at": r["p_start_at"].isoformat() if r["p_start_at"] else None,
             "plan_stages": st, "plan_done": bool(r["p_done"]),
             "plan_raised": round((r["p_price"] or 0) * (r["p_sold_pct"] or 0) / 100),
-            "launch_target": GROW_LAUNCH_TARGET,
+            "launch_target": r["p_launch_target"] if r["p_launch_target"] is not None else GROW_LAUNCH_TARGET,
         })
     return out
 
@@ -2452,7 +2455,8 @@ async def advance_grow_stages() -> list:
             changed = finished = launched = False
             if stage == 0:
                 raised = round(p["price"] * p["sold_pct"] / 100)
-                if raised < GROW_LAUNCH_TARGET:
+                target = p["launch_target"] or GROW_LAUNCH_TARGET
+                if raised < target:
                     continue  # ждём вложений — по дням стадию 0 не двигаем
                 stage, at, changed, launched = 1, now, True, True
             while True:

@@ -1202,6 +1202,9 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <div class="field"><label>Цена куста (100%), ₴</label><input id="gePrice" inputmode="numeric" placeholder="10000"></div>
     <div class="field"><label>Кол-во кустов</label><input id="geSlots" inputmode="numeric" placeholder="например 96"></div>
   </div>
+  <div class="field"><label>Сумма сбора для запуска, ₴</label><input id="geLaunchTarget" inputmode="numeric" placeholder="30000">
+    <small style="display:block;margin-top:5px;font-size:11px;color:var(--muted-2);line-height:1.4">Стадия «Семечко» держится, пока не соберут эту сумму — потом стадии идут по дням (дни у «Семечко» в таблице ниже не используются).</small>
+  </div>
   <div class="field"><label>Старт программы · предпродажа (необязательно)</label>
     <input type="datetime-local" id="geStart">
     <small style="display:block;margin-top:5px;font-size:11px;color:var(--muted-2);line-height:1.4">Пусто — старт сразу. Дата в будущем: в E-growing показывается таймер обратного отсчёта, идёт предпродажа, отсчёт цикла начнётся с этой даты.</small>
@@ -4270,6 +4273,7 @@ function openGedit(id) {
   document.getElementById('geSub').value = curGe?.sub || '';
   document.getElementById('gePrice').value = curGe?.price ?? '';
   document.getElementById('geSlots').value = curGe ? (curGe.slots ?? '') : '';
+  document.getElementById('geLaunchTarget').value = curGe ? (curGe.launch_target ?? '') : 30000;
   document.getElementById('geStart').value = (curGe && planNotStarted(curGe)) ? toLocalInput(curGe.start_at) : '';
   const ts = curGe ? planStages(curGe) : DEFAULT_STAGES;
   document.getElementById('geStages').innerHTML = ts.map((s, i) => `
@@ -4392,13 +4396,15 @@ async function saveGedit() {
     stages.push({ d, p: p || 0 });
   }
   const slotsRaw = document.getElementById('geSlots').value.trim();
+  const ltRaw = document.getElementById('geLaunchTarget').value.trim();
+  const launchTarget = ltRaw === '' ? 30000 : Math.max(0, parseInt(ltRaw, 10) || 0);
   const photo = gePhotoData === 'remove' ? null : (gePhotoData || (curGe ? 'keep' : null));
   try {
     const r = await API.call('/api/admin/grow', {
       id: curGe?.id || null, name,
       genetics: document.getElementById('geGenetics').value.trim(),
       sub: document.getElementById('geSub').value.trim(),
-      price, stages,
+      price, stages, launch_target: launchTarget,
       slots: slotsRaw === '' ? null : Math.max(0, parseInt(slotsRaw, 10) || 0),
       start_at: document.getElementById('geStart').value ? new Date(document.getElementById('geStart').value).toISOString() : null,
       active: geActiveVal, photo,
