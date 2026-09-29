@@ -2215,8 +2215,21 @@ async def get_grow_plans(include_inactive: bool = False, conn=None) -> list:
     for r in live:
         by_plan.setdefault(r["plan_id"], []).append(
             {"id": r["id"], "note": r["note"] or "", "created": r["created"].isoformat()})
+    # последние вложения по программе — для живой ленты на карточке сбора
+    recent = await c.fetch("""
+        SELECT plan_id, invested, created FROM (
+            SELECT plan_id, invested, created,
+                   ROW_NUMBER() OVER (PARTITION BY plan_id ORDER BY created DESC) AS rn
+            FROM shares
+        ) t WHERE rn <= 6 ORDER BY created DESC
+    """)
+    by_plan_recent: dict = {}
+    for r in recent:
+        by_plan_recent.setdefault(r["plan_id"], []).append(
+            {"amount": r["invested"], "created": r["created"].isoformat()})
     for p in plans:
         p["live"] = by_plan.get(p["id"], [])[:12]
+        p["recent"] = by_plan_recent.get(p["id"], [])[:6]
     return plans
 
 
@@ -2436,12 +2449,12 @@ async def advance_grow_stages() -> list:
         for p in plans:
             stages = _plan_stages(p)
             stage, at = p["stage"], p["stage_at"]
-            changed = finished = False
+            changed = finished = launched = False
             if stage == 0:
                 raised = round(p["price"] * p["sold_pct"] / 100)
                 if raised < GROW_LAUNCH_TARGET:
                     continue  # ждём вложений — по дням стадию 0 не двигаем
-                stage, at, changed = 1, now, True
+                stage, at, changed, launched = 1, now, True, True
             while True:
                 dur = timedelta(days=max(0, stages[stage]["d"]))
                 if now - at < dur:
@@ -2456,8 +2469,13 @@ async def advance_grow_stages() -> list:
                 await c.execute("""
                     UPDATE grow_plans SET stage=$2, stage_at=$3, done=$4 WHERE id=$1
                 """, p["id"], stage, at, finished)
+                if launched:
+                    investors = await c.fetch(
+                        "SELECT DISTINCT user_id FROM shares WHERE plan_id=$1 AND status=0", p["id"])
+                    notes += [{"kind": "launch", "plan_id": p["id"], "name": p["name"],
+                               "user_id": r["user_id"]} for r in investors]
                 if finished:
-                    notes += await _payout_plan(c, p["id"])
+                    notes += [{**n, "kind": "harvest"} for n in await _payout_plan(c, p["id"])]
     return notes
 
 
