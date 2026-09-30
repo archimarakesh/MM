@@ -3296,10 +3296,35 @@ function showLaunchToast(name) {
   haptic('medium');
   setTimeout(() => el.remove(), 3500);
 }
+function plBush(n) {
+  const a = n % 10, b = n % 100;
+  if (a === 1 && b !== 11) return 'куст';
+  if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return 'куста';
+  return 'кустов';
+}
+function bushLabel(pct) {
+  const whole = Math.floor(pct / 100);
+  const tenths = Math.round((pct % 100) / 10);
+  if (whole === 0) return `${tenths}/10 куста`;
+  if (tenths === 0) return `${whole} ${plBush(whole)}`;
+  return `${whole} ${plBush(whole)} и ${tenths}/10`;
+}
+function groupShares(list) {
+  const groups = {};
+  const order = [];
+  for (const s of list) {
+    const key = s.plan_id + ':' + s.profit_pct;
+    if (!groups[key]) { groups[key] = { ...s, pct: 0, invested: 0, payout: 0 }; order.push(key); }
+    groups[key].pct += s.pct;
+    groups[key].invested += s.invested;
+    groups[key].payout += s.payout;
+  }
+  return order.map(k => groups[k]);
+}
 function renderEgrow() {
   /* мои доли */
   const my = document.getElementById('myGrows');
-  const active = SHARES.filter(s => s.status === 0);
+  const active = groupShares(SHARES.filter(s => s.status === 0));
   const paid = SHARES.filter(s => s.status === 1);
   my.innerHTML = '';
   if (active.length) {
@@ -3313,7 +3338,7 @@ function renderEgrow() {
         const prog = ns ? 0 : collecting ? Math.round(raised / target * 100) : cycleProgress(s.plan_stages, st, s.plan_stage_at, s.plan_done);
         return `<div class="bezel gold reveal" style="margin-bottom:12px"><div class="bezel-core" style="padding:15px 16px">
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <b style="font-size:14.5px">${s.plan_name} · ${s.pct}%</b>
+            <b style="font-size:14.5px">${s.plan_name} · ${bushLabel(s.pct)} <span style="color:var(--muted);font-weight:600">(${s.pct}%)</span></b>
             ${ns ? '<span class="status st-wait">⏳ предпродажа</span>'
                  : collecting ? '<span class="status st-wait">🚀 сбор на запуск</span>'
                  : `<span class="status ${st >= 5 ? 'st-done' : 'st-ship'}">${meta[1]} ${meta[0]}</span>`}
