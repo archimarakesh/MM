@@ -1203,6 +1203,25 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
   <input type="file" id="geFile" accept="image/*" style="display:none">
 </div>
 
+<div class="sheet" id="sheet-buyshare">
+  <div class="sheet-grip"></div>
+  <h2>Подтвердите покупку</h2>
+  <p class="sheet-sub" id="bsSummary"></p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+    <div class="ref-stat" style="text-align:center;padding:14px 10px">
+      <b id="bsCost" style="font-size:20px;display:block"></b><span>спишется с баланса</span>
+    </div>
+    <div class="ref-stat" style="text-align:center;padding:14px 10px">
+      <b id="bsPayout" style="font-size:20px;display:block;color:var(--gold-soft)"></b><span>выплата</span>
+    </div>
+  </div>
+  <p class="note" style="margin-bottom:16px">💵 Списывается сразу с реального баланса (не бонусами). Выплата придёт после завершения цикла программы.</p>
+  <button class="btn btn-gold" onclick="confirmBuyShare()"><span id="bsConfirmLabel">Подтвердить покупку</span>
+    <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
+  </button>
+  <button class="btn btn-ghost" style="margin-top:10px" onclick="closeSheets()">Отмена</button>
+</div>
+
 <div id="viewer" style="position:fixed;inset:0;z-index:96;background:rgba(3,3,3,.93);display:none;align-items:center;justify-content:center;padding:16px" onclick="closeViewer()">
   <div id="viewerBody"></div>
 </div>
@@ -3425,18 +3444,37 @@ function renderEgrow() {
 }
 function toggleGrow(planId) { haptic('light'); growOpen.has(planId) ? growOpen.delete(planId) : growOpen.add(planId); renderEgrow(); }
 function selShare(planId, pct) { haptic('light'); selPct[planId] = pct; renderEgrow(); }
-async function buyShare(planId) {
+let pendingBuy = null;
+function buyShare(planId) {
   if (!API.ok) return toast('Доступно после подключения сервера');
   const p = PLANS.find(x => x.id === planId);
+  if (!p) return;
   const pct = selPct[planId] || 10;
+  const cost = Math.round(p.price * pct / 100);
   // E-grow — только за реальные (выводимые) средства, бонусом нельзя
   const real = S.withdrawable != null ? S.withdrawable : S.balance;
-  if (p && real < Math.round(p.price * pct / 100)) {
+  if (real < cost) {
     toast('E-grow — только за реальные средства (не бонусами)');
     return go('topup');
   }
+  const ts = planStages(p);
+  const enterP = ts[Math.min(p.stage, 5)].p;
+  const payout = cost + Math.round(cost * enterP / 100);
+  pendingBuy = { planId, pct, cost, payout };
+  document.getElementById('bsSummary').textContent = `Программа «${p.name}» · доля ${pct}% · стадия ${STAGE_META[Math.min(p.stage, 5)][0]} ${STAGE_META[Math.min(p.stage, 5)][1]}`;
+  document.getElementById('bsCost').textContent = fmt(cost) + ' ₴';
+  document.getElementById('bsPayout').textContent = `${fmt(payout)} ₴ (+${enterP}%)`;
+  document.getElementById('bsConfirmLabel').textContent = `Подтвердить покупку ${fmt(cost)} ₴`;
+  haptic('light');
+  openSheet('buyshare');
+}
+async function confirmBuyShare() {
+  if (!pendingBuy) return;
+  const { planId, pct } = pendingBuy;
   try { applySnapshot(await API.call('/api/grow/buy', { plan_id: planId, pct })); }
   catch (e) { return toast(e.message); }
+  pendingBuy = null;
+  closeSheets(true);
   haptic('medium'); toast(`Доля ${pct}% куплена 🌱`);
   renderEgrow();
 }
