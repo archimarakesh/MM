@@ -3309,6 +3309,14 @@ function bushLabel(pct) {
   if (tenths === 0) return `${whole} ${plBush(whole)}`;
   return `${whole} ${plBush(whole)} и ${tenths}/10`;
 }
+// компактно, для тесных мест (чипы, мини-статы): без слова «куста»
+function chipLabel(pct) {
+  const whole = Math.floor(pct / 100);
+  const tenths = Math.round((pct % 100) / 10);
+  if (whole === 0) return `${tenths}/10`;
+  if (tenths === 0) return `${whole} ${plBush(whole)}`;
+  return `${whole} ${plBush(whole)} ${tenths}/10`;
+}
 function groupShares(list) {
   const groups = {};
   const order = [];
@@ -3338,7 +3346,7 @@ function renderEgrow() {
         const prog = ns ? 0 : collecting ? Math.round(raised / target * 100) : cycleProgress(s.plan_stages, st, s.plan_stage_at, s.plan_done);
         return `<div class="bezel gold reveal" style="margin-bottom:12px"><div class="bezel-core" style="padding:15px 16px">
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <b style="font-size:14.5px">${s.plan_name} · ${bushLabel(s.pct)} <span style="color:var(--muted);font-weight:600">(${s.pct}%)</span></b>
+            <b style="font-size:14.5px">${s.plan_name} · ${bushLabel(s.pct)}</b>
             ${ns ? '<span class="status st-wait">⏳ предпродажа</span>'
                  : collecting ? '<span class="status st-wait">🚀 сбор на запуск</span>'
                  : `<span class="status ${st >= 5 ? 'st-done' : 'st-ship'}">${meta[1]} ${meta[0]}</span>`}
@@ -3447,17 +3455,17 @@ function renderEgrow() {
           <b>${k === 5 ? 'вход закрыт' : '+' + s.p + '%'}</b></div>`).join('')}
       </div>
       ${closed ? `<button class="btn btn-ghost" disabled>${p.done ? 'Программа завершена' : '🧺 Идёт сбор урожая — вход закрыт'}</button>` : `
-      <p class="note" style="margin:0 0 8px">Ваша доля куста (${fmt(p.price)} ₴ = 100%)${avail != null ? ` · свободно ${avail}%` : ''}</p>
+      <p class="note" style="margin:0 0 8px">Ваша доля куста (${fmt(p.price)} ₴ = 1 куст)${avail != null ? ` · свободно ${chipLabel(avail)}` : ''}</p>
       <div class="weight-chips" style="margin:0 0 12px">
-        ${[10, 20, 30, 40, 50, 100].map(x => `<div class="wchip ${x === pct ? 'sel' : ''}" ${x > maxPct ? 'style="opacity:.3;pointer-events:none"' : ''} onclick="selShare(${p.id},${x})">${x}%</div>`).join('')}
+        ${[10, 20, 30, 40, 50, 100].map(x => `<div class="wchip ${x === pct ? 'sel' : ''}" ${x > maxPct ? 'style="opacity:.3;pointer-events:none"' : ''} onclick="selShare(${p.id},${x})">${chipLabel(x)}</div>`).join('')}
       </div>
       ${pct ? `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-        <div class="ref-stat" style="padding:9px 10px"><b style="font-size:14px">${fmt(cost)} ₴</b><span>вход · ${pct}%</span></div>
+        <div class="ref-stat" style="padding:9px 10px"><b style="font-size:14px">${fmt(cost)} ₴</b><span>вход · ${chipLabel(pct)}</span></div>
         <div class="ref-stat" style="padding:9px 10px"><b style="font-size:14px;color:var(--gold-soft)">${fmt(payout)} ₴</b><span>выплата</span></div>
       </div>
       <p class="note" style="margin:0 0 8px;opacity:.8">💵 Только за реальные средства (не бонусами)</p>
-      <button class="btn btn-gold" onclick="buyShare(${p.id})">Купить ${pct}% за ${fmt(cost)} ₴
+      <button class="btn btn-gold" onclick="buyShare(${p.id})">Купить ${bushLabel(pct)} за ${fmt(cost)} ₴
         <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4-3.2-7-8-7 0 4.5 3.2 7 8 7z"/></svg></span>
       </button>` : `<a class="btn btn-ghost" style="text-decoration:none;color:var(--warn)" href="${ADMIN_CHAT}" target="_blank" rel="noopener">Все доли выкуплены — написать админу</a>`}`}
       </div>
@@ -3486,7 +3494,7 @@ function buyShare(planId) {
   const enterP = ts[Math.min(p.stage, 5)].p;
   const payout = cost + Math.round(cost * enterP / 100);
   pendingBuy = { planId, pct, cost, payout };
-  document.getElementById('bsSummary').textContent = `Программа «${p.name}» · доля ${pct}% · стадия ${STAGE_META[Math.min(p.stage, 5)][0]} ${STAGE_META[Math.min(p.stage, 5)][1]}`;
+  document.getElementById('bsSummary').textContent = `Программа «${p.name}» · ${bushLabel(pct)} · стадия ${STAGE_META[Math.min(p.stage, 5)][0]} ${STAGE_META[Math.min(p.stage, 5)][1]}`;
   document.getElementById('bsCost').textContent = fmt(cost) + ' ₴';
   document.getElementById('bsPayout').textContent = `${fmt(payout)} ₴ (+${enterP}%)`;
   document.getElementById('bsConfirmLabel').textContent = `Подтвердить покупку ${fmt(cost)} ₴`;
@@ -3500,7 +3508,7 @@ async function confirmBuyShare() {
   catch (e) { return toast(e.message); }
   pendingBuy = null;
   closeSheets(true);
-  haptic('medium'); toast(`Доля ${pct}% куплена 🌱`);
+  haptic('medium'); toast(`${bushLabel(pct)} куплено 🌱`);
   renderEgrow();
 }
 
