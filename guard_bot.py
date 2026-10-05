@@ -30,6 +30,11 @@ import riddle_bank as rb
 KYIV = ZoneInfo("Europe/Kyiv")
 ACTIVITY_PRIZES = [500, 400, 300, 200, 100]   # призы за 1-5 место, ₴ на баланс (бонусные, как приветственные)
 ACTIVITY_HOUR = 12                  # понедельник, по Киеву
+# недельная реферальная гонка — топ-3 по числу активированных рефералов за неделю.
+# Работает, только пока не активна Рулетка (открытого круга нет) — чтобы не
+# перегружать людей одновременно двумя конкурсами на рефералов.
+REF_RACE_PRIZES = [500, 300, 150]   # призы за 1-3 место, ₴ бонусом (как активность)
+REF_RACE_HOUR = 13                  # понедельник, по Киеву — на час позже активности
 CONTEST_TIMES = os.getenv("CONTEST_TIMES", "11:00,19:00")   # баннер конкурса, по Киеву
 CONTEST_BANNER = os.path.join("promo", "contest.png")
 CONTEST_CAPTION = ("🏆 <b>Конкурс активности</b>\n"
@@ -1090,6 +1095,60 @@ async def run(notify=None, on_ban=None, on_unban=None):
                 log.exception("Ошибка наград за активность")
                 await asyncio.sleep(300)
 
+    async def announce_ref_race(winners, start, end):
+        lines = [f"🤝 <b>Реферальная гонка — итоги недели</b> "
+                 f"({start.strftime('%d.%m')}–{end.strftime('%d.%m')})", ""]
+        for w in winners:
+            lines.append(f"{w['place']}. <b>{_esc(w['name'])}</b> — "
+                         f"<b>{w['amount']} ₴</b> на баланс "
+                         f"<i>(приглашено: {w['cnt']})</i>")
+        lines += ["", "Бонус уже на балансе — можно потратить в магазине.",
+                  "Новая неделя гонки началась — зовите друзей 👇"]
+        text = "\n".join(lines)
+        try:
+            await bot.send_message(int(RULES_CHAT_ID), text, parse_mode="HTML")
+        except Exception:
+            log.warning("Не удалось объявить победителей реферальной гонки в чате")
+        for w in winners:
+            if notify:
+                try:
+                    await notify(w["user_id"],
+                                 f"🤝 Вы вошли в топ-{w['place']} реферальной гонки за неделю!\n"
+                                 f"Приглашено друзей: <b>{w['cnt']}</b> · начислено <b>{w['amount']} ₴</b> на баланс.")
+                except Exception:
+                    pass
+
+    async def weekly_ref_race():
+        """Каждый понедельник в REF_RACE_HOUR по Киеву награждаем тройку лучших
+        реферальщиков — но только пока не активна Рулетка (нет открытого круга),
+        чтобы не дублировать конкурсы на рефералов одновременно."""
+        if not RULES_CHAT_ID:
+            log.info("RULES_CHAT_ID не задан — реферальная гонка выключена")
+            return
+        while True:
+            try:
+                now = datetime.now(KYIV)
+                nxt = now.replace(hour=REF_RACE_HOUR, minute=0, second=0, microsecond=0)
+                days = (7 - now.weekday()) % 7
+                if days == 0 and nxt <= now:
+                    days = 7
+                nxt += timedelta(days=days)
+                await asyncio.sleep(max(30, (nxt - now).total_seconds()))
+                if await db.lottery_open_round():
+                    log.info("Реферальная гонка: пропуск недели — активна Рулетка")
+                    continue
+                end = nxt.date() - timedelta(days=1)
+                start = end - timedelta(days=6)
+                winners = await db.award_ref_race(start, end, REF_RACE_PRIZES)
+                if winners:
+                    await announce_ref_race(winners, start, end)
+                    log.info("Награды реферальной гонки выданы: %s", len(winners))
+                else:
+                    log.info("Реферальная гонка: победителей нет (или уже выданы)")
+            except Exception:
+                log.exception("Ошибка реферальной гонки")
+                await asyncio.sleep(300)
+
     # ── тематическая викторина: опрос темы → вопросы-опросы → призы ──────────
     # poll_id/correct — активный вопрос-опрос; future ставит победителя.
     # chat — где идёт викторина; allow_admin — засчитывать ответ владельца (тест в ЛС)
@@ -1632,6 +1691,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
     log.info("Guard-бот запущен. RULES_CHAT_ID=%r, STATS_CHANNEL_ID=%r, ADMIN=%s, таймаут=%s c",
              RULES_CHAT_ID, STATS_CHANNEL_ID, GUARD_ADMIN_ID, RULES_TIMEOUT)
     awards = asyncio.create_task(weekly_awards())
+    ref_race = asyncio.create_task(weekly_ref_race())
     contest = asyncio.create_task(contest_poster())
     snaps = asyncio.create_task(snapshot_loop())
     quiz = asyncio.create_task(quiz_scheduler())
@@ -1647,6 +1707,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
         await dp.start_polling(bot, allowed_updates=allowed)
     finally:
         awards.cancel()
+        ref_race.cancel()
         contest.cancel()
         snaps.cancel()
         quiz.cancel()

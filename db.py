@@ -2653,6 +2653,42 @@ async def award_activity_week(week_start, week_end, prizes: list) -> list:
         return out
 
 
+# ── недельная реферальная гонка: топ по числу активированных рефералов ───────
+_REF_RACE_SQL = """
+    SELECT u.ref_by AS user_id, MAX(ref.name) AS ref_name, COUNT(*) AS cnt
+    FROM users u
+    JOIN users ref ON ref.tg_id = u.ref_by
+    WHERE u.ref_by IS NOT NULL AND u.bonus_claimed
+      AND u.created::date >= $1 AND u.created::date <= $2
+    GROUP BY u.ref_by
+    HAVING COUNT(*) > 0
+    ORDER BY cnt DESC
+    LIMIT $3
+"""
+
+
+async def award_ref_race(week_start, week_end, prizes: list) -> list:
+    """Начисляет призы топ-реферерам недели (в locked — как бонус, без вывода).
+    Идемпотентно: за одну неделю награждаем один раз."""
+    async with _pool.acquire() as c, c.transaction():
+        if await c.fetchval("SELECT 1 FROM ref_race_awards WHERE week_start=$1 LIMIT 1", week_start):
+            return []
+        rows = await c.fetch(_REF_RACE_SQL, week_start, week_end, len(prizes))
+        out = []
+        for i, r in enumerate(rows):
+            amount = prizes[i]
+            uid = r["user_id"]
+            await c.execute("UPDATE users SET balance=balance+$1, locked=locked+$1 "
+                            "WHERE tg_id=$2", amount, uid)
+            await c.execute("""
+                INSERT INTO ref_race_awards(week_start, place, user_id, cnt, amount)
+                VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING
+            """, week_start, i + 1, uid, r["cnt"], amount)
+            out.append({"place": i + 1, "user_id": uid, "name": r["ref_name"] or "участник",
+                        "amount": amount, "cnt": r["cnt"]})
+        return out
+
+
 # ── статистика подписок чата/канала (guard-бот /stats) ───────────────────────
 async def record_member_event(chat_id: int, user_id: int, direction: str,
                               name: str | None = None) -> bool:
