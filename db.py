@@ -172,6 +172,13 @@ async def init():
             ALTER TABLE products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'g';
             -- минимальная покупка в единицах товара (граммов или штук)
             ALTER TABLE products ADD COLUMN IF NOT EXISTS min_qty INT NOT NULL DEFAULT 2;
+            -- разделы каталога (категории товаров) — выбор сверху в магазине, как в админке
+            CREATE TABLE IF NOT EXISTS categories(
+                id     BIGSERIAL PRIMARY KEY,
+                name   TEXT NOT NULL,
+                active BOOLEAN NOT NULL DEFAULT true,
+                pos    INT NOT NULL DEFAULT 0);
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS category_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
@@ -505,6 +512,7 @@ def _product_row(r, rating) -> dict:
     return {
         "id": r["id"], "name": r["name"], "sub": r["sub"], "emoji": r["emoji"],
         "genetics": r["genetics"] or "",
+        "category_id": r["category_id"],
         "tag": r["tag"], "base": r["base"],
         "unit": r["unit"] or "g",
         "min_qty": int(r["min_qty"] if r["min_qty"] is not None else MIN_GRAMS),
@@ -565,30 +573,65 @@ async def save_product(d: dict) -> int:
         genetics = str(d.get("genetics", "")).strip()
         unit = "pc" if str(d.get("unit", "g")) == "pc" else "g"
         min_qty = max(1, int(d.get("min_qty") or (1 if unit == "pc" else MIN_GRAMS)))
+        category_id = d.get("category_id")
+        category_id = int(category_id) if category_id not in (None, "") else None
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
                                     active=$8, photos=$9, stock=$10, genetics=$11,
-                                    unit=$12, min_qty=$13
+                                    unit=$12, min_qty=$13, category_id=$14
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
                 d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)),
-                pj, stock, genetics, unit, min_qty)
+                pj, stock, genetics, unit, min_qty, category_id)
             return int(d["id"])
         return await c.fetchval("""
             INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics,
-                                 unit, min_qty, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+                                 unit, min_qty, category_id, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty)
+            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id)
 
 
 async def delete_product(pid: int):
     async with _pool.acquire() as c:
         await c.execute("DELETE FROM ratings WHERE product_id=$1", pid)
         await c.execute("DELETE FROM products WHERE id=$1", pid)
+
+
+# ── разделы каталога (категории) ──────────────────────────────────────────────
+async def get_categories(include_inactive: bool = False, conn=None) -> list:
+    c = conn or _pool
+    q = "SELECT * FROM categories" + ("" if include_inactive else " WHERE active") + " ORDER BY pos, id"
+    rows = await c.fetch(q)
+    return [{"id": r["id"], "name": r["name"], "active": r["active"]} for r in rows]
+
+
+async def save_category(d: dict) -> int:
+    name = str(d.get("name", "")).strip()
+    if not name:
+        raise ValueError("Укажите название раздела")
+    active = bool(d.get("active", True))
+    async with _pool.acquire() as c:
+        if d.get("id"):
+            cid = int(d["id"])
+            await c.execute("UPDATE categories SET name=$2, active=$3 WHERE id=$1",
+                            cid, name, active)
+            return cid
+        return await c.fetchval("""
+            INSERT INTO categories(name, active, pos)
+            VALUES($1, $2, COALESCE((SELECT MAX(pos)+1 FROM categories), 0))
+            RETURNING id
+        """, name, active)
+
+
+async def delete_category(cid: int):
+    """Раздел удалён — товары не трогаем, просто расцепляем (переходят в «Без раздела»)."""
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("UPDATE products SET category_id=NULL WHERE category_id=$1", cid)
+        await c.execute("DELETE FROM categories WHERE id=$1", cid)
 
 
 def price_for(product: dict, grams: int) -> int:
@@ -733,6 +776,7 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
         "pin_locked_until": u["pin_locked_until"].isoformat() if u["pin_locked_until"] else None,
         "orders": orders,
         "products": await get_products(conn=c),
+        "categories": await get_categories(conn=c),
         "payment": payment_public(await get_settings(conn=c)),
         "payments": await payments_history(tg_id, c),
         "grow_plans": await get_grow_plans(conn=c),
