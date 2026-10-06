@@ -912,6 +912,30 @@ async def run(notify=None, on_ban=None, on_unban=None):
                       "сообщения; флуд и нарушения снижают счёт."]
         await message.answer("\n".join(lines), parse_mode="HTML")
 
+    @dp.message(Command("race"))
+    async def cmd_race(message: Message):
+        """Текущий рейтинг реферальной гонки за идущую неделю."""
+        if RULES_CHAT_ID and str(message.chat.id) != str(RULES_CHAT_ID):
+            return
+        today = datetime.now(KYIV).date()
+        start = today - timedelta(days=today.weekday())     # понедельник этой недели
+        try:
+            rows = await db.top_referrers(start, today, 10)
+        except Exception:
+            return
+        if not rows:
+            await message.answer("На этой неделе рефералов пока никто не привёл.")
+            return
+        lines = [f"🤝 <b>Топ реферальной гонки за неделю</b> (с {start.strftime('%d.%m')})", ""]
+        for i, r in enumerate(rows):
+            prize = f" · <b>{REF_RACE_PRIZES[i]} ₴</b>" if i < len(REF_RACE_PRIZES) else ""
+            lines.append(f"{i + 1}. {_esc(r['name'])} — {r['cnt']} приглаш.{prize}")
+        lines += ["", "Награждение — в понедельник в 13:00. Считаются только друзья, "
+                      "которые забрали приветственный бонус (выполнили все условия)."]
+        if await db.lottery_open_round():
+            lines.append("⚠ Сейчас активна Рулетка — награждение этой недели будет пропущено.")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
     async def _chat_total(chat_id: int):
         try:
             return await bot.get_chat_member_count(chat_id)

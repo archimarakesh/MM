@@ -2667,6 +2667,14 @@ _REF_RACE_SQL = """
 """
 
 
+async def top_referrers(week_start, week_end, limit: int = 10) -> list:
+    """Текущий рейтинг гонки за ещё не закрытую неделю — для команды /race."""
+    async with _pool.acquire() as c:
+        rows = await c.fetch(_REF_RACE_SQL, week_start, week_end, limit)
+    return [{"user_id": r["user_id"], "name": r["ref_name"] or "участник", "cnt": r["cnt"]}
+            for r in rows]
+
+
 async def award_ref_race(week_start, week_end, prizes: list) -> list:
     """Начисляет призы топ-реферерам недели (в locked — как бонус, без вывода).
     Идемпотентно: за одну неделю награждаем один раз."""
