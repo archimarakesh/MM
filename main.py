@@ -2560,6 +2560,7 @@ async def api_admin_data(request: Request):
     admin_user(request)
     return {
         "products": await db.get_products(include_inactive=True),
+        "categories": await db.get_categories(include_inactive=True),
         "grow_plans": await db.get_grow_plans(include_inactive=True),
         "settings": await db.get_settings(),
         "topups": await db.admin_topups(),
@@ -2619,6 +2620,26 @@ async def api_admin_product_delete(request: Request):
     b = await request.json()
     await db.delete_product(int(b.get("id", 0)))
     return {"products": await db.get_products(include_inactive=True)}
+
+
+@app.post("/api/admin/category")
+async def api_admin_category(request: Request):
+    admin_user(request)
+    b = await request.json()
+    try:
+        await db.save_category(b)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"categories": await db.get_categories(include_inactive=True)}
+
+
+@app.post("/api/admin/category/delete")
+async def api_admin_category_delete(request: Request):
+    admin_user(request)
+    b = await request.json()
+    await db.delete_category(int(b.get("id", 0)))
+    return {"categories": await db.get_categories(include_inactive=True),
+            "products": await db.get_products(include_inactive=True)}
 
 
 @app.post("/api/admin/settings")
