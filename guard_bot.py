@@ -205,7 +205,8 @@ async def run(notify=None, on_ban=None, on_unban=None):
     from aiogram import Bot, Dispatcher, F
     from aiogram.enums import ContentType
     from aiogram.filters import Command, CommandObject
-    from aiogram.types import (CallbackQuery, ChatPermissions, FSInputFile,
+    from aiogram.types import (BotCommand, BotCommandScopeChatAdministrators,
+                               CallbackQuery, ChatPermissions, FSInputFile,
                                InlineKeyboardButton, InlineKeyboardMarkup, Message)
 
     global BOT
@@ -1702,6 +1703,41 @@ async def run(notify=None, on_ban=None, on_unban=None):
                 pass
             await add_warn(message, name, "флуд")
 
+    async def _set_commands():
+        """Подсказка команд в Telegram (меню «/» в чате): всем — основные,
+        админам чата — ещё и модераторские/сервисные."""
+        public = [
+            BotCommand(command="rules", description="Правила чата"),
+            BotCommand(command="report", description="Пожаловаться на сообщение (ответом на него)"),
+            BotCommand(command="top", description="Топ активности за неделю"),
+            BotCommand(command="race", description="Топ реферальной гонки за неделю"),
+        ]
+        try:
+            await bot.set_my_commands(public)
+        except Exception:
+            log.exception("Не удалось выставить подсказки команд")
+        if not RULES_CHAT_ID:
+            return
+        admin_cmds = public + [
+            BotCommand(command="ban", description="Забанить (ответом или по ID)"),
+            BotCommand(command="kick", description="Кикнуть (ответом или по ID)"),
+            BotCommand(command="mute", description="Замьютить (ответом, можно с временем)"),
+            BotCommand(command="unmute", description="Снять мьют"),
+            BotCommand(command="unban", description="Разбанить"),
+            BotCommand(command="all", description="Позвать всех участников"),
+            BotCommand(command="stats", description="Статистика подписок чата/канала"),
+            BotCommand(command="acheck", description="Самопроверка счётчика активности"),
+            BotCommand(command="riddle", description="Запустить загадку вручную"),
+            BotCommand(command="riddleleft", description="Сколько загадок осталось"),
+            BotCommand(command="quiz", description="Запустить викторину вручную"),
+            BotCommand(command="quizleft", description="Сколько вопросов викторины осталось"),
+        ]
+        try:
+            await bot.set_my_commands(
+                admin_cmds, scope=BotCommandScopeChatAdministrators(chat_id=int(RULES_CHAT_ID)))
+        except Exception:
+            log.exception("Не удалось выставить подсказки команд для админов")
+
     async def initial_snapshot():
         """Стартовый снимок — чтобы базовая линия и «учёт с …» появились сразу."""
         for chat_id in _stats_chat_ids():
@@ -1720,6 +1756,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
     snaps = asyncio.create_task(snapshot_loop())
     quiz = asyncio.create_task(quiz_scheduler())
     riddles = asyncio.create_task(riddle_scheduler())
+    await _set_commands()
     await initial_snapshot()
     # chat_member нужно запросить явно: aiogram включит его в allowed_updates,
     # только если тип обновления зарегистрирован (у нас есть @dp.chat_member)
