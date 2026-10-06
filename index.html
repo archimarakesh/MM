@@ -1155,8 +1155,9 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
   </div>
   <div class="field"><label id="peTiersLabel">Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
   <input type="file" id="peFile" accept="image/*" style="display:none">
-  <div class="pay-opts" style="grid-template-columns:1fr">
+  <div class="pay-opts" style="grid-template-columns:1fr 1fr;gap:8px">
     <div class="pay-opt" id="peActive" onclick="peToggleActive()">Товар активен<small>показывается в каталоге</small></div>
+    <div class="pay-opt" id="peBonusOk" onclick="peToggleBonusOk()">Можно бонусами<small>оплата из бонусного баланса</small></div>
   </div>
   <button class="btn btn-gold" onclick="savePedit()">Сохранить товар
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
@@ -2147,7 +2148,7 @@ function updatePrice() {
   const p = curProduct, ts = tiersOf(p), t = tierFor(p, curGrams);
   document.querySelectorAll('#sheet-product .wchip').forEach(w =>
     w.classList.toggle('sel', parseInt(w.dataset.w, 10) === curGrams));
-  document.getElementById('tierTable').innerHTML = ts.map((x, i) =>
+  document.getElementById('tierTable').innerHTML = ts.length <= 1 ? '' : ts.map((x, i) =>
     `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${tierLabel(ts, i, p.unit)}</span><b>${fmt(Math.round(p.base * x.k))} ₴/${uShort(p.unit)}</b></div>`).join('');
   document.getElementById('totalGrams').textContent = `Итого · ${curGrams} ${uShort(p.unit)}`;
   document.getElementById('totalSum').textContent = fmt(priceFor(p, curGrams)) + ' ₴';
@@ -2259,14 +2260,16 @@ function pickWh(i) {
   document.getElementById('coNPList').innerHTML = '';
   haptic('light');
 }
-// сколько реальных средств нужно на заказ: бонусом (locked) — не больше N%
-function orderPaySplit(total) {
-  const pct = S.bonus_pay_pct != null ? S.bonus_pay_pct : 50;
+// сколько реальных средств нужно на заказ: бонусом (locked) — не больше N%,
+// и только если товар разрешает оплату бонусами (p.bonus_ok !== false)
+function orderPaySplit(total, p) {
+  const allowBonus = !p || p.bonus_ok !== false;
+  const pct = allowBonus ? (S.bonus_pay_pct != null ? S.bonus_pay_pct : 50) : 0;
   const real = S.withdrawable != null ? S.withdrawable : S.balance;
   const locked = Math.max(0, S.balance - real);
-  const bonusUse = Math.min(locked, Math.floor(total * pct / 100));
+  const bonusUse = allowBonus ? Math.min(locked, Math.floor(total * pct / 100)) : 0;
   const realNeed = total - bonusUse;
-  return { pct, real, bonusUse, realNeed, enough: real >= realNeed };
+  return { pct, real, bonusUse, realNeed, allowBonus, enough: real >= realNeed };
 }
 function openCheckout() {
   resetCheckoutAddr();
@@ -2274,14 +2277,18 @@ function openCheckout() {
   payMethod = 'balance';
   document.getElementById('coSummary').textContent =
     `${curProduct.name} · ${curGrams} ${uShort(curProduct.unit)} · ${fmt(total)} ₴`;
-  const sp = orderPaySplit(total);
-  document.getElementById('coPays').innerHTML =
-    `<div style="grid-column:1/-1">
+  const sp = orderPaySplit(total, curProduct);
+  document.getElementById('coPays').innerHTML = sp.allowBonus ? `
+    <div style="grid-column:1/-1">
        <p class="note" style="margin:0 0 6px">Бонусами можно оплатить <b style="color:var(--gold-soft)">половину</b> заказа (${sp.pct}%). К оплате <b>${fmt(total)} ₴</b>:</p>
        <div style="display:flex;gap:8px">
          <div class="ref-stat" style="flex:1;padding:9px 10px"><b style="font-size:14px;color:var(--gold-soft)">🎁 ${fmt(sp.bonusUse)} ₴</b><span>бонусом</span></div>
          <div class="ref-stat" style="flex:1;padding:9px 10px"><b style="font-size:14px;color:${sp.enough ? 'var(--txt)' : 'var(--danger)'}">💵 ${fmt(sp.realNeed)} ₴</b><span>реальными</span></div>
        </div>
+       ${sp.enough ? '' : `<p class="note" style="margin:6px 0 0;color:var(--danger)">Не хватает реальных ${fmt(sp.realNeed - sp.real)} ₴ — пополните баланс</p>`}
+     </div>` : `
+    <div style="grid-column:1/-1">
+       <p class="note" style="margin:0 0 6px">Этот товар оплачивается только реальными средствами, без бонусов. К оплате <b style="color:${sp.enough ? 'var(--txt)' : 'var(--danger)'}">${fmt(total)} ₴</b></p>
        ${sp.enough ? '' : `<p class="note" style="margin:6px 0 0;color:var(--danger)">Не хватает реальных ${fmt(sp.realNeed - sp.real)} ₴ — пополните баланс</p>`}
      </div>`;
   document.getElementById('coExtra').innerHTML = sp.enough ? '' :
@@ -2305,7 +2312,7 @@ async function placeOrder() {
     if (coWhSel) { ship.branch = coWhSel.desc; ship.wh_ref = coWhSel.ref; ship.postomat = coWhSel.postomat; }
   }
   const total = priceFor(curProduct, curGrams);
-  const sp = orderPaySplit(total);
+  const sp = orderPaySplit(total, curProduct);
   if (!sp.enough) {
     toast(`Бонусом можно оплатить до ${sp.pct}% — нужно реальными ${fmt(sp.realNeed)} ₴`);
     closeSheets(true); return go('topup');
@@ -3670,7 +3677,7 @@ async function deleteAccount() {
 }
 
 /* ═══════════ Админка ═══════════ */
-let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peUnit = 'g', peTiersArr = [];
+let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peBonusOkVal = true, peUnit = 'g', peTiersArr = [];
 // админка сгруппирована: группа сверху → её подвкладки под ней (меню/подменю)
 const ADMIN_TABS = {
   products: 'Товары', orders: 'Заказы',
@@ -4102,6 +4109,7 @@ async function modReview(order, action) {
 function openPedit(id) {
   curPe = id ? AD.products.find(p => p.id === id) : null;
   peActiveVal = curPe ? curPe.active : true;
+  peBonusOkVal = curPe ? curPe.bonus_ok !== false : true;
   document.getElementById('peTitle').textContent = curPe ? 'Редактировать товар' : 'Новый товар';
   document.getElementById('peName').value = curPe?.name || '';
   document.getElementById('peGenetics').value = curPe?.genetics || '';
@@ -4123,13 +4131,23 @@ function openPedit(id) {
     ? Array.from({ length: curPe.photos || 0 }, (_, i) => ({ url: `/photo/${curPe.id}/${i}?size=t&v=${curPe.pv || 0}`, payload: { old: i } }))
     : [];
   renderPePhotos();
+  peSyncUnitUI();
   renderPeTiers();
   syncPeActive();
+  syncPeBonusOk();
   openSheet('pedit');
 }
-// градации цены — динамический список с добавлением/удалением строк
+// градации цены — динамический список с добавлением/удалением строк (поштучно — одна цена без градаций)
 function renderPeTiers() {
   const s = uShort(peUnit);
+  if (peUnit === 'pc') {
+    const price = peTiersArr[0]?.price ?? 100;
+    document.getElementById('peTiers').innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px">
+        <input class="mini-input" id="pePrice0" inputmode="numeric" value="${price}">
+        <span class="pe-pu" style="font-size:11px;color:var(--muted-2)">₴/${s}</span></div>`;
+    return;
+  }
   document.getElementById('peTiers').innerHTML = peTiersArr.map((t, i) => `
     <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px;align-items:center">
       <div style="display:flex;align-items:center;gap:6px">
@@ -4145,12 +4163,17 @@ function renderPeTiers() {
 }
 // снять текущие введённые значения в массив (перед добавлением/удалением строки)
 function peReadTiers() {
+  if (peUnit === 'pc') {
+    peTiersArr = [{ from: 1, price: parseFloat(document.getElementById('pePrice0').value) || 0 }];
+    return;
+  }
   peTiersArr = peTiersArr.map((_, i) => ({
     from: parseInt(document.getElementById('peFrom' + i).value, 10) || 0,
     price: parseFloat(document.getElementById('pePrice' + i).value) || 0,
   }));
 }
 function peAddTier() {
+  if (peUnit === 'pc') return;   // поштучно — без градаций
   peReadTiers();
   const last = peTiersArr[peTiersArr.length - 1] || { from: 1, price: 100 };
   peTiersArr.push({ from: Math.round((last.from || 1) * 2),
@@ -4158,22 +4181,27 @@ function peAddTier() {
   renderPeTiers(); haptic('light');
 }
 function peRemoveTier(i) {
-  if (peTiersArr.length <= 1) return;    // хотя бы одна градация нужна
+  if (peUnit === 'pc' || peTiersArr.length <= 1) return;    // хотя бы одна градация нужна
   peReadTiers();
   peTiersArr.splice(i, 1);
   renderPeTiers(); haptic('light');
 }
-function peSetUnit(u) {
-  peUnit = u === 'pc' ? 'pc' : 'g';
+function peSyncUnitUI() {
   const s = uShort(peUnit), word = peUnit === 'pc' ? 'штуку' : 'грамм';
   document.getElementById('peUnitG').classList.toggle('sel', peUnit === 'g');
   document.getElementById('peUnitPc').classList.toggle('sel', peUnit === 'pc');
   document.getElementById('peMinLabel').textContent = `Минимальная покупка, ${s}`;
   document.getElementById('peStockLabel').textContent = `Наличие, ${s}`;
-  document.getElementById('peTiersLabel').textContent = `Градация цены, ₴ за ${word}`;
-  document.querySelectorAll('#peTiers .pe-u').forEach(e => e.textContent = s);
-  document.querySelectorAll('#peTiers .pe-pu').forEach(e => e.textContent = '₴/' + s);
+  document.getElementById('peTiersLabel').textContent = peUnit === 'pc'
+    ? `Цена, ₴ за ${word}` : `Градация цены, ₴ за ${word}`;
   const mn = document.getElementById('peMin'); if (mn) mn.placeholder = peUnit === 'pc' ? '1' : '2';
+}
+function peSetUnit(u) {
+  peReadTiers();
+  peUnit = u === 'pc' ? 'pc' : 'g';
+  if (peUnit === 'pc') peTiersArr = [{ from: 1, price: peTiersArr[0]?.price || 100 }];
+  peSyncUnitUI();
+  renderPeTiers();
 }
 let pePhotos = [];
 function renderPePhotos() {
@@ -4234,6 +4262,8 @@ document.getElementById('peFile').addEventListener('change', e => {
 });
 function peToggleActive() { peActiveVal = !peActiveVal; syncPeActive(); haptic('light'); }
 function syncPeActive() { document.getElementById('peActive').classList.toggle('sel', peActiveVal); }
+function peToggleBonusOk() { peBonusOkVal = !peBonusOkVal; syncPeBonusOk(); haptic('light'); }
+function syncPeBonusOk() { document.getElementById('peBonusOk').classList.toggle('sel', peBonusOkVal); }
 async function savePedit() {
   const name = document.getElementById('peName').value.trim();
   if (!name) return toast('Укажите название');
@@ -4255,6 +4285,7 @@ async function savePedit() {
       category_id: document.getElementById('peCategory').value || null,
       base, tiers: rows.map(x => ({ from: x.from, k: +(x.price / base).toFixed(4) })),
       active: peActiveVal,
+      bonus_ok: peBonusOkVal,
       unit: peUnit,
       min_qty: Math.max(1, parseInt(document.getElementById('peMin').value, 10) || (peUnit === 'pc' ? 1 : 2)),
       photos: pePhotos.map(x => x.payload),

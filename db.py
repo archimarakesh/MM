@@ -172,6 +172,8 @@ async def init():
             ALTER TABLE products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'g';
             -- минимальная покупка в единицах товара (граммов или штук)
             ALTER TABLE products ADD COLUMN IF NOT EXISTS min_qty INT NOT NULL DEFAULT 2;
+            -- можно ли оплатить этот товар бонусом (locked) — часть товаров только за реальные
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS bonus_ok BOOLEAN NOT NULL DEFAULT true;
             -- разделы каталога (категории товаров) — выбор сверху в магазине, как в админке
             CREATE TABLE IF NOT EXISTS categories(
                 id     BIGSERIAL PRIMARY KEY,
@@ -516,6 +518,7 @@ def _product_row(r, rating) -> dict:
         "tag": r["tag"], "base": r["base"],
         "unit": r["unit"] or "g",
         "min_qty": int(r["min_qty"] if r["min_qty"] is not None else MIN_GRAMS),
+        "bonus_ok": bool(r["bonus_ok"]) if r["bonus_ok"] is not None else True,
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
         "active": r["active"], "photos": photos,
         "pv": len(r["photos"] or ""),  # версия фото для кэш-бастинга
@@ -575,24 +578,25 @@ async def save_product(d: dict) -> int:
         min_qty = max(1, int(d.get("min_qty") or (1 if unit == "pc" else MIN_GRAMS)))
         category_id = d.get("category_id")
         category_id = int(category_id) if category_id not in (None, "") else None
+        bonus_ok = bool(d.get("bonus_ok", True))
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
                                     active=$8, photos=$9, stock=$10, genetics=$11,
-                                    unit=$12, min_qty=$13, category_id=$14
+                                    unit=$12, min_qty=$13, category_id=$14, bonus_ok=$15
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
                 d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)),
-                pj, stock, genetics, unit, min_qty, category_id)
+                pj, stock, genetics, unit, min_qty, category_id, bonus_ok)
             return int(d["id"])
         return await c.fetchval("""
             INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics,
-                                 unit, min_qty, category_id, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+                                 unit, min_qty, category_id, bonus_ok, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id)
+            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id, bonus_ok)
 
 
 async def delete_product(pid: int):
@@ -981,7 +985,7 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
             # обязательно реальными (выводимыми). locked тратим первым, но с капом.
             locked = int(u["locked"] or 0)
             withdrawable = int(u["balance"]) - locked
-            bonus_cap = total * BONUS_PAY_MAX_PCT // 100
+            bonus_cap = (total * BONUS_PAY_MAX_PCT // 100) if p["bonus_ok"] else 0
             bonus_part = min(locked, bonus_cap)
             real_need = total - bonus_part
             if withdrawable < real_need:
