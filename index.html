@@ -1002,7 +1002,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
   <p class="sheet-sub" id="coSummary"></p>
   <div class="field"><label>Имя и фамилия</label><input id="coName" placeholder="Иван Иванов"></div>
   <div class="field"><label>Телефон</label><input id="coPhone" inputmode="tel" placeholder="+380"></div>
-  <div class="field"><label>Способ доставки</label>
+  <div class="field" id="coMethodField"><label>Способ доставки</label>
     <div class="np-kind" id="coMethod">
       <div class="wchip sel" data-m="np" onclick="setMethod('np', this)">Новая Почта</div>
       <div class="wchip" data-m="taxi" onclick="setMethod('taxi', this)">🚕 Такси (Днепр)</div>
@@ -1144,6 +1144,12 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <div class="field"><label id="peStockLabel">Наличие, г</label><input id="peStock" inputmode="numeric" placeholder="пусто — без лимита"></div>
   </div>
   <div class="field"><label>Раздел каталога</label><select id="peCategory"></select></div>
+  <div class="field"><label>Способы доставки</label>
+    <div class="pay-opts" style="grid-template-columns:1fr 1fr;gap:8px">
+      <div class="pay-opt" id="peDelivNp" onclick="peToggleDelivery('np')">Новая Почта<small>отделения/почтоматы</small></div>
+      <div class="pay-opt" id="peDelivTaxi" onclick="peToggleDelivery('taxi')">🚕 Такси<small>только г. Днепр</small></div>
+    </div>
+  </div>
   <div class="field"><label>Единица измерения</label>
     <div class="pay-opts" style="grid-template-columns:1fr 1fr;gap:8px">
       <div class="pay-opt" id="peUnitG" onclick="peSetUnit('g')">За грамм<small>вес, ₴/г</small></div>
@@ -2273,8 +2279,18 @@ function orderPaySplit(total, p) {
   const realNeed = total - bonusUse;
   return { pct, real, bonusUse, realNeed, allowBonus, enough: real >= realNeed };
 }
+function syncDeliveryOptions() {
+  const allowed = (curProduct && curProduct.delivery && curProduct.delivery.length) ? curProduct.delivery : ['np', 'taxi'];
+  document.querySelectorAll('#coMethod .wchip').forEach(x => {
+    x.style.display = allowed.includes(x.dataset.m) ? '' : 'none';
+  });
+  document.getElementById('coMethodField').style.display = allowed.length > 1 ? '' : 'none';
+  const method = allowed.includes(coMethod) ? coMethod : allowed[0];
+  setMethod(method, document.querySelector(`#coMethod .wchip[data-m="${method}"]`));
+}
 function openCheckout() {
   resetCheckoutAddr();
+  syncDeliveryOptions();
   const total = priceFor(curProduct, curGrams);
   payMethod = 'balance';
   document.getElementById('coSummary').textContent =
@@ -3680,6 +3696,7 @@ async function deleteAccount() {
 
 /* ═══════════ Админка ═══════════ */
 let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peBonusOkVal = true, peUnit = 'g', peTiersArr = [];
+let peDeliveryVal = ['np', 'taxi'];
 // админка сгруппирована: группа сверху → её подвкладки под ней (меню/подменю)
 const ADMIN_TABS = {
   products: 'Товары', orders: 'Заказы',
@@ -4112,6 +4129,7 @@ function openPedit(id) {
   curPe = id ? AD.products.find(p => p.id === id) : null;
   peActiveVal = curPe ? curPe.active : true;
   peBonusOkVal = curPe ? curPe.bonus_ok !== false : true;
+  peDeliveryVal = curPe && curPe.delivery && curPe.delivery.length ? curPe.delivery.slice() : ['np', 'taxi'];
   document.getElementById('peTitle').textContent = curPe ? 'Редактировать товар' : 'Новый товар';
   document.getElementById('peName').value = curPe?.name || '';
   document.getElementById('peGenetics').value = curPe?.genetics || '';
@@ -4137,6 +4155,7 @@ function openPedit(id) {
   renderPeTiers();
   syncPeActive();
   syncPeBonusOk();
+  syncPeDelivery();
   openSheet('pedit');
 }
 // градации цены — динамический список с добавлением/удалением строк (поштучно — одна цена без градаций)
@@ -4266,6 +4285,19 @@ function peToggleActive() { peActiveVal = !peActiveVal; syncPeActive(); haptic('
 function syncPeActive() { document.getElementById('peActive').classList.toggle('sel', peActiveVal); }
 function peToggleBonusOk() { peBonusOkVal = !peBonusOkVal; syncPeBonusOk(); haptic('light'); }
 function syncPeBonusOk() { document.getElementById('peBonusOk').classList.toggle('sel', peBonusOkVal); }
+function peToggleDelivery(m) {
+  if (peDeliveryVal.includes(m)) {
+    if (peDeliveryVal.length <= 1) return toast('Должен остаться хотя бы один способ доставки');
+    peDeliveryVal = peDeliveryVal.filter(x => x !== m);
+  } else {
+    peDeliveryVal.push(m);
+  }
+  syncPeDelivery(); haptic('light');
+}
+function syncPeDelivery() {
+  document.getElementById('peDelivNp').classList.toggle('sel', peDeliveryVal.includes('np'));
+  document.getElementById('peDelivTaxi').classList.toggle('sel', peDeliveryVal.includes('taxi'));
+}
 async function savePedit() {
   const name = document.getElementById('peName').value.trim();
   if (!name) return toast('Укажите название');
@@ -4288,6 +4320,7 @@ async function savePedit() {
       base, tiers: rows.map(x => ({ from: x.from, k: +(x.price / base).toFixed(4) })),
       active: peActiveVal,
       bonus_ok: peBonusOkVal,
+      delivery: peDeliveryVal,
       unit: peUnit,
       min_qty: Math.max(1, parseInt(document.getElementById('peMin').value, 10) || (peUnit === 'pc' ? 1 : 2)),
       photos: pePhotos.map(x => x.payload),
