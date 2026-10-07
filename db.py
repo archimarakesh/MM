@@ -29,6 +29,8 @@ DEFAULT_TIERS = [
     {"from": 1, "k": 1.00}, {"from": 10, "k": 0.90}, {"from": 25, "k": 0.80},
     {"from": 50, "k": 0.70}, {"from": 100, "k": 0.60},
 ]
+DELIVERY_METHODS = ("np", "taxi")   # Новая Почта / Такси (Днепр)
+DEFAULT_DELIVERY = list(DELIVERY_METHODS)
 # Верхнего лимита на количество нет — ограничивает только наличие (stock) товара.
 # MAX_GRAMS остаётся высоким предохранителем от абсурдных/переполняющих значений.
 MAX_GRAMS = int(os.getenv("MAX_GRAMS", "100000") or 100000)
@@ -181,6 +183,8 @@ async def init():
                 active BOOLEAN NOT NULL DEFAULT true,
                 pos    INT NOT NULL DEFAULT 0);
             ALTER TABLE products ADD COLUMN IF NOT EXISTS category_id BIGINT;
+            -- доступные способы доставки для товара: ["np","taxi"] — JSON-массив
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS delivery TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
@@ -519,6 +523,7 @@ def _product_row(r, rating) -> dict:
         "unit": r["unit"] or "g",
         "min_qty": int(r["min_qty"] if r["min_qty"] is not None else MIN_GRAMS),
         "bonus_ok": bool(r["bonus_ok"]) if r["bonus_ok"] is not None else True,
+        "delivery": json.loads(r["delivery"]) if r["delivery"] else DEFAULT_DELIVERY,
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
         "active": r["active"], "photos": photos,
         "pv": len(r["photos"] or ""),  # версия фото для кэш-бастинга
@@ -579,24 +584,26 @@ async def save_product(d: dict) -> int:
         category_id = d.get("category_id")
         category_id = int(category_id) if category_id not in (None, "") else None
         bonus_ok = bool(d.get("bonus_ok", True))
+        delivery = [m for m in (d.get("delivery") or DEFAULT_DELIVERY) if m in DELIVERY_METHODS]
+        dj = json.dumps(delivery or DEFAULT_DELIVERY)
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
                                     active=$8, photos=$9, stock=$10, genetics=$11,
-                                    unit=$12, min_qty=$13, category_id=$14, bonus_ok=$15
+                                    unit=$12, min_qty=$13, category_id=$14, bonus_ok=$15, delivery=$16
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
                 d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)),
-                pj, stock, genetics, unit, min_qty, category_id, bonus_ok)
+                pj, stock, genetics, unit, min_qty, category_id, bonus_ok, dj)
             return int(d["id"])
         return await c.fetchval("""
             INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics,
-                                 unit, min_qty, category_id, bonus_ok, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+                                 unit, min_qty, category_id, bonus_ok, delivery, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id, bonus_ok)
+            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id, bonus_ok, dj)
 
 
 async def delete_product(pid: int):
@@ -895,6 +902,12 @@ async def _order_product_total(c, product_id: int, grams: int, lock: bool = Fals
     return p, price_for(_product_row(p, {}), grams)
 
 
+def _check_delivery(p, ship: dict):
+    allowed = json.loads(p["delivery"]) if p["delivery"] else DEFAULT_DELIVERY
+    if (ship or {}).get("method") not in allowed:
+        raise ValueError("Этот способ доставки недоступен для товара")
+
+
 async def _take_stock(c, product_id: int, grams: int):
     await c.execute(
         "UPDATE products SET stock=stock-$1 WHERE id=$2 AND stock IS NOT NULL", grams, product_id)
@@ -976,6 +989,7 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
     """Оплата с баланса (сразу оплачен) или картой (квитанция на проверку)."""
     async with _pool.acquire() as c, c.transaction():
         p, total = await _order_product_total(c, product_id, grams, lock=True)
+        _check_delivery(p, ship)
         u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         cash = 0
         if pay == "balance":
@@ -1020,6 +1034,7 @@ async def create_order_invoice(tg_id: int, product_id: int, grams: int, currency
     async with _pool.acquire() as c, c.transaction():
         await _guard_pending_orders(c, tg_id)
         p, total = await _order_product_total(c, product_id, grams, lock=True)
+        _check_delivery(p, ship)
         oid = await _insert_order(c, tg_id, p, grams, total, -1, currency, ship)
         await _take_stock(c, product_id, grams)
         # новый счёт отменяет прежний неоплаченный (и его заказ, если был) с возвратом остатка
