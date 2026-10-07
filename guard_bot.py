@@ -265,7 +265,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
             log.warning("Журнал не доставлен — админ не нажал Start у guard-бота?")
 
     async def log_action(icon: str, action: str, chat, by, target_name, target_id,
-                         reason: str, snippet: str | None = None):
+                         reason: str, snippet: str | None = None, kb=None):
         extra = f"\n✉️ Сообщение: «{_esc(str(snippet)[:200])}»" if snippet else ""
         await journal(
             f"{icon} <b>{action}</b>\n"
@@ -274,7 +274,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
             f"💬 Чат: {_esc(getattr(chat, 'title', chat))}\n"
             f"📝 Причина: {_esc(reason or 'не указана')}"
             f"{extra}\n"
-            f"🕒 {_now()}")
+            f"🕒 {_now()}", kb)
 
     async def is_admin(chat_id: int, user_id: int) -> bool:
         if user_id == GUARD_ADMIN_ID:
@@ -1659,7 +1659,13 @@ async def run(notify=None, on_ban=None, on_unban=None):
                                 f"⚠️ <b>{_esc(name)}</b>, ссылки и реклама запрещены — сообщение удалено. "
                                 "Повтор — бан.")
                 await log_action("🔗", "Удаление (реклама/ссылки, авто)", message.chat,
-                                 "автомодерация", name, uid, "реклама/ссылки, 1-е предупреждение", text)
+                                 "автомодерация", name, uid, "реклама/ссылки, 1-е предупреждение", text,
+                                 kb=InlineKeyboardMarkup(inline_keyboard=[[
+                                     InlineKeyboardButton(text="🚫 Забанить сразу",
+                                                          callback_data=f"gban:{message.chat.id}:{uid}"),
+                                     InlineKeyboardButton(text="✖ Не банить",
+                                                          callback_data=f"gfree:{message.chat.id}:{uid}"),
+                                 ]]))
             return
 
         # мат/оскорбления: сообщение убираем всегда, но предупреждение и страйк —
