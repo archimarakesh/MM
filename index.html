@@ -1087,6 +1087,11 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <div><h3>Уведомления</h3><p>Статусы заказов и акции</p></div>
     <div class="toggle on" id="notifToggle"></div>
   </div>
+  <div class="set-row" onclick="toggleSound()">
+    <div class="link-ico">🔊</div>
+    <div><h3>Звук</h3><p>Щелчки и звон монет в приложении</p></div>
+    <div class="toggle on" id="soundToggle"></div>
+  </div>
   <div class="set-row" onclick="openTransfer()">
     <div class="link-ico">↔️</div>
     <div><h3>Перенос аккаунта</h3><p>На другой Telegram-аккаунт</p></div>
@@ -1319,6 +1324,7 @@ const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 const SFX = { click: new Audio('sfx-click.mp3'), coin: new Audio('sfx-coin.mp3') };
 SFX.click.volume = 0.5; SFX.coin.volume = 0.6;
 function sfx(name) {
+  if (S.sound === false) return;   // звук выключен в настройках приложения
   const a = SFX[name]; if (!a) return;
   try { a.currentTime = 0; a.play().catch(() => {}); } catch (e) {}
 }
@@ -1383,7 +1389,7 @@ const SUPPORT = [
 /* ═══════════ Состояние (демо на localStorage, потом заменим на API) ═══════════ */
 const DB_KEY = 'mm_state_v1';
 let S = JSON.parse(localStorage.getItem(DB_KEY) || 'null') || {
-  balance: 1250, pin: null, notif: true,
+  balance: 1250, pin: null, notif: true, sound: true,
   refCount: 3, refEarned: 187,
   orders: [
     { id: 'MM-1042', product: 'Golden Reserve', grams: 25, total: 2400, date: '12.07.2026',
@@ -3679,10 +3685,17 @@ const pinIsSet = () => API.ok ? !!S.hasPin : !!S.pin;
 function syncSettings() {
   document.getElementById('pinState').textContent = pinIsSet() ? 'Установлен · нажмите чтобы сменить' : 'Не установлен';
   document.getElementById('notifToggle').classList.toggle('on', S.notif);
+  document.getElementById('soundToggle').classList.toggle('on', S.sound !== false);
 }
 function toggleNotif() {
   S.notif = !S.notif; save(); syncSettings(); haptic('light');
   toast(S.notif ? 'Уведомления включены' : 'Уведомления выключены');
+}
+function toggleSound() {
+  S.sound = S.sound === false;   // false→true, true/undefined→false
+  save(); syncSettings(); haptic('light');
+  if (S.sound) sfx('click');
+  toast(S.sound ? 'Звук включён' : 'Звук выключен');
 }
 function openTransfer() {
   document.getElementById('transferCode').textContent = '— — — —';
