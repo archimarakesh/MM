@@ -1410,15 +1410,26 @@ async def api_order(request: Request):
     else:
         ship_txt = (f"{esc(ship.get('name'))} · {esc(ship.get('phone'))}\n"
                     f"{esc(ship.get('city'))}, НП №{esc(ship.get('np'))}")
-    product_id, grams = pint(b.get("product_id")), pint(b.get("grams"))
+    items = [{"product_id": pint(it.get("product_id")), "grams": pint(it.get("grams"))}
+             for it in (b.get("items") or [])]
+    if not items:
+        # старый формат тела запроса (один товар плоским product_id/grams) —
+        # оставляем на случай ещё не обновившегося у кого-то клиента
+        pid, g = pint(b.get("product_id")), pint(b.get("grams"))
+        if pid:
+            items = [{"product_id": pid, "grams": g}]
     # оплата заказа — только с баланса (пополнить баланс можно любым способом)
     try:
-        snap = await db.create_order(u["id"], product_id, grams, "balance", ship)
+        snap = await db.create_order(u["id"], items, "balance", ship)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    items_txt = "\n".join(
+        f"{esc(i['product'])} · {i['grams']} {'шт' if i['unit'] == 'pc' else 'г'} · {i['total']} ₴"
+        for i in snap.get("order_items", []))
     await notify(ADMIN_ID,
                  f"🛒 <b>Новый заказ {snap['order_code']} (оплачен с баланса)</b>\n"
-                 f"{esc(snap.get('order_product'))} · {snap['order_grams']} г · {snap['order_total']} ₴\n"
+                 f"{items_txt}\n"
+                 f"Итого: {snap['order_total']} ₴\n"
                  f"{ship_txt}")
     snap["is_admin"] = bool(ADMIN_ID) and u["id"] == ADMIN_ID
     await _drain_ref_notify()          # реферальные с оплаты заказа балансом
