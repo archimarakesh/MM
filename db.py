@@ -26,8 +26,9 @@ ORDER_CODE_BASE = 1000      # MM-1001, MM-1002, ...
 AUTO_DELIVER_DAYS = 5       # через сколько дней после отправки заказ считается полученным
 
 DEFAULT_TIERS = [
-    {"from": 1, "k": 1.00}, {"from": 10, "k": 0.90}, {"from": 25, "k": 0.80},
-    {"from": 50, "k": 0.70}, {"from": 100, "k": 0.60},
+    {"from": 5, "k": 1.0}, {"from": 10, "k": 0.9048}, {"from": 20, "k": 0.8095},
+    {"from": 30, "k": 0.7143}, {"from": 40, "k": 0.6548}, {"from": 50, "k": 0.619},
+    {"from": 100, "k": 0.4762},
 ]
 DELIVERY_METHODS = ("np", "taxi")   # Новая Почта / Такси (Днепр)
 DEFAULT_DELIVERY = list(DELIVERY_METHODS)

@@ -1319,9 +1319,13 @@ const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 /* ═══════════ Данные ═══════════ */
 /* Товары легко заменить: базовая цена за грамм + пороги скидок */
 const TIERS = [
-  { from: 1, k: 1.00 }, { from: 10, k: 0.90 }, { from: 25, k: 0.80 },
-  { from: 50, k: 0.70 }, { from: 100, k: 0.60 },
+  { from: 5, k: 1.0 }, { from: 10, k: 0.9048 }, { from: 20, k: 0.8095 },
+  { from: 30, k: 0.7143 }, { from: 40, k: 0.6548 }, { from: 50, k: 0.619 },
+  { from: 100, k: 0.4762 },
 ];
+// базовая ставка нового весового товара, ₴/г (при этих k даёт 2100/3800/6800/9000/11001/12999/20000 ₴
+// за 5/10/20/30/40/50/100 г — текущие закупочные цены с маржой 50%→35%)
+const DEFAULT_BASE_G = 420;
 const WEIGHTS = [2, 5, 10, 25, 50, 100];
 const MIN_GRAMS = 2;
 const MAX_GRAMS = 100000;   // верхнего лимита нет — цифра лишь предохранитель, ограничивает наличие
@@ -4180,7 +4184,7 @@ function openPedit(id) {
   peUnit = curPe?.unit || 'g';
   document.getElementById('peMin').value = curPe && curPe.min_qty != null ? curPe.min_qty : '';
   peDelReset();
-  const basePrice = curPe ? curPe.base : 100;
+  const basePrice = curPe ? curPe.base : (peUnit === 'pc' ? 100 : DEFAULT_BASE_G);
   const srcP = { base: basePrice, tiers: curPe ? curPe.tiers : TIERS };
   if (peUnit === 'pc') {
     peTiersArr = [{ from: 1, price: priceFor(srcP, 1) }];
