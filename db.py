@@ -52,8 +52,9 @@ MAX_PENDING_TOPUPS = 8    # квитанций на проверке на юзе
 # а ставка ограничена BONUS_MAX_BET — нельзя слить весь бонус в один спин.
 BONUS_WAGER_X = int(os.getenv("BONUS_WAGER_X", "15") or 15)
 BONUS_MAX_BET = int(os.getenv("BONUS_MAX_BET", "100") or 100)
-# бонусом (locked) можно оплатить не больше этого % покупки — остальное реальными
-BONUS_PAY_MAX_PCT = max(0, min(100, int(os.getenv("BONUS_PAY_MAX_PCT", "50") or 50)))
+# бонусом (locked) можно оплатить не больше этого % покупки — остальное реальными;
+# значение по умолчанию, пока админ не задал своё через settings (ключ bonus_pay_pct)
+DEFAULT_BONUS_PAY_PCT = max(0, min(100, int(os.getenv("BONUS_PAY_MAX_PCT", "50") or 50)))
 # Кэшбэк-программа: оборот РЕАЛЬНЫХ трат за скользящие 12 мес → % кэшбэка, который
 # возвращается БОНУСОМ на счёт с каждой покупки. Пороги (₴, %); настраивается через
 # CASHBACK_TIERS="5000:3,10000:5,...". По умолчанию 7 ступеней 3→20% до 100k.
@@ -736,6 +737,21 @@ async def deposit_bonus_set(pct: int, until_iso: str) -> None:
     await set_kv("dep_bonus_until", str(until_iso or ""))
 
 
+# ── какую долю заказа можно оплатить бонусом (locked) — настраивается админом ──
+async def bonus_pay_pct() -> int:
+    v = await get_kv("bonus_pay_pct")
+    if v in (None, ""):
+        return DEFAULT_BONUS_PAY_PCT
+    try:
+        return max(0, min(100, int(v)))
+    except (TypeError, ValueError):
+        return DEFAULT_BONUS_PAY_PCT
+
+
+async def set_bonus_pay_pct(pct: int) -> None:
+    await set_kv("bonus_pay_pct", str(max(0, min(100, int(pct)))))
+
+
 async def all_user_ids(exclude_banned: bool = True) -> list:
     """tg_id всех пользователей — для рассылки в бота."""
     q = "SELECT tg_id FROM users" + (" WHERE NOT banned" if exclude_banned else "")
@@ -1001,16 +1017,17 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
         if pay == "balance":
             if u["balance"] < total:
                 raise ValueError("Недостаточно средств — пополните баланс")
-            # бонусом (locked) — не больше BONUS_PAY_MAX_PCT% заказа; остальное
+            # бонусом (locked) — не больше настроенного админом % заказа; остальное
             # обязательно реальными (выводимыми). locked тратим первым, но с капом.
+            pct = await bonus_pay_pct()
             locked = int(u["locked"] or 0)
             withdrawable = int(u["balance"]) - locked
-            bonus_cap = (total * BONUS_PAY_MAX_PCT // 100) if p["bonus_ok"] else 0
+            bonus_cap = (total * pct // 100) if p["bonus_ok"] else 0
             bonus_part = min(locked, bonus_cap)
             real_need = total - bonus_part
             if withdrawable < real_need:
                 raise ValueError(
-                    f"Бонусами можно оплатить не больше {BONUS_PAY_MAX_PCT}%. "
+                    f"Бонусами можно оплатить не больше {pct}%. "
                     f"Нужно реальными: {real_need} ₴, доступно: {max(0, withdrawable)} ₴")
             await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", total, tg_id)
             await _spend_locked(c, tg_id, bonus_part)   # списываем только использованный бонус
