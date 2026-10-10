@@ -1315,6 +1315,14 @@ const tgUser = tg?.initDataUnsafe?.user;
 // deep-link из казино: startapp=topup_<токен> → сразу на пополнение без пина
 window._wantTopup = (tg?.initDataUnsafe?.start_param || '').startsWith('topup');
 const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
+/* ── звуки интерфейса: щелчок на главных кнопках, монеты на деньгах/бонусах ── */
+const SFX = { click: new Audio('sfx-click.mp3'), coin: new Audio('sfx-coin.mp3') };
+SFX.click.volume = 0.5; SFX.coin.volume = 0.6;
+function sfx(name) {
+  const a = SFX[name]; if (!a) return;
+  try { a.currentTime = 0; a.play().catch(() => {}); } catch (e) {}
+}
+document.addEventListener('click', e => { if (e.target.closest('.btn-gold, .good-buy')) sfx('click'); });
 
 /* ═══════════ Данные ═══════════ */
 /* Товары легко заменить: базовая цена за грамм + пороги скидок */
@@ -2370,7 +2378,7 @@ async function placeOrder() {
     try { d = await API.call('/api/order', { product_id: curProduct.id, product_name: curProduct.name, grams: curGrams, pay: 'balance', ship }); }
     catch (e) { return toast(e.message); }
     applySnapshot(d);
-    closeSheets(true); haptic('medium');
+    closeSheets(true); haptic('medium'); sfx('coin');
     toast(d.order_cashback ? `Заказ оформлен ✦ Кэшбэк +${fmt(d.order_cashback)} ₴ бонусом` : 'Заказ оформлен ✦');
     go('history');
     return;
@@ -2385,7 +2393,7 @@ async function placeOrder() {
   });
   save(); syncBalance();
   closeSheets(true);
-  haptic('medium');
+  haptic('medium'); sfx('coin');
   toast('Заказ оформлен ✦');
   go('history');
 }
@@ -2879,7 +2887,7 @@ async function checkInvoice(manual) {
       const wasOrder = INV.order;
       INV = false; clearInterval(invPoll);
       await serverSync();
-      haptic('medium');
+      haptic('medium'); sfx('coin');
       if (wasOrder) {
         closeSheets(true);
         toast(`Заказ ${wasOrder} оплачен ✅`);
@@ -2928,7 +2936,7 @@ async function checkCardPay(manual) {
       CARD = false; clearInterval(cardPoll);
       await serverSync();
       if (document.getElementById('view-topup').classList.contains('active')) renderTopup();
-      haptic('medium'); toast('Оплата картой получена — баланс пополнен ✅');
+      haptic('medium'); sfx('coin'); toast('Оплата картой получена — баланс пополнен ✅');
     } else if (manual) {
       toast('Оплата пока не поступила — обычно до пары минут');
     }
@@ -3054,7 +3062,7 @@ function topUpDemo() {
   if (!v || v <= 0) return toast('Укажите сумму');
   S.balance += v; save(); syncBalance();
   document.getElementById('tuSum').value = '';
-  haptic('medium'); toast(`Баланс пополнен на ${fmt(v)} ₴`);
+  haptic('medium'); sfx('coin'); toast(`Баланс пополнен на ${fmt(v)} ₴`);
 }
 async function redeemPromo() {
   const code = document.getElementById('promoInput').value.trim();
@@ -3065,7 +3073,7 @@ async function redeemPromo() {
   catch (e) { return toast(e.message); }
   applySnapshot(d);
   document.getElementById('promoInput').value = '';
-  haptic('medium'); toast(`🎟 Промокод активирован: +${fmt(d.promo_amount)} ₴`);
+  haptic('medium'); sfx('coin'); toast(`🎟 Промокод активирован: +${fmt(d.promo_amount)} ₴`);
 }
 function renderPayHistory() {
   const el = document.getElementById('payHistory');
@@ -3099,7 +3107,7 @@ async function claimBonus() {
   if (!API.ok) return toast('Доступно после подключения сервера');
   try { applySnapshot(await API.call('/api/bonus/claim')); }
   catch (e) { return toast(e.message); }
-  closeSheets(true); haptic('medium');
+  closeSheets(true); haptic('medium'); sfx('coin');
   toast(`🎉 +${fmt(S.bonusAmount || 100)} ₴ на балансе!`);
 }
 
@@ -3598,7 +3606,7 @@ async function confirmBuyShare() {
   catch (e) { return toast(e.message); }
   pendingBuy = null;
   closeSheets(true);
-  haptic('medium'); toast(`${bushLabel(pct)} куплено 🌱`);
+  haptic('medium'); sfx('coin'); toast(`${bushLabel(pct)} куплено 🌱`);
   renderEgrow();
 }
 
