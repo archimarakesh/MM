@@ -4372,7 +4372,7 @@ async function savePedit() {
       sub: document.getElementById('peSub').value.trim(),
       tag: document.getElementById('peTag').value.trim(),
       category_id: document.getElementById('peCategory').value || null,
-      base, tiers: rates.map(x => ({ from: x.from, k: +(x.rate / base).toFixed(4) })),
+      base, tiers: rates.map(x => ({ from: x.from, k: +(x.rate / base).toFixed(6) })),
       active: peActiveVal,
       bonus_pct,
       delivery: peDeliveryVal,
