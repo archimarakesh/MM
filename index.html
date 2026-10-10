@@ -2042,7 +2042,7 @@ document.querySelectorAll('.sheet').forEach(sh => {
 });
 
 /* свайп влево/вправо — листание основных разделов */
-const SWIPE_VIEWS = ['shop', 'egrow', 'lottery', 'profile', 'support'];
+const SWIPE_VIEWS = ['shop', 'egrow', 'profile', 'support'];
 function swipeGo(v, dir) {
   // раздел сейчас скрыт — менять классы безопасно, анимация не запустится раньше времени
   const el = document.getElementById('view-' + v);
