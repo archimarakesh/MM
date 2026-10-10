@@ -1319,12 +1319,12 @@ const haptic = s => tg?.HapticFeedback?.impactOccurred(s || 'light');
 /* ═══════════ Данные ═══════════ */
 /* Товары легко заменить: базовая цена за грамм + пороги скидок */
 const TIERS = [
-  { from: 5, k: 1.0 }, { from: 10, k: 0.9048 }, { from: 20, k: 0.8095 },
-  { from: 30, k: 0.7143 }, { from: 40, k: 0.6548 }, { from: 50, k: 0.619 },
-  { from: 100, k: 0.4762 },
+  { from: 5, k: 1.0 }, { from: 10, k: 0.904762 }, { from: 20, k: 0.809524 },
+  { from: 30, k: 0.674603 }, { from: 40, k: 0.654762 }, { from: 50, k: 0.619048 },
+  { from: 100, k: 0.47619 },
 ];
-// базовая ставка нового весового товара, ₴/г (при этих k даёт 2100/3800/6800/9000/11001/12999/20000 ₴
-// за 5/10/20/30/40/50/100 г — текущие закупочные цены с маржой 50%→35%)
+// базовая ставка нового весового товара, ₴/г (при этих k даёт 2100/3800/6800/8500/11000/13000/20000 ₴
+// за 5/10/20/30/40/50/100 г)
 const DEFAULT_BASE_G = 420;
 const WEIGHTS = [2, 5, 10, 25, 50, 100];
 const MIN_GRAMS = 2;
@@ -4255,13 +4255,23 @@ function peSyncUnitUI() {
 }
 function peSetUnit(u) {
   peReadTiers();
+  const from = peUnit;   // единица ДО переключения — чтобы не тащить цену не того масштаба
   peUnit = u === 'pc' ? 'pc' : 'g';
   if (peUnit === 'pc') {
-    peTiersArr = [{ from: 1, price: peTiersArr[0]?.price || 100 }];
+    // сбрасываем на дефолт 100 ₴/шт, если раньше был весовой — его цена за весь вес
+    // (например 2100 ₴ за 5 г) не имеет смысла как цена за штуку
+    peTiersArr = [{ from: 1, price: from === 'pc' ? (peTiersArr[0]?.price || 100) : 100 }];
   } else {
     const min = Math.max(1, parseInt(document.getElementById('peMin').value, 10) || MIN_GRAMS);
-    const rate = peTiersArr[0] ? (peTiersArr[0].price / (peTiersArr[0].from || 1)) : 100;
-    peTiersArr = weightSteps(min).map(w => ({ from: w, price: Math.round(rate * w) }));
+    if (from === 'g') {
+      const rate = peTiersArr[0] ? (peTiersArr[0].price / (peTiersArr[0].from || 1)) : 100;
+      peTiersArr = weightSteps(min).map(w => ({ from: w, price: Math.round(rate * w) }));
+    } else {
+      // переключение со штучного — подставляем дефолтную весовую градацию, а не
+      // штучную ставку, растянутую на граммы
+      const srcP = { base: DEFAULT_BASE_G, tiers: TIERS };
+      peTiersArr = weightSteps(min).map(w => ({ from: w, price: priceFor(srcP, w) }));
+    }
   }
   peSyncUnitUI();
   renderPeTiers();
