@@ -1302,6 +1302,18 @@ async def casino_banner():
     return FileResponse("casino_banner.jpg", headers=_IMMUTABLE)
 
 
+@app.get("/sfx-click.mp3")
+async def sfx_click():
+    # короткий щелчок на главных кнопках
+    return FileResponse("sfx-click.mp3", headers=_IMMUTABLE)
+
+
+@app.get("/sfx-coin.mp3")
+async def sfx_coin():
+    # звон монет — успешный заказ, пополнение, бонус
+    return FileResponse("sfx-coin.mp3", headers=_IMMUTABLE)
+
+
 @app.get("/growphoto/{pid}")
 async def grow_photo(pid: int, size: str = "f"):
     data = await db.grow_plan_photo(pid, "t" if size == "t" else "f")
