@@ -1156,7 +1156,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
       <div class="pay-opt" id="peUnitPc" onclick="peSetUnit('pc')">Поштучно<small>штуки, ₴/шт</small></div>
     </div>
   </div>
-  <div class="field"><label id="peMinLabel">Минимальная покупка, г</label><input id="peMin" inputmode="numeric" placeholder="2"></div>
+  <div class="field"><label id="peMinLabel">Минимальная покупка, г</label><input id="peMin" inputmode="numeric" placeholder="2" oninput="peOnMinChange()"></div>
   <div class="field"><label>Фото товара · до 4 шт</label>
     <div id="pePhotos" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div>
     <p class="note" id="pePhotoHint" style="margin:6px 0 0;display:none">Перетащите фото, чтобы изменить порядок. Первое — главное.</p>
@@ -1331,6 +1331,12 @@ const WEIGHT_LADDER = [5, 10, 15, 20, 30, 40, 50, 100];
 const uShort = u => u === 'pc' ? 'шт' : 'г';        // короткий суффикс: 5 г / 5 шт
 const uWord = u => u === 'pc' ? 'шт' : 'грамм';     // слово: минимум 2 грамма / 2 шт
 const uMin = p => p.min_qty || (p.unit === 'pc' ? 1 : MIN_GRAMS);
+// шаги весовой градации с учётом минимальной покупки товара (запасной — сам минимум,
+// если он выше старшей ступени лесенки и так в неё не попадает)
+function weightSteps(min) {
+  const steps = WEIGHT_LADDER.filter(w => w >= min && w <= MAX_GRAMS);
+  return steps.length ? steps : [min];
+}
 // пресеты количества под товар: поштучно — лесенка от минимума, весовой — фиксированная градация
 function qtyPresets(p) {
   const min = uMin(p);
@@ -1338,8 +1344,7 @@ function qtyPresets(p) {
     const ladder = [1, 2, 3, 5, 10, 20];
     return [...new Set([min, ...ladder.filter(w => w > min)])].filter(w => w <= MAX_GRAMS).slice(0, 6);
   }
-  const steps = WEIGHT_LADDER.filter(w => w >= min && w <= MAX_GRAMS);
-  return steps.length ? steps : [min];
+  return weightSteps(min);
 }
 // количество в заказе с единицей: «5 г» / «3 шт» (o.unit по умолчанию граммы)
 const qtyStr = o => `${o.grams} ${uShort(o.unit || 'g')}`;
@@ -2165,11 +2170,18 @@ function renderProductSheet() {
   updatePrice();
 }
 function updatePrice() {
-  const p = curProduct, ts = tiersOf(p), t = tierFor(p, curGrams);
+  const p = curProduct, ts = tiersOf(p);
   document.querySelectorAll('#sheet-product .wchip').forEach(w =>
     w.classList.toggle('sel', parseInt(w.dataset.w, 10) === curGrams));
-  document.getElementById('tierTable').innerHTML = ts.length <= 1 ? '' : ts.map((x, i) =>
-    `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${tierLabel(ts, i, p.unit)}</span><b>${fmt(Math.round(p.base * x.k))} ₴/${uShort(p.unit)}</b></div>`).join('');
+  // весовой товар продаётся фиксированной градацией — показываем цену за каждый вес целиком,
+  // а не диапазон «от–до» с ценой за грамм (поштучные товары — как раньше, диапазонами)
+  document.getElementById('tierTable').innerHTML = p.unit === 'pc'
+    ? (ts.length <= 1 ? '' : ts.map((x, i) => {
+        const t = tierFor(p, curGrams);
+        return `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${tierLabel(ts, i, p.unit)}</span><b>${fmt(Math.round(p.base * x.k))} ₴/${uShort(p.unit)}</b></div>`;
+      }).join(''))
+    : qtyPresets(p).map(w =>
+        `<div class="tier-row ${w === curGrams ? 'hit' : ''}"><span>${w} г</span><b>${fmt(priceFor(p, w))} ₴</b></div>`).join('');
   document.getElementById('totalGrams').textContent = `Итого · ${curGrams} ${uShort(p.unit)}`;
   document.getElementById('totalSum').textContent = fmt(priceFor(p, curGrams)) + ' ₴';
   const short = p.stock != null && (p.stock === 0 || curGrams > p.stock);
@@ -4156,10 +4168,13 @@ function openPedit(id) {
   document.getElementById('peMin').value = curPe && curPe.min_qty != null ? curPe.min_qty : '';
   peDelReset();
   const basePrice = curPe ? curPe.base : 100;
-  peTiersArr = (curPe ? curPe.tiers : TIERS).map(t => ({
-    from: t.from, price: Math.round(basePrice * t.k),
-  }));
-  if (!peTiersArr.length) peTiersArr = [{ from: 1, price: 100 }];
+  const srcP = { base: basePrice, tiers: curPe ? curPe.tiers : TIERS };
+  if (peUnit === 'pc') {
+    peTiersArr = [{ from: 1, price: priceFor(srcP, 1) }];
+  } else {
+    const min = curPe && curPe.min_qty != null ? curPe.min_qty : MIN_GRAMS;
+    peTiersArr = weightSteps(min).map(w => ({ from: w, price: priceFor(srcP, w) }));
+  }
   pePhotos = curPe
     ? Array.from({ length: curPe.photos || 0 }, (_, i) => ({ url: `/photo/${curPe.id}/${i}?size=t&v=${curPe.pv || 0}`, payload: { old: i } }))
     : [];
@@ -4171,7 +4186,8 @@ function openPedit(id) {
   syncPeDelivery();
   openSheet('pedit');
 }
-// градации цены — динамический список с добавлением/удалением строк (поштучно — одна цена без градаций)
+// цена товара: поштучно — одна цена за штуку; весовой — фиксированная цена за каждый вес
+// из градации (5/10/15/20/30/40/50/100 г, с учётом минимальной покупки), без «от-до»
 function renderPeTiers() {
   const s = uShort(peUnit);
   if (peUnit === 'pc') {
@@ -4183,42 +4199,33 @@ function renderPeTiers() {
     return;
   }
   document.getElementById('peTiers').innerHTML = peTiersArr.map((t, i) => `
-    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px;align-items:center">
-      <div style="display:flex;align-items:center;gap:6px">
-        <span style="font-size:11px;color:var(--muted-2)">от</span>
-        <input class="mini-input" id="peFrom${i}" inputmode="numeric" value="${t.from}">
-        <span class="pe-u" style="font-size:11px;color:var(--muted-2)">${s}</span></div>
-      <div style="display:flex;align-items:center;gap:6px">
-        <input class="mini-input" id="pePrice${i}" inputmode="numeric" value="${t.price}">
-        <span class="pe-pu" style="font-size:11px;color:var(--muted-2)">₴/${s}</span></div>
-      <div onclick="peRemoveTier(${i})" title="Убрать градацию" style="width:26px;height:26px;border-radius:8px;border:1px solid var(--line);display:grid;place-items:center;color:var(--danger);font-size:13px;cursor:${peTiersArr.length > 1 ? 'pointer' : 'not-allowed'};opacity:${peTiersArr.length > 1 ? '1' : '.35'}">✕</div>
-    </div>`).join('')
-    + `<button class="btn btn-ghost" style="padding:9px;font-size:12.5px;margin-top:2px" onclick="peAddTier()">+ Добавить градацию</button>`;
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="flex:none;min-width:44px;font-size:12.5px;font-weight:700;color:var(--txt)">${t.from} г</span>
+      <input class="mini-input" id="pePrice${i}" inputmode="numeric" value="${t.price}" style="flex:1">
+      <span style="flex:none;font-size:11px;color:var(--muted-2)">₴</span>
+    </div>`).join('');
 }
-// снять текущие введённые значения в массив (перед добавлением/удалением строки)
+// снять текущие введённые значения в массив
 function peReadTiers() {
   if (peUnit === 'pc') {
     peTiersArr = [{ from: 1, price: parseFloat(document.getElementById('pePrice0').value) || 0 }];
     return;
   }
-  peTiersArr = peTiersArr.map((_, i) => ({
-    from: parseInt(document.getElementById('peFrom' + i).value, 10) || 0,
+  peTiersArr = peTiersArr.map((t, i) => ({
+    from: t.from,
     price: parseFloat(document.getElementById('pePrice' + i).value) || 0,
   }));
 }
-function peAddTier() {
-  if (peUnit === 'pc') return;   // поштучно — без градаций
+// минимальная покупка поменялась — пересобрать строки весовой градации, сохранив уже введённые цены
+function peOnMinChange() {
+  if (peUnit === 'pc') return;
   peReadTiers();
-  const last = peTiersArr[peTiersArr.length - 1] || { from: 1, price: 100 };
-  peTiersArr.push({ from: Math.round((last.from || 1) * 2),
-                    price: Math.max(1, Math.round((last.price || 100) * 0.9)) });
-  renderPeTiers(); haptic('light');
-}
-function peRemoveTier(i) {
-  if (peUnit === 'pc' || peTiersArr.length <= 1) return;    // хотя бы одна градация нужна
-  peReadTiers();
-  peTiersArr.splice(i, 1);
-  renderPeTiers(); haptic('light');
+  const min = Math.max(1, parseInt(document.getElementById('peMin').value, 10) || MIN_GRAMS);
+  const prev = {};
+  peTiersArr.forEach(t => { prev[t.from] = t.price; });
+  const rate = peTiersArr[0] ? (peTiersArr[0].price / (peTiersArr[0].from || 1)) : 100;
+  peTiersArr = weightSteps(min).map(w => ({ from: w, price: prev[w] ?? Math.round(rate * w) }));
+  renderPeTiers();
 }
 function peSyncUnitUI() {
   const s = uShort(peUnit), word = peUnit === 'pc' ? 'штуку' : 'грамм';
@@ -4227,13 +4234,19 @@ function peSyncUnitUI() {
   document.getElementById('peMinLabel').textContent = `Минимальная покупка, ${s}`;
   document.getElementById('peStockLabel').textContent = `Наличие, ${s}`;
   document.getElementById('peTiersLabel').textContent = peUnit === 'pc'
-    ? `Цена, ₴ за ${word}` : `Градация цены, ₴ за ${word}`;
+    ? `Цена, ₴ за ${word}` : `Цена за каждый вес, ₴`;
   const mn = document.getElementById('peMin'); if (mn) mn.placeholder = peUnit === 'pc' ? '1' : '2';
 }
 function peSetUnit(u) {
   peReadTiers();
   peUnit = u === 'pc' ? 'pc' : 'g';
-  if (peUnit === 'pc') peTiersArr = [{ from: 1, price: peTiersArr[0]?.price || 100 }];
+  if (peUnit === 'pc') {
+    peTiersArr = [{ from: 1, price: peTiersArr[0]?.price || 100 }];
+  } else {
+    const min = Math.max(1, parseInt(document.getElementById('peMin').value, 10) || MIN_GRAMS);
+    const rate = peTiersArr[0] ? (peTiersArr[0].price / (peTiersArr[0].from || 1)) : 100;
+    peTiersArr = weightSteps(min).map(w => ({ from: w, price: Math.round(rate * w) }));
+  }
   peSyncUnitUI();
   renderPeTiers();
 }
@@ -4317,12 +4330,14 @@ async function savePedit() {
   peReadTiers();
   const rows = [];
   for (const t of peTiersArr) {
-    if (!t.from || !t.price || t.price <= 0) return toast('Проверьте градацию цен');
+    if (!t.from || !t.price || t.price <= 0) return toast('Проверьте цену по каждому весу');
     rows.push({ from: t.from, price: t.price });
   }
-  if (!rows.length) return toast('Добавьте хотя бы одну градацию');
+  if (!rows.length) return toast('Добавьте цену хотя бы для одного веса');
   rows.sort((a, b) => a.from - b.from);
-  const base = rows[0].price;
+  // price в rows — ПОЛНАЯ цена за эту конкретную градацию (не за грамм), приводим к ставке за грамм
+  const rates = rows.map(x => ({ from: x.from, rate: x.price / x.from }));
+  const base = rates[0].rate;
   try {
     const r = await API.call('/api/admin/product', {
       id: curPe?.id || null, name,
@@ -4330,7 +4345,7 @@ async function savePedit() {
       sub: document.getElementById('peSub').value.trim(),
       tag: document.getElementById('peTag').value.trim(),
       category_id: document.getElementById('peCategory').value || null,
-      base, tiers: rows.map(x => ({ from: x.from, k: +(x.price / base).toFixed(4) })),
+      base, tiers: rates.map(x => ({ from: x.from, k: +(x.rate / base).toFixed(4) })),
       active: peActiveVal,
       bonus_ok: peBonusOkVal,
       delivery: peDeliveryVal,
