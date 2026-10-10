@@ -569,7 +569,7 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 /* ── нижняя навигация (один в один с казино: там не дёргается) ── */
 nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-bottom));z-index:70;
   max-width:28rem;margin:0 auto}
-.nav-core{display:grid;grid-template-columns:repeat(4,1fr);gap:0.125rem;padding:0.4375rem;border-radius:62.4375rem;
+.nav-core{display:grid;grid-template-columns:repeat(5,1fr);gap:0.125rem;padding:0.4375rem;border-radius:62.4375rem;
   background:rgba(14,12,8,.88);backdrop-filter:blur(0.625rem);-webkit-backdrop-filter:blur(0.625rem);
   border:0.0625rem solid var(--gold-line);
   box-shadow:0 1.125rem 2.75rem rgba(0,0,0,.55),inset 0 0.0625rem 0.0625rem rgba(255,255,255,.06)}
@@ -580,6 +580,10 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 .nav-item span{font-size:0.5625rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
 .nav-item.active{color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d);
   box-shadow:0 0.5rem 1.25rem rgba(212,175,55,.3),inset 0 0.0625rem 0.0625rem rgba(255,255,255,.5)}
+.nav-item{position:relative}
+.nav-badge{position:absolute;top:0.125rem;right:0.5rem;min-width:1.125rem;height:1.125rem;padding:0 0.25rem;
+  border-radius:62.4375rem;background:var(--danger);color:#fff;font-size:0.59375rem;font-weight:800;
+  display:grid;place-items:center;box-shadow:0 0 0 0.125rem rgba(14,12,8,.88)}
 
 /* toast */
 #toast{position:fixed;top:calc(0.875rem + max(env(safe-area-inset-top), var(--tg-top)));left:50%;transform:translate(-50%,-160%);z-index:95;
@@ -977,6 +981,11 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4-3.2-7-8-7 0 4.5 3.2 7 8 7z"/><path d="M12 14c0-5 3.2-8 8-8 0 5.5-3.2 8-8 8z"/></svg>
       <span>E-Grow</span>
     </div>
+    <div class="nav-item" onclick="openSheet('cart')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="18" cy="20" r="1.3"/><path d="M2 3h3l2.2 11.2a1.6 1.6 0 0 0 1.6 1.3h8.4a1.6 1.6 0 0 0 1.6-1.3L21.5 7H6"/></svg>
+      <span>Корзина</span>
+      <span class="nav-badge" id="cartBadge" style="display:none">0</span>
+    </div>
     <div class="nav-item" data-v="profile" onclick="go('profile')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>
       <span>Профиль</span>
@@ -994,6 +1003,13 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 <div class="sheet" id="sheet-product">
   <div class="sheet-grip"></div>
   <div id="productBody"></div>
+</div>
+
+<div class="sheet" id="sheet-cart">
+  <div class="sheet-grip"></div>
+  <h2>Корзина</h2>
+  <p class="sheet-sub">Можно добавить несколько товаров и оформить одной доставкой.</p>
+  <div id="cartBody"></div>
 </div>
 
 <div class="sheet" id="sheet-checkout">
@@ -1366,6 +1382,15 @@ function qtyPresets(p) {
 }
 // количество в заказе с единицей: «5 г» / «3 шт» (o.unit по умолчанию граммы)
 const qtyStr = o => `${o.grams} ${uShort(o.unit || 'g')}`;
+// позиции заказа: новый формат — o.items[], старый (до корзины) — одна строка o.product/grams/unit
+const orderItems = o => (o.items && o.items.length) ? o.items
+  : (o.product ? [{ product: o.product, grams: o.grams, unit: o.unit, total: o.total }] : []);
+// «Golden Reserve · 10 г» для одной позиции, «3 товара» для корзины
+function orderLineSummary(o) {
+  const items = orderItems(o);
+  if (items.length <= 1) return items[0] ? `${items[0].product} · ${items[0].grams} ${uShort(items[0].unit || 'g')}` : (o.product || '—');
+  return `${items.length} ${plItems(items.length)}`;
+}
 const GRADS = [
   'linear-gradient(140deg,#3a2d0e,#1c1506)', 'linear-gradient(140deg,#23211d,#0e0d0b)',
   'linear-gradient(140deg,#3d2c12,#241505)', 'linear-gradient(140deg,#1f1d2b,#0d0c14)',
@@ -1964,6 +1989,7 @@ function openSheet(name) {
   document.getElementById('veil').classList.add('open');
   document.getElementById('sheet-' + name).classList.add('open');
   if (name === 'settings') syncSettings();
+  if (name === 'cart') renderCartSheet();
   if (name === 'withdraw') renderWithdraw();
   if (name === 'delacc') {
     delAccArmed = false;
@@ -2132,6 +2158,42 @@ function renderGoods() {
 }
 
 let curProduct = null, curGrams = 10;
+/* ═══════════ Корзина: несколько товаров в одном заказе ═══════════ */
+const CART_KEY = 'mm_cart_v1';
+let CART = (() => { try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch (e) { return []; } })();
+const saveCart = () => localStorage.setItem(CART_KEY, JSON.stringify(CART));
+const cartProduct = pid => (P || PRODUCTS).find(p => String(p.id) === String(pid));
+// валидные строки корзины на СЕЙЧАС (товар существует/активен, вес всё ещё укладывается в градацию)
+function cartLines() {
+  return CART.map(c => {
+    const p = cartProduct(c.pid);
+    if (!p) return null;
+    const steps = qtyPresets(p);
+    const grams = steps.includes(c.grams) ? c.grams : steps[0];
+    return { product: p, grams, total: priceFor(p, grams) };
+  }).filter(Boolean);
+}
+function cartCount() { return CART.length; }
+function syncCartBadge() {
+  const b = document.getElementById('cartBadge'); if (!b) return;
+  const n = cartCount();
+  b.textContent = n > 9 ? '9+' : String(n);
+  b.style.display = n > 0 ? '' : 'none';
+}
+function addToCart(pid, grams) {
+  const i = CART.findIndex(c => String(c.pid) === String(pid));
+  if (i >= 0) CART[i].grams = grams; else CART.push({ pid, grams });
+  saveCart(); syncCartBadge(); haptic('medium'); sfx('coin');
+  toast('Добавлено в корзину 🛒');
+}
+function removeFromCart(pid) {
+  CART = CART.filter(c => String(c.pid) !== String(pid));
+  saveCart(); syncCartBadge(); renderCartSheet(); haptic('light');
+}
+function cartLineSetGrams(pid, grams) {
+  const c = CART.find(x => String(x.pid) === String(pid));
+  if (c) { c.grams = grams; saveCart(); renderCartSheet(); }
+}
 function openProduct(id) {
   curProduct = goodsList().find(p => String(p.id) === String(id));
   // дефолт количества: поштучно — минимум, весовой — 10 г из фиксированной градации (либо первая доступная)
@@ -2206,9 +2268,12 @@ function updatePrice() {
   document.getElementById('orderAction').innerHTML = short ? `
     <a class="btn btn-ghost" style="text-decoration:none;color:var(--warn)" href="${ADMIN_CHAT}" target="_blank" rel="noopener">💬 Написать админу</a>
     <p class="note" style="text-align:center">${p.stock === 0 ? 'Товара сейчас нет в наличии' : 'Такого количества сейчас нет'} — напишите админу, подскажем, когда будет.</p>` : `
-    <button class="btn btn-gold" onclick="openCheckout()">Оформить заказ
-      <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
-    </button>`;
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="addToCart('${p.id}', ${curGrams})">В корзину</button>
+      <button class="btn btn-gold" style="flex:1.3" onclick="buyNow()">Купить сейчас
+        <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+      </button>
+    </div>`;
 }
 function setGrams(w) {
   haptic('light'); curGrams = w;
@@ -2311,20 +2376,29 @@ function pickWh(i) {
   document.getElementById('coNPList').innerHTML = '';
   haptic('light');
 }
-// сколько реальных средств нужно на заказ: бонусом (locked) — не больше N% этого
-// конкретного товара (p.bonus_pct), либо общей настройки, если у товара свой % не задан
-function orderPaySplit(total, p) {
+// сколько реальных средств нужно на заказ: бонусом (locked) — не больше суммы по
+// каждой позиции (свой % товара, либо общая настройка, если у товара свой не задан)
+function orderPaySplit(total, items) {
   const defPct = S.bonus_pay_pct != null ? S.bonus_pay_pct : 50;
-  const pct = p && p.bonus_pct != null ? p.bonus_pct : defPct;
-  const allowBonus = pct > 0;
+  const bonusCap = items.reduce((s, it) => {
+    const pct = it.product && it.product.bonus_pct != null ? it.product.bonus_pct : defPct;
+    return s + Math.floor(it.total * pct / 100);
+  }, 0);
+  const allowBonus = bonusCap > 0;
   const real = S.withdrawable != null ? S.withdrawable : S.balance;
   const locked = Math.max(0, S.balance - real);
-  const bonusUse = allowBonus ? Math.min(locked, Math.floor(total * pct / 100)) : 0;
+  const bonusUse = Math.min(locked, bonusCap);
   const realNeed = total - bonusUse;
-  return { pct, real, bonusUse, realNeed, allowBonus, enough: real >= realNeed };
+  return { bonusCap, real, bonusUse, realNeed, allowBonus, enough: real >= realNeed };
 }
-function syncDeliveryOptions() {
-  const allowed = (curProduct && curProduct.delivery && curProduct.delivery.length) ? curProduct.delivery : ['np', 'taxi'];
+// способ доставки — общий на весь заказ: пересечение разрешённых способов всех товаров корзины
+function syncDeliveryOptions(items) {
+  let allowed = null;
+  items.forEach(it => {
+    const d = (it.product.delivery && it.product.delivery.length) ? it.product.delivery : ['np', 'taxi'];
+    allowed = allowed ? allowed.filter(m => d.includes(m)) : d.slice();
+  });
+  if (!allowed || !allowed.length) allowed = ['np', 'taxi'];   // бэкенд всё равно проверит при оформлении
   document.querySelectorAll('#coMethod .wchip').forEach(x => {
     x.style.display = allowed.includes(x.dataset.m) ? '' : 'none';
   });
@@ -2332,17 +2406,66 @@ function syncDeliveryOptions() {
   const method = allowed.includes(coMethod) ? coMethod : allowed[0];
   setMethod(method, document.querySelector(`#coMethod .wchip[data-m="${method}"]`));
 }
-function openCheckout() {
+let checkoutItems = [];   // [{product, grams, total}] — то, что оформляем прямо сейчас
+function buyNow() {
+  checkoutItems = [{ product: curProduct, grams: curGrams, total: priceFor(curProduct, curGrams) }];
+  openCheckoutSheet();
+}
+function checkoutFromCart() {
+  checkoutItems = cartLines();
+  if (!checkoutItems.length) return toast('Корзина пуста');
+  closeSheets(true);
+  openCheckoutSheet();
+}
+function renderCartSheet() {
+  const lines = cartLines();
+  // строки, которые исчезли/стали неактивны с момента добавления — молча подчищаем
+  if (lines.length !== CART.length) { CART = lines.map(l => ({ pid: l.product.id, grams: l.grams })); saveCart(); syncCartBadge(); }
+  const body = document.getElementById('cartBody');
+  if (!lines.length) {
+    body.innerHTML = `<div class="empty"><div class="e-ico">🛒</div><p>Корзина пуста — добавьте товары со страницы магазина.</p></div>
+      <button class="btn btn-gold" onclick="closeSheets(true);go('shop')">В магазин</button>`;
+    return;
+  }
+  const total = lines.reduce((s, l) => s + l.total, 0);
+  body.innerHTML = lines.map(l => `
+    <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:11px 12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="min-width:0">
+          <h3 style="font-size:13.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.product.name)}</h3>
+          <div style="font-size:11.5px;color:var(--muted-2);margin-top:2px">${fmt(l.total)} ₴</div>
+        </div>
+        <div onclick="removeFromCart('${l.product.id}')" style="flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:var(--danger);background:rgba(224,122,95,.1);cursor:pointer;font-size:13px">✕</div>
+      </div>
+      <div class="weight-chips" style="margin:8px 0 0">
+        ${qtyPresets(l.product).map(w => `<div class="wchip ${w === l.grams ? 'sel' : ''}" style="padding:0.375rem 0.6875rem;font-size:0.71875rem" onclick="cartLineSetGrams('${l.product.id}', ${w})">${w} ${uShort(l.product.unit)}</div>`).join('')}
+      </div>
+    </div></div>`).join('')
+    + `<div class="total-row"><span>Итого · ${lines.length} ${plItems(lines.length)}</span><b>${fmt(total)} ₴</b></div>
+    <button class="btn btn-gold" onclick="checkoutFromCart()">Оформить заказ
+      <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
+    </button>`;
+}
+// «1 товар» / «2 товара» / «5 товаров» — русское склонение числительного
+function plItems(n) {
+  const n10 = n % 10, n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return 'товар';
+  if ([2, 3, 4].includes(n10) && ![12, 13, 14].includes(n100)) return 'товара';
+  return 'товаров';
+}
+function openCheckoutSheet() {
   resetCheckoutAddr();
-  syncDeliveryOptions();
-  const total = priceFor(curProduct, curGrams);
+  syncDeliveryOptions(checkoutItems);
+  const total = checkoutItems.reduce((s, it) => s + it.total, 0);
   payMethod = 'balance';
-  document.getElementById('coSummary').textContent =
-    `${curProduct.name} · ${curGrams} ${uShort(curProduct.unit)} · ${fmt(total)} ₴`;
-  const sp = orderPaySplit(total, curProduct);
+  document.getElementById('coSummary').innerHTML = checkoutItems.length === 1
+    ? `${checkoutItems[0].product.name} · ${checkoutItems[0].grams} ${uShort(checkoutItems[0].product.unit)} · ${fmt(total)} ₴`
+    : checkoutItems.map(it => `${it.product.name} · ${it.grams} ${uShort(it.product.unit)} · ${fmt(it.total)} ₴`).join('<br>')
+      + `<br><b style="color:var(--gold-soft)">Итого: ${fmt(total)} ₴</b>`;
+  const sp = orderPaySplit(total, checkoutItems);
   document.getElementById('coPays').innerHTML = sp.allowBonus ? `
     <div style="grid-column:1/-1">
-       <p class="note" style="margin:0 0 6px">Бонусами можно оплатить до <b style="color:var(--gold-soft)">${sp.pct}%</b> заказа. К оплате <b>${fmt(total)} ₴</b>:</p>
+       <p class="note" style="margin:0 0 6px">Бонусами можно оплатить до <b style="color:var(--gold-soft)">${fmt(sp.bonusCap)} ₴</b>. К оплате <b>${fmt(total)} ₴</b>:</p>
        <div style="display:flex;gap:8px">
          <div class="ref-stat" style="flex:1;padding:9px 10px"><b style="font-size:14px;color:var(--gold-soft)">🎁 ${fmt(sp.bonusUse)} ₴</b><span>бонусом</span></div>
          <div class="ref-stat" style="flex:1;padding:9px 10px"><b style="font-size:14px;color:${sp.enough ? 'var(--txt)' : 'var(--danger)'}">💵 ${fmt(sp.realNeed)} ₴</b><span>реальными</span></div>
@@ -2350,7 +2473,7 @@ function openCheckout() {
        ${sp.enough ? '' : `<p class="note" style="margin:6px 0 0;color:var(--danger)">Не хватает реальных ${fmt(sp.realNeed - sp.real)} ₴ — пополните баланс</p>`}
      </div>` : `
     <div style="grid-column:1/-1">
-       <p class="note" style="margin:0 0 6px">Этот товар оплачивается только реальными средствами, без бонусов. К оплате <b style="color:${sp.enough ? 'var(--txt)' : 'var(--danger)'}">${fmt(total)} ₴</b></p>
+       <p class="note" style="margin:0 0 6px">Этот заказ оплачивается только реальными средствами, без бонусов. К оплате <b style="color:${sp.enough ? 'var(--txt)' : 'var(--danger)'}">${fmt(total)} ₴</b></p>
        ${sp.enough ? '' : `<p class="note" style="margin:6px 0 0;color:var(--danger)">Не хватает реальных ${fmt(sp.realNeed - sp.real)} ₴ — пополните баланс</p>`}
      </div>`;
   document.getElementById('coExtra').innerHTML = sp.enough ? '' :
@@ -2373,17 +2496,28 @@ async function placeOrder() {
     if (coCitySel) ship.city_ref = coCitySel.ref;
     if (coWhSel) { ship.branch = coWhSel.desc; ship.wh_ref = coWhSel.ref; ship.postomat = coWhSel.postomat; }
   }
-  const total = priceFor(curProduct, curGrams);
-  const sp = orderPaySplit(total, curProduct);
+  const total = checkoutItems.reduce((s, it) => s + it.total, 0);
+  const sp = orderPaySplit(total, checkoutItems);
   if (!sp.enough) {
-    toast(`Бонусом можно оплатить до ${sp.pct}% — нужно реальными ${fmt(sp.realNeed)} ₴`);
+    toast(`Бонусом можно оплатить максимум ${fmt(sp.bonusCap)} ₴ — нужно реальными ${fmt(sp.realNeed)} ₴`);
     closeSheets(true); return go('topup');
   }
+  const boughtIds = checkoutItems.map(it => String(it.product.id));
+  const dropFromCart = () => {
+    CART = CART.filter(c => !boughtIds.includes(String(c.pid)));
+    saveCart(); syncCartBadge();
+  };
   if (API.ok) {
     let d;
-    try { d = await API.call('/api/order', { product_id: curProduct.id, product_name: curProduct.name, grams: curGrams, pay: 'balance', ship }); }
+    try {
+      d = await API.call('/api/order', {
+        items: checkoutItems.map(it => ({ product_id: it.product.id, grams: it.grams })),
+        pay: 'balance', ship,
+      });
+    }
     catch (e) { return toast(e.message); }
     applySnapshot(d);
+    dropFromCart();
     closeSheets(true); haptic('medium'); sfx('coin');
     toast(d.order_cashback ? `Заказ оформлен ✦ Кэшбэк +${fmt(d.order_cashback)} ₴ бонусом` : 'Заказ оформлен ✦');
     go('history');
@@ -2393,10 +2527,13 @@ async function placeOrder() {
   S.balance -= total;
   S.orders.unshift({
     id: 'MM-' + (1043 + S.orders.length),
-    product: curProduct.name, grams: curGrams, total,
+    product: checkoutItems.length === 1 ? checkoutItems[0].product.name : `${checkoutItems[0].product.name} +${checkoutItems.length - 1}`,
+    items: checkoutItems.map(it => ({ product: it.product.name, grams: it.grams, unit: it.product.unit, total: it.total })),
+    grams: checkoutItems.length === 1 ? checkoutItems[0].grams : null, total,
     date: new Date().toLocaleDateString('ru-RU'),
     status: 0, ttn: null, ship,
   });
+  dropFromCart();
   save(); syncBalance();
   closeSheets(true);
   haptic('medium'); sfx('coin');
@@ -2441,7 +2578,7 @@ function renderOrders() {
     return `<div class="order bezel reveal" style="transition-delay:${j * 60}ms" onclick="openOrder(${i})">
       <div class="bezel-core">
         <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
-        <div class="order-meta"><span>${o.product} · ${qtyStr(o)} · ${o.date}</span><b>${fmt(o.total)} ₴</b></div>
+        <div class="order-meta"><span>${orderLineSummary(o)} · ${o.date}</span><b>${fmt(o.total)} ₴</b></div>
       </div>
     </div>`;
   }).join('') + pagerHtml(S.orders.length, ordersPage, 'ordersGo');
@@ -2454,7 +2591,11 @@ function renderOrderBody(i) {
   if (!o) return;
   document.getElementById('orderBody').innerHTML = `
     <h2>${o.id}</h2>
-    <p class="sheet-sub">${o.product} · ${qtyStr(o)} · ${o.date} · <b style="color:var(--gold-soft)">${fmt(o.total)} ₴</b></p>
+    <p class="sheet-sub">${orderLineSummary(o)} · ${o.date} · <b style="color:var(--gold-soft)">${fmt(o.total)} ₴</b></p>
+    ${orderItems(o).length > 1 ? `
+    <div class="tier-table" style="margin-bottom:12px">
+      ${orderItems(o).map(it => `<div class="tier-row"><span>${esc(it.product)} · ${it.grams} ${uShort(it.unit || 'g')}</span><b>${fmt(it.total)} ₴</b></div>`).join('')}
+    </div>` : ''}
     ${o.status >= 0 ? `
     <div class="timeline">
       ${STATUSES.map((s, k) => `
@@ -3879,9 +4020,12 @@ function renderAdmin(tab) {
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${o.id}</b><span class="status ${stClass(o.status)}">${stLabel(o.status)}</span></div>
         <div style="font-size:12px;color:var(--muted);line-height:1.65">
-          ${esc(o.product)} · ${qtyStr(o)} · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
+          ${esc(orderLineSummary(o))} · <b style="color:var(--txt)">${fmt(o.total)} ₴</b> · ${o.date}${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
           ${esc(o.user)}${o.username ? ' · @' + esc(o.username) : ''}${paySplit(o)}
         </div>
+        ${orderItems(o).length > 1 ? `<div class="stat-list" style="margin-top:6px">
+          ${orderItems(o).map(it => `<div><span>${esc(it.product)} · ${it.grams} ${uShort(it.unit || 'g')}</span><b style="color:var(--txt)">${fmt(it.total)} ₴</b></div>`).join('')}
+        </div>` : ''}
         ${o.ship ? shipChips(o.ship) : ''}
         ${o.np_status_text ? `<div style="font-size:11.5px;color:var(--gold-soft);margin-top:6px">📍 ${esc(o.np_status_text)}${o.np_eta ? ` · ожид. ${npDate(o.np_eta)}` : ''}</div>` : ''}
         ${o.status === -1 && o.receipt ? `
@@ -4725,9 +4869,12 @@ async function loadDoneOrders() {
       <div class="bezel" style="margin-bottom:10px"><div class="bezel-core" style="padding:13px 14px">
         <div class="order-top"><b>${o.id}</b><span class="status ok">Получен</span></div>
         <div style="font-size:12px;color:var(--muted);line-height:1.65">
-          ${esc(o.product)} · ${qtyStr(o)} · <b style="color:var(--txt)">${fmt(o.total)} ₴</b>${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
+          ${esc(orderLineSummary(o))} · <b style="color:var(--txt)">${fmt(o.total)} ₴</b>${o.pay ? ' · ' + (TU_LABELS[o.pay] || esc(o.pay)) : ''}<br>
           ${esc(o.user)}${o.username ? ' · @' + esc(o.username) : ''}${paySplit(o)}
         </div>
+        ${orderItems(o).length > 1 ? `<div class="stat-list" style="margin-top:6px">
+          ${orderItems(o).map(it => `<div><span>${esc(it.product)} · ${it.grams} ${uShort(it.unit || 'g')}</span><b style="color:var(--txt)">${fmt(it.total)} ₴</b></div>`).join('')}
+        </div>` : ''}
         ${o.ttn ? `<div class="ttn" style="margin-top:8px"><span>ТТН</span><b>${esc(o.ttn)}</b></div>` : ''}
         ${o.delay_paid > 0 ? `<p class="note" style="margin-top:6px;color:var(--lose)">⏳ Компенсация за просрочку: ${o.delay_paid} сут · ${fmt(o.delay_paid * 50)} ₴</p>` : ''}
         ${orderTimeline(o)}
@@ -4971,7 +5118,7 @@ async function adminUserOpen(id) {
   const u = d.user;
   const sect = (title, n, inner) => `<div class="section-head" style="margin:16px 0 8px"><h2 style="font-size:15px">${title}</h2><span>${n}</span></div>${inner}`;
   const orders = (d.orders || []).map(o => `
-    <div class="set-row"><div><h3>${auEsc(o.product || 'Заказ')}${o.grams ? ' · ' + o.grams + ' ' + uShort(o.unit || 'g') : ''}</h3>
+    <div class="set-row"><div><h3>${auEsc(orderLineSummary(o))}</h3>
     <p>${fmt(o.total)} ₴${o.bonus_part ? ` (бонус ${fmt(o.bonus_part)} ₴)` : ''} · ${AU_ORDER_ST[o.status] || o.status}${o.date ? ' · ' + auEsc(o.date) : ''}${o.ttn ? ' · ТТН ' + auEsc(o.ttn) : ''}</p></div></div>`).join('') || '<p class="note">нет заказов</p>';
   const topups = (d.topups || []).map(t => `
     <div class="set-row"><div><h3>${fmt(t.amount)} ₴ · ${AU_KIND[t.kind] || t.kind}${t.detail ? ' ' + auEsc(t.detail) : ''}</h3>
@@ -5366,7 +5513,7 @@ function revealNow(root) {
 const BUILD = 'v11';  // метка сборки — видно в «Настройках», чтобы ловить старый кэш. Поднимать при правках
 document.getElementById('buildTag').textContent = BUILD;
 renderGoods(); renderOrders(); renderSupport(); renderFaq();
-initProfile(); syncBalance(); syncSettings(); initLock();
+initProfile(); syncBalance(); syncSettings(); syncCartBadge(); initLock();
 observeReveals();
 serverSync();
 startAutoSync();

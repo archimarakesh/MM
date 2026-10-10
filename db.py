@@ -216,6 +216,19 @@ async def init():
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT 'g';
             UPDATE orders SET ship=NULL WHERE status=3 AND ship IS NOT NULL;
             CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id);
+            -- корзина: один заказ (одна доставка/статус/ТТН) может включать несколько
+            -- товарных позиций. orders.product/grams/unit/product_id остаются как сводка
+            -- первой позиции (для старых мест, которые их ещё читают); источник истины
+            -- по составу заказа — эта таблица.
+            CREATE TABLE IF NOT EXISTS order_items(
+                id         BIGSERIAL PRIMARY KEY,
+                order_id   BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                product_id BIGINT,
+                product    TEXT NOT NULL,
+                grams      INT NOT NULL,
+                unit       TEXT NOT NULL DEFAULT 'g',
+                total      BIGINT NOT NULL);
+            CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items(order_id);
             CREATE TABLE IF NOT EXISTS topups(
                 id      BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL,
@@ -785,10 +798,12 @@ async def snapshot(tg_id: int, conn: asyncpg.Connection | None = None) -> dict:
     rows = await c.fetch("SELECT * FROM orders WHERE user_id=$1 ORDER BY id DESC", tg_id)
     rate = {r["order_id"]: r for r in await c.fetch(
         "SELECT order_id, stars, text, anon FROM ratings WHERE user_id=$1", tg_id)}
+    items = await _order_items_by_order(c, [r["id"] for r in rows])
     orders = [{
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "product": r["product"], "grams": r["grams"], "total": r["total"],
         "unit": r["unit"] or "g",
+        "items": items.get(r["id"], []),
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
         "delay_paid": r["delay_paid"],
         "ship": json.loads(r["ship"]) if r["ship"] else None,
@@ -945,6 +960,28 @@ async def _restock(c, product_id, grams):
             "UPDATE products SET stock=stock+$1 WHERE id=$2 AND stock IS NOT NULL", grams, product_id)
 
 
+async def _restock_order(c, order_id: int):
+    """Возврат на склад всех позиций заказа (корзина — несколько строк в order_items)."""
+    rows = await c.fetch("SELECT product_id, grams FROM order_items WHERE order_id=$1", order_id)
+    for r in rows:
+        await _restock(c, r["product_id"], r["grams"])
+
+
+async def _order_items_by_order(c, order_ids: list) -> dict:
+    """Позиции по заказам одним запросом: {order_id: [{product, product_id, grams, unit, total}, ...]}."""
+    if not order_ids:
+        return {}
+    rows = await c.fetch(
+        "SELECT * FROM order_items WHERE order_id = ANY($1::bigint[]) ORDER BY id", order_ids)
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r["order_id"], []).append({
+            "product": r["product"], "product_id": r["product_id"],
+            "grams": r["grams"], "unit": r["unit"] or "g", "total": r["total"],
+        })
+    return out
+
+
 async def order_total(product_id: int, grams: int) -> int:
     async with _pool.acquire() as c:
         _, total = await _order_product_total(c, product_id, grams)
@@ -957,15 +994,31 @@ async def _guard_pending_orders(c, tg_id: int):
         raise ValueError("Слишком много незавершённых заказов — оплатите или дождитесь обработки")
 
 
-async def _insert_order(c, tg_id, p, grams, total, status, pay, ship,
+async def _insert_order(c, tg_id, lines, total, status, pay, ship,
                         receipt=None, bonus_part=0) -> int:
-    return await c.fetchval("""
+    """lines: [(product_row, grams, line_total), ...] — одна или несколько позиций
+    одного заказа (одна доставка/статус/ТТН). Пишет заголовок заказа + по строке
+    в order_items на каждую позицию."""
+    first_p, first_grams, _ = lines[0]
+    if len(lines) == 1:
+        summary, sum_grams, sum_unit, sum_pid = first_p["name"], first_grams, (first_p["unit"] or "g"), first_p["id"]
+    else:
+        names = [p["name"] for p, _, _ in lines]
+        summary = names[0] + (f" +{len(names) - 1}" if len(names) > 1 else "")
+        sum_grams = sum_unit = sum_pid = None   # сводных г/шт/товара у заказа-корзины нет — смотри order_items
+    oid = await c.fetchval("""
         INSERT INTO orders(user_id, product_id, product, grams, total, status, pay,
                            receipt, ship, date, bonus_part, unit)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id
-    """, tg_id, p["id"], p["name"], grams, total, status, pay, receipt,
+    """, tg_id, sum_pid, summary, sum_grams, total, status, pay, receipt,
         json.dumps(ship, ensure_ascii=False), datetime.now().strftime("%d.%m.%Y"),
-        int(bonus_part), (p["unit"] or "g"))
+        int(bonus_part), sum_unit)
+    for p, grams, line_total in lines:
+        await c.execute("""
+            INSERT INTO order_items(order_id, product_id, product, grams, unit, total)
+            VALUES($1,$2,$3,$4,$5,$6)
+        """, oid, p["id"], p["name"], grams, (p["unit"] or "g"), line_total)
+    return oid
 
 
 async def user_cashback(tg_id: int, conn=None) -> dict:
@@ -1010,48 +1063,68 @@ async def _apply_cashback(c, tg_id: int, real_amount: int, order_id: int) -> int
     return amount
 
 
-async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
+async def create_order(tg_id: int, items: list, pay: str,
                        ship: dict, receipt: str | None = None) -> dict:
-    """Оплата с баланса (сразу оплачен) или картой (квитанция на проверку)."""
+    """Оплата с баланса (сразу оплачен) или картой (квитанция на проверку).
+    items: [{"product_id": int, "grams": int}, ...] — корзина: одна или несколько
+    позиций одной доставкой/заказом."""
+    if not items:
+        raise ValueError("Корзина пуста")
     async with _pool.acquire() as c, c.transaction():
-        p, total = await _order_product_total(c, product_id, grams, lock=True)
-        _check_delivery(p, ship)
+        lines = []           # [(product_row, grams, line_total), ...]
+        allowed = None       # пересечение способов доставки по всем товарам корзины
+        for it in items:
+            p, line_total = await _order_product_total(c, int(it["product_id"]), int(it["grams"]), lock=True)
+            lines.append((p, int(it["grams"]), line_total))
+            da = set(json.loads(p["delivery"]) if p["delivery"] else DEFAULT_DELIVERY)
+            allowed = da if allowed is None else (allowed & da)
+        if not allowed:
+            raise ValueError("У товаров в корзине нет общего способа доставки")
+        if (ship or {}).get("method") not in allowed:
+            raise ValueError("Этот способ доставки недоступен для заказа")
+        total = sum(lt for _, _, lt in lines)
         u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         cash = 0
         if pay == "balance":
             if u["balance"] < total:
                 raise ValueError("Недостаточно средств — пополните баланс")
-            # бонусом (locked) — не больше % для этого товара (или общей настройки,
-            # если у товара свой % не задан); остальное обязательно реальными
-            # (выводимыми). locked тратим первым, но с капом.
-            pct = p["bonus_pct"] if p["bonus_pct"] is not None else await bonus_pay_pct()
+            # бонусом (locked) — не больше % по каждому товару (свой или общая настройка),
+            # суммарно по корзине; остальное обязательно реальными. locked тратим первым,
+            # но с капом.
+            default_pct = await bonus_pay_pct()
+            bonus_cap = sum(
+                lt * (p["bonus_pct"] if p["bonus_pct"] is not None else default_pct) // 100
+                for p, _, lt in lines)
             locked = int(u["locked"] or 0)
             withdrawable = int(u["balance"]) - locked
-            bonus_cap = total * pct // 100
             bonus_part = min(locked, bonus_cap)
             real_need = total - bonus_part
             if withdrawable < real_need:
                 raise ValueError(
-                    f"Бонусами можно оплатить не больше {pct}%. "
+                    f"Бонусами можно оплатить максимум {bonus_cap} ₴ по этому заказу. "
                     f"Нужно реальными: {real_need} ₴, доступно: {max(0, withdrawable)} ₴")
             await c.execute("UPDATE users SET balance=balance-$1 WHERE tg_id=$2", total, tg_id)
             await _spend_locked(c, tg_id, bonus_part)   # списываем только использованный бонус
-            oid = await _insert_order(c, tg_id, p, grams, total, 0, "balance", ship,
+            oid = await _insert_order(c, tg_id, lines, total, 0, "balance", ship,
                                       bonus_part=bonus_part)
             await _ref_bonus(c, tg_id, total)
             # кэшбэк бонусом за РЕАЛЬНУЮ часть покупки (бонусами оплаченное не в счёт)
             cash = await _apply_cashback(c, tg_id, total - bonus_part, oid)
         elif pay == "card":
             await _guard_pending_orders(c, tg_id)
-            oid = await _insert_order(c, tg_id, p, grams, total, -1, "card", ship, receipt)
+            oid = await _insert_order(c, tg_id, lines, total, -1, "card", ship, receipt)
         else:
             raise ValueError("Неизвестный способ оплаты")
-        await _take_stock(c, product_id, grams)
+        for p, grams, _ in lines:
+            await _take_stock(c, p["id"], grams)
         snap = await snapshot(tg_id, c)
         snap["order_code"] = f"MM-{oid + ORDER_CODE_BASE}"
         snap["order_total"] = total
-        snap["order_product"] = p["name"]
-        snap["order_grams"] = grams
+        snap["order_items"] = [
+            {"product": p["name"], "grams": g, "unit": p["unit"] or "g", "total": lt}
+            for p, g, lt in lines]
+        snap["order_product"] = lines[0][0]["name"] if len(lines) == 1 else f"{lines[0][0]['name']} +{len(lines) - 1}"
+        snap["order_grams"] = lines[0][1] if len(lines) == 1 else None
         snap["order_cashback"] = cash
         return snap
 
@@ -1063,7 +1136,7 @@ async def create_order_invoice(tg_id: int, product_id: int, grams: int, currency
         await _guard_pending_orders(c, tg_id)
         p, total = await _order_product_total(c, product_id, grams, lock=True)
         _check_delivery(p, ship)
-        oid = await _insert_order(c, tg_id, p, grams, total, -1, currency, ship)
+        oid = await _insert_order(c, tg_id, [(p, grams, total)], total, -1, currency, ship)
         await _take_stock(c, product_id, grams)
         # новый счёт отменяет прежний неоплаченный (и его заказ, если был) с возвратом остатка
         await _cancel_user_pending_invoices(c, tg_id, exclude_order_id=oid)
@@ -1099,7 +1172,7 @@ async def order_decide(order_code: str, approve: bool) -> dict:
             cash = await _apply_cashback(c, o["user_id"], int(o["total"] or 0), oid)
         else:
             await c.execute("UPDATE orders SET status=-2 WHERE id=$1", oid)
-            await _restock(c, o["product_id"], o["grams"])
+            await _restock_order(c, oid)
         return {"user_id": o["user_id"], "code": order_code, "approved": approve,
                 "cashback": cash}
 
@@ -1130,10 +1203,10 @@ async def delete_order(order_code: str) -> dict:
                 # оплата картой/криптой (извне) — возвращаем как баланс магазина
                 await c.execute("UPDATE users SET balance=balance+$1 WHERE tg_id=$2",
                                 total, o["user_id"])
-            await _restock(c, o["product_id"], o["grams"])
+            await _restock_order(c, oid)
             refunded = total
         elif st == -1:                      # не оплачен — денег не брали, вернуть только товар
-            await _restock(c, o["product_id"], o["grams"])
+            await _restock_order(c, oid)
         await c.execute("DELETE FROM invoices WHERE order_id=$1", oid)   # снять привязанные счета
         await c.execute("DELETE FROM orders WHERE id=$1", oid)
         await c.execute("DELETE FROM ratings WHERE order_id=$1", oid)
@@ -1168,7 +1241,11 @@ async def rate_order(tg_id: int, order_code: str, stars: int,
             raise ValueError("Заказ не найден")
         if o["status"] != 3:
             raise ValueError("Оценить можно после получения заказа")
-        if not o["product_id"]:
+        # заказ-корзина (несколько товаров) не хранит product_id на заголовке —
+        # оценку ставим на первую позицию заказа
+        pid = o["product_id"] or await c.fetchval(
+            "SELECT product_id FROM order_items WHERE order_id=$1 ORDER BY id LIMIT 1", oid)
+        if not pid:
             raise ValueError("Этот заказ нельзя оценить")
         if write_text:
             # ставим/обновляем оценку и текст сразу; имя-снимок — на момент отзыва
@@ -1177,13 +1254,13 @@ async def rate_order(tg_id: int, order_code: str, stars: int,
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8, now())
                 ON CONFLICT (order_id) DO UPDATE
                   SET stars=$4, text=$5, anon=$6, name=$7, avatar=$8, created=now()
-            """, oid, tg_id, o["product_id"], stars, review, anon,
+            """, oid, tg_id, pid, stars, review, anon,
                 (name or "").strip()[:64] or None, ava)
         else:
             await c.execute("""
                 INSERT INTO ratings(order_id, user_id, product_id, stars) VALUES($1,$2,$3,$4)
                 ON CONFLICT (order_id) DO UPDATE SET stars=$4
-            """, oid, tg_id, o["product_id"], stars)
+            """, oid, tg_id, pid, stars)
         return await snapshot(tg_id, c)
 
 
@@ -1472,21 +1549,29 @@ async def sales_stats(period: str = "all") -> dict:
         await _auto_deliver(c)
         tot = await c.fetchrow(f"""
             SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
-                   COALESCE(SUM(grams),0) AS grams,
                    COALESCE(SUM(bonus_part),0) AS bonus
             FROM orders WHERE status >= 1{flt}
         """, *args)
+        grams_row = await c.fetchrow(f"""
+            SELECT COALESCE(SUM(oi.grams),0) AS grams
+            FROM order_items oi JOIN orders o ON o.id = oi.order_id
+            WHERE o.status >= 1{flt.replace('created', 'o.created')}
+        """, *args)
+        # разбивка по товару — считаем от позиций заказа (order_items), а не
+        # от orders.product: в заказе-корзине там сводная строка «товар +N», не название
         by = await c.fetch(f"""
-            SELECT product, COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
-                   COALESCE(SUM(grams),0) AS grams
-            FROM orders WHERE status >= 1{flt} GROUP BY product ORDER BY revenue DESC LIMIT 20
+            SELECT oi.product AS product, COUNT(*) AS cnt, COALESCE(SUM(oi.total),0) AS revenue,
+                   COALESCE(SUM(oi.grams),0) AS grams
+            FROM order_items oi JOIN orders o ON o.id = oi.order_id
+            WHERE o.status >= 1{flt.replace('created', 'o.created')}
+            GROUP BY oi.product ORDER BY revenue DESC LIMIT 20
         """, *args)
     revenue, bonus = int(tot["revenue"]), int(tot["bonus"])
     real = revenue - bonus
     fee = round(real * WITHDRAW_FEE_PCT / 100)
     shipping = int(tot["cnt"]) * PARCEL_COST
     return {
-        "count": tot["cnt"], "revenue": revenue, "grams": int(tot["grams"]),
+        "count": tot["cnt"], "revenue": revenue, "grams": int(grams_row["grams"]),
         "bonus": bonus, "real": real,
         "fee_pct": WITHDRAW_FEE_PCT, "fee": fee,
         "parcel_cost": PARCEL_COST, "shipping": shipping,
@@ -1516,11 +1601,13 @@ async def admin_orders() -> list:
             WHERE o.status <> 3
             ORDER BY o.id DESC LIMIT 200
         """)
+        items = await _order_items_by_order(c, [r["id"] for r in rows])
     return [{
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "user": r["name"] or "?", "username": r["username"], "user_id": r["user_id"],
         "product": r["product"], "grams": r["grams"], "total": r["total"],
         "unit": r["unit"] or "g",
+        "items": items.get(r["id"], []),
         "bonus_part": int(r["bonus_part"] or 0),
         "real_part": int(r["total"] or 0) - int(r["bonus_part"] or 0),
         "status": r["status"], "ttn": r["ttn"], "date": r["date"],
@@ -1545,11 +1632,13 @@ async def admin_orders_done(limit: int = 100) -> list:
             ORDER BY COALESCE(o.received_at, o.shipped_at, o.created) DESC, o.id DESC
             LIMIT $1
         """, limit)
+        items = await _order_items_by_order(c, [r["id"] for r in rows])
     return [{
         "id": f"MM-{r['id'] + ORDER_CODE_BASE}",
         "user": r["name"] or "?", "username": r["username"], "user_id": r["user_id"],
         "product": r["product"], "grams": r["grams"], "total": int(r["total"] or 0),
         "unit": r["unit"] or "g",
+        "items": items.get(r["id"], []),
         "bonus_part": int(r["bonus_part"] or 0),
         "real_part": int(r["total"] or 0) - int(r["bonus_part"] or 0),
         "pay": r["pay"], "ttn": r["ttn"], "date": r["date"],
@@ -3859,6 +3948,7 @@ async def admin_user_detail(tg_id: int) -> dict:
             SELECT id, product, grams, unit, total, status, ttn, date, bonus_part, created
             FROM orders WHERE user_id=$1 ORDER BY created DESC LIMIT 50
         """, tg_id)
+        order_items = await _order_items_by_order(c, [r["id"] for r in orders])
         money = await _user_money(c, tg_id)
         topups = await c.fetch("""
             SELECT * FROM (
@@ -3908,6 +3998,7 @@ async def admin_user_detail(tg_id: int) -> dict:
         "orders": [{
             "id": r["id"], "product": r["product"], "grams": r["grams"],
             "unit": r["unit"] or "g",
+            "items": order_items.get(r["id"], []),
             "total": int(r["total"] or 0), "status": r["status"], "ttn": r["ttn"],
             "date": r["date"], "bonus_part": int(r["bonus_part"] or 0),
             "created": r["created"].isoformat() if r["created"] else None,
