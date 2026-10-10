@@ -31,6 +31,8 @@ DEFAULT_TIERS = [
 ]
 DELIVERY_METHODS = ("np", "taxi")   # Новая Почта / Такси (Днепр)
 DEFAULT_DELIVERY = list(DELIVERY_METHODS)
+# весовой товар продаётся только этими фиксированными градациями, без произвольных граммов
+WEIGHT_LADDER = (5, 10, 15, 20, 30, 40, 50, 100)
 # Верхнего лимита на количество нет — ограничивает только наличие (stock) товара.
 # MAX_GRAMS остаётся высоким предохранителем от абсурдных/переполняющих значений.
 MAX_GRAMS = int(os.getenv("MAX_GRAMS", "100000") or 100000)
@@ -897,6 +899,10 @@ async def _order_product_total(c, product_id: int, grams: int, lock: bool = Fals
         raise ValueError(f"Минимум — {lo} {unit_word}")
     if grams > MAX_GRAMS:
         raise ValueError("Слишком большое количество")
+    if (p["unit"] or "g") != "pc":
+        steps = [w for w in WEIGHT_LADDER if w >= lo] or [lo]
+        if grams not in steps:
+            raise ValueError(f"Вес можно выбрать только из градации: {', '.join(map(str, steps))} г")
     if p["stock"] is not None and grams > p["stock"]:
         raise ValueError("Такого количества нет в наличии — напишите админу")
     return p, price_for(_product_row(p, {}), grams)
