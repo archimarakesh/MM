@@ -255,8 +255,9 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 /* полноэкранная страница (не низкая шторка) — для «Мои рефералы» */
 .sheet.sheet-page{top:0;height:100dvh;max-height:100dvh;border-radius:0;
   padding-top:calc(0.75rem + env(safe-area-inset-top))}
-.sheet-grip{width:5.5rem;height:1.75rem;padding:0.75rem 1.5rem;box-sizing:border-box;border-radius:6.1875rem;
-  background:rgba(255,255,255,.14);background-clip:content-box;margin:-0.25rem auto 0.375rem;cursor:grab;touch-action:none}
+.sheet-grip{width:5.5rem;height:1.75rem;margin:-0.25rem auto 0.375rem;cursor:grab;touch-action:none;
+  display:flex;align-items:center;justify-content:center}
+.sheet-grip::after{content:'';width:2.5rem;height:0.25rem;border-radius:99px;background:rgba(255,255,255,.14)}
 .sheet h2{font-weight:800;font-size:1.1875rem;letter-spacing:-.01em;margin-bottom:0.25rem}
 .sheet .sheet-sub{color:var(--muted);font-size:0.78125rem;margin-bottom:1.125rem;line-height:1.5}
 
@@ -2183,7 +2184,7 @@ function syncCartBadge() {
 function addToCart(pid, grams) {
   const i = CART.findIndex(c => String(c.pid) === String(pid));
   if (i >= 0) CART[i].grams = grams; else CART.push({ pid, grams });
-  saveCart(); syncCartBadge(); haptic('medium'); sfx('coin');
+  saveCart(); syncCartBadge(); haptic('medium');
   toast('Добавлено в корзину 🛒');
 }
 function removeFromCart(pid) {
