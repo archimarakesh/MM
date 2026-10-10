@@ -1162,10 +1162,10 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <p class="note" id="pePhotoHint" style="margin:6px 0 0;display:none">Перетащите фото, чтобы изменить порядок. Первое — главное.</p>
   </div>
   <div class="field"><label id="peTiersLabel">Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
+  <div class="field"><label id="peBonusPctLabel">Оплата бонусами, %</label><input id="peBonusPct" inputmode="numeric" placeholder="как в настройках по умолчанию"></div>
   <input type="file" id="peFile" accept="image/*" style="display:none">
-  <div class="pay-opts" style="grid-template-columns:1fr 1fr;gap:8px">
+  <div class="pay-opts" style="grid-template-columns:1fr">
     <div class="pay-opt" id="peActive" onclick="peToggleActive()">Товар активен<small>показывается в каталоге</small></div>
-    <div class="pay-opt" id="peBonusOk" onclick="peToggleBonusOk()">Можно бонусами<small>оплата из бонусного баланса</small></div>
   </div>
   <button class="btn btn-gold" onclick="savePedit()">Сохранить товар
     <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span>
@@ -2293,11 +2293,12 @@ function pickWh(i) {
   document.getElementById('coNPList').innerHTML = '';
   haptic('light');
 }
-// сколько реальных средств нужно на заказ: бонусом (locked) — не больше N%,
-// и только если товар разрешает оплату бонусами (p.bonus_ok !== false)
+// сколько реальных средств нужно на заказ: бонусом (locked) — не больше N% этого
+// конкретного товара (p.bonus_pct), либо общей настройки, если у товара свой % не задан
 function orderPaySplit(total, p) {
-  const allowBonus = !p || p.bonus_ok !== false;
-  const pct = allowBonus ? (S.bonus_pay_pct != null ? S.bonus_pay_pct : 50) : 0;
+  const defPct = S.bonus_pay_pct != null ? S.bonus_pay_pct : 50;
+  const pct = p && p.bonus_pct != null ? p.bonus_pct : defPct;
+  const allowBonus = pct > 0;
   const real = S.withdrawable != null ? S.withdrawable : S.balance;
   const locked = Math.max(0, S.balance - real);
   const bonusUse = allowBonus ? Math.min(locked, Math.floor(total * pct / 100)) : 0;
@@ -2323,7 +2324,7 @@ function openCheckout() {
   const sp = orderPaySplit(total, curProduct);
   document.getElementById('coPays').innerHTML = sp.allowBonus ? `
     <div style="grid-column:1/-1">
-       <p class="note" style="margin:0 0 6px">Бонусами можно оплатить <b style="color:var(--gold-soft)">половину</b> заказа (${sp.pct}%). К оплате <b>${fmt(total)} ₴</b>:</p>
+       <p class="note" style="margin:0 0 6px">Бонусами можно оплатить до <b style="color:var(--gold-soft)">${sp.pct}%</b> заказа. К оплате <b>${fmt(total)} ₴</b>:</p>
        <div style="display:flex;gap:8px">
          <div class="ref-stat" style="flex:1;padding:9px 10px"><b style="font-size:14px;color:var(--gold-soft)">🎁 ${fmt(sp.bonusUse)} ₴</b><span>бонусом</span></div>
          <div class="ref-stat" style="flex:1;padding:9px 10px"><b style="font-size:14px;color:${sp.enough ? 'var(--txt)' : 'var(--danger)'}">💵 ${fmt(sp.realNeed)} ₴</b><span>реальными</span></div>
@@ -3720,7 +3721,7 @@ async function deleteAccount() {
 }
 
 /* ═══════════ Админка ═══════════ */
-let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peBonusOkVal = true, peUnit = 'g', peTiersArr = [];
+let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peUnit = 'g', peTiersArr = [];
 let peDeliveryVal = ['np', 'taxi'];
 // админка сгруппирована: группа сверху → её подвкладки под ней (меню/подменю)
 const ADMIN_TABS = {
@@ -4164,8 +4165,9 @@ async function modReview(order, action) {
 function openPedit(id) {
   curPe = id ? AD.products.find(p => p.id === id) : null;
   peActiveVal = curPe ? curPe.active : true;
-  peBonusOkVal = curPe ? curPe.bonus_ok !== false : true;
   peDeliveryVal = curPe && curPe.delivery && curPe.delivery.length ? curPe.delivery.slice() : ['np', 'taxi'];
+  document.getElementById('peBonusPct').value = curPe && curPe.bonus_pct != null ? curPe.bonus_pct : '';
+  document.getElementById('peBonusPct').placeholder = `по умолчанию — ${AD.bonus_pay_pct ?? 50}%`;
   document.getElementById('peTitle').textContent = curPe ? 'Редактировать товар' : 'Новый товар';
   document.getElementById('peName').value = curPe?.name || '';
   document.getElementById('peGenetics').value = curPe?.genetics || '';
@@ -4193,7 +4195,6 @@ function openPedit(id) {
   peSyncUnitUI();
   renderPeTiers();
   syncPeActive();
-  syncPeBonusOk();
   syncPeDelivery();
   openSheet('pedit');
 }
@@ -4320,8 +4321,6 @@ document.getElementById('peFile').addEventListener('change', e => {
 });
 function peToggleActive() { peActiveVal = !peActiveVal; syncPeActive(); haptic('light'); }
 function syncPeActive() { document.getElementById('peActive').classList.toggle('sel', peActiveVal); }
-function peToggleBonusOk() { peBonusOkVal = !peBonusOkVal; syncPeBonusOk(); haptic('light'); }
-function syncPeBonusOk() { document.getElementById('peBonusOk').classList.toggle('sel', peBonusOkVal); }
 function peToggleDelivery(m) {
   if (peDeliveryVal.includes(m)) {
     if (peDeliveryVal.length <= 1) return toast('Должен остаться хотя бы один способ доставки');
@@ -4349,6 +4348,9 @@ async function savePedit() {
   // price в rows — ПОЛНАЯ цена за эту конкретную градацию (не за грамм), приводим к ставке за грамм
   const rates = rows.map(x => ({ from: x.from, rate: x.price / x.from }));
   const base = rates[0].rate;
+  const bonusPctRaw = document.getElementById('peBonusPct').value.trim();
+  if (bonusPctRaw !== '' && (!/^\d+$/.test(bonusPctRaw) || +bonusPctRaw > 100)) return toast('% оплаты бонусами — число от 0 до 100');
+  const bonus_pct = bonusPctRaw === '' ? null : +bonusPctRaw;
   try {
     const r = await API.call('/api/admin/product', {
       id: curPe?.id || null, name,
@@ -4358,7 +4360,7 @@ async function savePedit() {
       category_id: document.getElementById('peCategory').value || null,
       base, tiers: rates.map(x => ({ from: x.from, k: +(x.rate / base).toFixed(4) })),
       active: peActiveVal,
-      bonus_ok: peBonusOkVal,
+      bonus_pct,
       delivery: peDeliveryVal,
       unit: peUnit,
       min_qty: Math.max(1, parseInt(document.getElementById('peMin').value, 10) || (peUnit === 'pc' ? 1 : 2)),
