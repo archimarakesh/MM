@@ -4015,7 +4015,18 @@ function renderAdmin(tab) {
     }).catch(() => { if (adminTab === 'refs') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
   } else {
     const s = AD.settings;
-    b.innerHTML = `
+    const bonusPctCard = `
+      <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
+        <div class="section-head" style="margin:0 0 8px"><h2 style="font-size:15px">🎁 Оплата бонусами</h2>
+          <span>сейчас до ${AD.bonus_pay_pct ?? 50}%</span></div>
+        <p class="note" style="margin:0 0 10px">Максимальная доля заказа, которую можно закрыть бонусным (невыводимым) балансом — остальное обязательно реальными средствами. Действует только для товаров с включённой оплатой бонусами.</p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="mini-input" id="bonusPct" inputmode="numeric" placeholder="%" style="width:78px" value="${AD.bonus_pay_pct ?? 50}">
+          <span style="font-size:12px;color:var(--muted-2)">% от суммы заказа</span>
+          <button class="btn btn-gold" style="width:auto;padding:11px 16px;margin-left:auto" onclick="saveBonusPct()">Сохранить</button>
+        </div>
+      </div></div>`;
+    b.innerHTML = bonusPctCard + `
       <p class="note" style="margin:0 0 12px">Заполненные реквизиты видны покупателям при пополнении. Пустое поле — способ отключён.</p>
       <div class="field"><label>Номер карты</label><input id="payCard" value="${s.card_number || ''}" placeholder="0000 0000 0000 0000"></div>
       <div class="field"><label>Получатель (для карты)</label><input id="payHolder" value="${s.card_holder || ''}" placeholder="Иван И."></div>
@@ -5059,6 +5070,14 @@ async function savePay() {
     PAY = Object.fromEntries(Object.entries(AD.settings).filter(([, v]) => v));
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Реквизиты сохранены');
+}
+async function saveBonusPct() {
+  const pct = parseInt(document.getElementById('bonusPct').value, 10);
+  if (!Number.isInteger(pct) || pct < 0 || pct > 100) return toast('Укажите % от 0 до 100');
+  try {
+    AD.bonus_pay_pct = (await API.call('/api/admin/bonus-pay-pct', { pct })).bonus_pay_pct;
+  } catch (e) { return toast(e.message); }
+  haptic('medium'); toast('Сохранено'); renderAdmin('pay');
 }
 async function setDepBonus() {
   const pct = parseInt(document.getElementById('depPct').value, 10);

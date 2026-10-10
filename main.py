@@ -1229,7 +1229,7 @@ async def _snap(uid: int) -> dict:
                            and bool(bot and BONUS_CHAT_ID))
     snap["bonus_amount"] = BONUS_AMOUNT
     snap["min_withdraw"] = db.MIN_WITHDRAW
-    snap["bonus_pay_pct"] = db.BONUS_PAY_MAX_PCT   # бонусом до N% покупки
+    snap["bonus_pay_pct"] = await db.bonus_pay_pct()   # бонусом до N% покупки
     snap["card_auto"] = paydome.enabled()
     snap["card_fee"] = CARD_FEE_PCT if paydome.enabled() else 0
     # ссылка «вернуться в казино» с токеном: казино не спросит пин повторно
@@ -2572,6 +2572,7 @@ async def api_admin_data(request: Request):
         "grow_stats": await db.grow_stats(),
         "promos": await db.admin_promos(),
         "deposit_bonus": await db.deposit_bonus_state(),
+        "bonus_pay_pct": await db.bonus_pay_pct(),
     }
 
 
@@ -2647,6 +2648,15 @@ async def api_admin_settings(request: Request):
     admin_user(request)
     await db.set_settings(await request.json())
     return {"settings": await db.get_settings()}
+
+
+@app.post("/api/admin/bonus-pay-pct")
+async def api_admin_bonus_pay_pct(request: Request):
+    """Максимальный % заказа, который можно оплатить бонусным (locked) балансом."""
+    admin_user(request)
+    b = await request.json()
+    await db.set_bonus_pay_pct(pint(b.get("pct")))
+    return {"bonus_pay_pct": await db.bonus_pay_pct()}
 
 
 @app.post("/api/admin/deposit-bonus")
