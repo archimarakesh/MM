@@ -179,6 +179,8 @@ async def init():
             ALTER TABLE products ADD COLUMN IF NOT EXISTS min_qty INT NOT NULL DEFAULT 2;
             -- можно ли оплатить этот товар бонусом (locked) — часть товаров только за реальные
             ALTER TABLE products ADD COLUMN IF NOT EXISTS bonus_ok BOOLEAN NOT NULL DEFAULT true;
+            -- индивидуальный % оплаты бонусами для товара; NULL — берём общую настройку (settings)
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS bonus_pct INT;
             -- разделы каталога (категории товаров) — выбор сверху в магазине, как в админке
             CREATE TABLE IF NOT EXISTS categories(
                 id     BIGSERIAL PRIMARY KEY,
@@ -525,7 +527,7 @@ def _product_row(r, rating) -> dict:
         "tag": r["tag"], "base": r["base"],
         "unit": r["unit"] or "g",
         "min_qty": int(r["min_qty"] if r["min_qty"] is not None else MIN_GRAMS),
-        "bonus_ok": bool(r["bonus_ok"]) if r["bonus_ok"] is not None else True,
+        "bonus_pct": int(r["bonus_pct"]) if r["bonus_pct"] is not None else None,
         "delivery": json.loads(r["delivery"]) if r["delivery"] else DEFAULT_DELIVERY,
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
         "active": r["active"], "photos": photos,
@@ -586,27 +588,28 @@ async def save_product(d: dict) -> int:
         min_qty = max(1, int(d.get("min_qty") or (1 if unit == "pc" else MIN_GRAMS)))
         category_id = d.get("category_id")
         category_id = int(category_id) if category_id not in (None, "") else None
-        bonus_ok = bool(d.get("bonus_ok", True))
+        bonus_pct = d.get("bonus_pct")
+        bonus_pct = None if bonus_pct in (None, "") else max(0, min(100, int(bonus_pct)))
         delivery = [m for m in (d.get("delivery") or DEFAULT_DELIVERY) if m in DELIVERY_METHODS]
         dj = json.dumps(delivery or DEFAULT_DELIVERY)
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
                                     active=$8, photos=$9, stock=$10, genetics=$11,
-                                    unit=$12, min_qty=$13, category_id=$14, bonus_ok=$15, delivery=$16
+                                    unit=$12, min_qty=$13, category_id=$14, bonus_pct=$15, delivery=$16
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
                 d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)),
-                pj, stock, genetics, unit, min_qty, category_id, bonus_ok, dj)
+                pj, stock, genetics, unit, min_qty, category_id, bonus_pct, dj)
             return int(d["id"])
         return await c.fetchval("""
             INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics,
-                                 unit, min_qty, category_id, bonus_ok, delivery, pos)
+                                 unit, min_qty, category_id, bonus_pct, delivery, pos)
             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id, bonus_ok, dj)
+            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id, bonus_pct, dj)
 
 
 async def delete_product(pid: int):
@@ -1017,12 +1020,13 @@ async def create_order(tg_id: int, product_id: int, grams: int, pay: str,
         if pay == "balance":
             if u["balance"] < total:
                 raise ValueError("Недостаточно средств — пополните баланс")
-            # бонусом (locked) — не больше настроенного админом % заказа; остальное
-            # обязательно реальными (выводимыми). locked тратим первым, но с капом.
-            pct = await bonus_pay_pct()
+            # бонусом (locked) — не больше % для этого товара (или общей настройки,
+            # если у товара свой % не задан); остальное обязательно реальными
+            # (выводимыми). locked тратим первым, но с капом.
+            pct = p["bonus_pct"] if p["bonus_pct"] is not None else await bonus_pay_pct()
             locked = int(u["locked"] or 0)
             withdrawable = int(u["balance"]) - locked
-            bonus_cap = (total * pct // 100) if p["bonus_ok"] else 0
+            bonus_cap = total * pct // 100
             bonus_part = min(locked, bonus_cap)
             real_need = total - bonus_part
             if withdrawable < real_need:
