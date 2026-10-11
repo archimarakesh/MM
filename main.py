@@ -140,7 +140,7 @@ EGROW_REMINDER_TEXT = (
 )
 # общий секрет с внешними сервисами (казино и т.п.). Пусто — кошелёк наружу закрыт
 WALLET_TOKEN = os.getenv("WALLET_TOKEN", "")
-CARD_MIN = 200               # пополнение картой — от 200 ₴, меньше только криптой
+CARD_MIN = 500               # пополнение картой — от 500 ₴, меньше только криптой
 CARD_LIMIT = 30000           # оплата картой — до 30 000 ₴, свыше только крипта
 # компенсация покупателю за каждые просроченные сутки отправки (заказ в работе без ТТН)
 DELAY_BONUS = int(os.getenv("DELAY_BONUS", "50") or 50)
@@ -2711,6 +2711,68 @@ async def api_admin_snova_test(request: Request):
         return {"error": str(e)}
     st = await snova.status(deal_id)
     return {"created": deal, "status": st}
+
+
+@app.post("/api/admin/snova/balance")
+async def api_admin_snova_balance(request: Request):
+    admin_user(request)
+    try:
+        return await snova.balance()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/admin/snova/withdraw-usdt")
+async def api_admin_snova_withdraw_usdt(request: Request):
+    """Вывод USDT с баланса провайдера на свой кошелёк TRC-20."""
+    admin_user(request)
+    b = await request.json()
+    wallet = str(b.get("wallet", "")).strip()
+    try:
+        amount = float(b.get("amount"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Укажите сумму")
+    if amount <= 0 or not wallet:
+        raise HTTPException(400, "Укажите сумму и адрес кошелька")
+    try:
+        return await snova.withdraw_usdt(amount, wallet)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/admin/snova/payout-currencies")
+async def api_admin_snova_payout_currencies(request: Request):
+    admin_user(request)
+    try:
+        return {"currencies": await snova.payout_currencies()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/admin/snova/payout")
+async def api_admin_snova_payout(request: Request):
+    """Вывод баланса провайдера прямо в фиат на карту (PayOut). Комиссия списывается
+    сразу при создании заявки, отмена — только первые 2 минуты. external_id —
+    защита от повторной отправки (дубль не создаст вторую заявку и не спишет снова)."""
+    admin_user(request)
+    b = await request.json()
+    currency = str(b.get("currency", "")).strip().upper()
+    card_number = str(b.get("card_number", "")).strip()
+    bank_name = str(b.get("bank_name", "")).strip()
+    cardholder_name = str(b.get("cardholder_name", "")).strip()
+    comment = str(b.get("comment", "")).strip()
+    try:
+        fiat_amount = float(b.get("fiat_amount"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Укажите сумму")
+    if not all([currency, card_number, bank_name, cardholder_name]) or fiat_amount <= 0:
+        raise HTTPException(400, "Заполните валюту, сумму и реквизиты карты")
+    external_id = f"payout-{int(time.time())}-{secrets.token_hex(3)}"
+    try:
+        return await snova.payout_create(currency, fiat_amount, card_number, bank_name,
+                                         cardholder_name, comment, external_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/admin/bonus-pay-pct")

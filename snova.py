@@ -97,6 +97,69 @@ async def status(deal_id: str) -> dict | None:
         return None
 
 
+async def balance() -> dict:
+    """Доступный баланс USDT провайдера."""
+    if not TOKEN:
+        raise ValueError("SNOVA_TOKEN не задан")
+    async with aiohttp.ClientSession() as s:
+        async with s.get(f"{BASE}/api/v1/balance/", headers=_headers(),
+                         timeout=aiohttp.ClientTimeout(total=20)) as r:
+            data = await r.json()
+            if r.status != 200:
+                raise ValueError(f"Snova balance {r.status}: {str(data)[:200]}")
+    return data
+
+
+async def withdraw_usdt(amount: float, wallet: str) -> dict:
+    """Вывод USDT на кошелёк TRC-20 с баланса провайдера."""
+    if not TOKEN:
+        raise ValueError("SNOVA_TOKEN не задан")
+    payload = {"amount": amount, "wallet": wallet}
+    async with aiohttp.ClientSession() as s:
+        async with s.post(f"{BASE}/api/v1/balance/withdrawal/", json=payload, headers=_headers(),
+                          timeout=aiohttp.ClientTimeout(total=20)) as r:
+            data = await r.json()
+            if r.status not in (200, 201):
+                raise ValueError(f"Snova withdrawal {r.status}: {str(data)[:200]}")
+    return data
+
+
+async def payout_currencies() -> list:
+    """Доступные валюты для вывода в фиат (курс, лимиты, комиссия)."""
+    if not TOKEN:
+        raise ValueError("SNOVA_TOKEN не задан")
+    async with aiohttp.ClientSession() as s:
+        async with s.get(f"{BASE}/api/v1/payout/currencies/", headers=_headers(),
+                         timeout=aiohttp.ClientTimeout(total=20)) as r:
+            data = await r.json()
+            if r.status != 200:
+                raise ValueError(f"Snova payout/currencies {r.status}: {str(data)[:200]}")
+    return data
+
+
+async def payout_create(currency: str, fiat_amount: float, card_number: str,
+                        bank_name: str, cardholder_name: str, comment: str = "",
+                        external_id: str | None = None) -> dict:
+    """Вывод баланса в фиат прямо на банковскую карту (PayOut)."""
+    if not TOKEN:
+        raise ValueError("SNOVA_TOKEN не задан")
+    payload = {
+        "currency": currency, "fiat_amount": fiat_amount, "card_number": card_number,
+        "bank_name": bank_name, "cardholder_name": cardholder_name,
+    }
+    if comment:
+        payload["comment"] = comment
+    if external_id:
+        payload["external_id"] = external_id
+    async with aiohttp.ClientSession() as s:
+        async with s.post(f"{BASE}/api/v1/payout/", json=payload, headers=_headers(),
+                          timeout=aiohttp.ClientTimeout(total=20)) as r:
+            data = await r.json()
+            if r.status not in (200, 201):
+                raise ValueError(f"Snova payout create {r.status}: {str(data)[:200]}")
+    return data
+
+
 def verify_signature(url: str, raw_body: bytes, signature: str) -> bool:
     """HMAC-SHA256(secret, json_body + url) — как описано в доке вебхука Super Nova."""
     if not WEBHOOK_SECRET or not signature:
