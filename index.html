@@ -2301,7 +2301,7 @@ function customGramsBlur(el) {
 
 /* ═══════════ Checkout ═══════════ */
 let payMethod = 'balance';
-const CARD_MIN = 200;     // минимум для пополнения картой (меньше — только крипта)
+const CARD_MIN = 500;     // минимум для пополнения картой (меньше — только крипта)
 const CARD_LIMIT = 30000; // лимит оплаты картой при пополнении
 /* ── выбор адреса из справочника Новой Почты ── */
 let coCitySel = null, coWhSel = null, coKind = '', coCityRes = [], coWhRes = [], npTimer = null, coMethod = 'np';
@@ -4219,6 +4219,28 @@ function renderAdmin(tab) {
         <p class="note" style="margin:10px 0 6px">Диагностика: создаёт настоящую заявку на 100 ₴ с теми же полями, что и обычное пополнение — для разбора точного ответа провайдера при ошибке. Если не оплатите — просто останется висеть в их кабинете:</p>
         <button class="btn btn-ghost" onclick="checkSnovaTest()">🧪 Тестовая заявка (100 ₴)</button>
         <pre id="snovaTestResult" class="note" style="white-space:pre-wrap;margin-top:10px;word-break:break-all"></pre>
+      </div></div>
+      <div class="bezel" style="margin-top:14px"><div class="bezel-core" style="padding:15px 16px">
+        <div class="section-head" style="margin:0 0 8px"><h2 style="font-size:15px">Вывод баланса Super Nova</h2>
+          <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px" onclick="snovaBalance()">🔄 Баланс</button></div>
+        <p id="snovaBalanceResult" class="note" style="margin:0 0 12px">нажмите «Баланс», чтобы узнать доступную сумму</p>
+        <p class="note" style="margin:0 0 6px;color:var(--gold-soft)">Вывод в USDT (TRC-20)</p>
+        <div class="field"><label>Сумма USDT</label><input id="snWdAmount" inputmode="decimal" placeholder="0.00"></div>
+        <div class="field"><label>Кошелёк TRC-20</label><input id="snWdWallet" placeholder="T..."></div>
+        <button class="btn btn-ghost" onclick="snovaWithdrawUsdt()">Вывести USDT</button>
+        <pre id="snWdResult" class="note" style="white-space:pre-wrap;margin-top:8px;word-break:break-all"></pre>
+        <p class="note" style="margin:16px 0 6px;color:var(--gold-soft)">Вывод в фиат на карту (PayOut)</p>
+        <p class="note" style="margin:0 0 10px">⚠️ Комиссия списывается сразу при создании, отменить можно только в первые 2 минуты. Проверьте реквизиты карты перед отправкой — при ошибке комиссия не возвращается.</p>
+        <div class="field"><label>Валюта</label>
+          <select id="snPoCurrency"><option value="UAH">UAH</option><option value="RUB">RUB</option><option value="KZT">KZT</option></select>
+        </div>
+        <div class="field"><label>Сумма к получению</label><input id="snPoAmount" inputmode="decimal" placeholder="0"></div>
+        <div class="field"><label>Номер карты</label><input id="snPoCard" placeholder="0000 0000 0000 0000"></div>
+        <div class="field"><label>Банк (полное название)</label><input id="snPoBank" placeholder="PrivatBank"></div>
+        <div class="field"><label>ФИО держателя</label><input id="snPoHolder" placeholder="Иван Иванов"></div>
+        <div class="field"><label>Комментарий (необязательно)</label><input id="snPoComment" placeholder=""></div>
+        <button class="btn btn-gold" onclick="snovaPayout()">Вывести на карту</button>
+        <pre id="snPoResult" class="note" style="white-space:pre-wrap;margin-top:8px;word-break:break-all"></pre>
       </div></div>`;
   }
 }
@@ -5279,6 +5301,47 @@ async function checkSnovaTest() {
   try {
     const r = await API.call('/api/admin/snova/test');
     el.textContent = JSON.stringify(r, null, 2);
+  } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
+}
+async function snovaBalance() {
+  const el = document.getElementById('snovaBalanceResult');
+  el.textContent = 'Загрузка…';
+  try {
+    const r = await API.call('/api/admin/snova/balance');
+    el.innerHTML = `Доступно: <b style="color:var(--gold-soft)">${esc(r.available_balance)} USDT</b>`;
+  } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
+}
+async function snovaWithdrawUsdt() {
+  const el = document.getElementById('snWdResult');
+  const amount = parseFloat(document.getElementById('snWdAmount').value);
+  const wallet = document.getElementById('snWdWallet').value.trim();
+  if (!amount || amount <= 0 || !wallet) return toast('Укажите сумму и кошелёк');
+  if (!confirm(`Вывести ${amount} USDT на кошелёк ${wallet}?`)) return;
+  el.textContent = 'Отправка…';
+  try {
+    const r = await API.call('/api/admin/snova/withdraw-usdt', { amount, wallet });
+    el.textContent = JSON.stringify(r, null, 2);
+    haptic('medium'); toast('Заявка на вывод отправлена');
+  } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
+}
+async function snovaPayout() {
+  const el = document.getElementById('snPoResult');
+  const currency = document.getElementById('snPoCurrency').value;
+  const fiat_amount = parseFloat(document.getElementById('snPoAmount').value);
+  const card_number = document.getElementById('snPoCard').value.trim();
+  const bank_name = document.getElementById('snPoBank').value.trim();
+  const cardholder_name = document.getElementById('snPoHolder').value.trim();
+  const comment = document.getElementById('snPoComment').value.trim();
+  if (!fiat_amount || fiat_amount <= 0 || !card_number || !bank_name || !cardholder_name) {
+    return toast('Заполните сумму и реквизиты карты');
+  }
+  if (!confirm(`Проверьте реквизиты ещё раз:\n${card_number}\n${bank_name}\n${cardholder_name}\n\nСписание комиссии — сразу, отмена только первые 2 минуты. Продолжить?`)) return;
+  el.textContent = 'Отправка…';
+  try {
+    const r = await API.call('/api/admin/snova/payout',
+      { currency, fiat_amount, card_number, bank_name, cardholder_name, comment });
+    el.textContent = JSON.stringify(r, null, 2);
+    haptic('medium'); toast('Заявка на вывод создана');
   } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
 }
 async function saveBonusPct() {
