@@ -44,8 +44,12 @@ def _headers() -> dict:
 
 
 async def create_exchange(deal_id: str, amount_uah: int, webhook_url: str = "",
-                          user_uid: str | None = None) -> dict:
-    """Создаёт заявку на обмен. Возвращает credentials/payment_amount/status."""
+                          user_uid: str | None = None, test_scenario: str | None = None) -> dict:
+    """Создаёт заявку на обмен. Возвращает credentials/payment_amount/status.
+
+    test_scenario — только для sandbox-токенов провайдера (success/canceled/
+    pending/trouble/random), на live-токене должно игнорироваться. Не передавать
+    из обычного пользовательского потока — только из изолированных admin-проверок."""
     payload = {
         "id": deal_id,
         "payment_settings": PAYMENT_SETTINGS,
@@ -55,6 +59,8 @@ async def create_exchange(deal_id: str, amount_uah: int, webhook_url: str = "",
         payload["webhook"] = webhook_url
     if user_uid:
         payload["user_uid"] = user_uid
+    if test_scenario:
+        payload["test_scenario"] = test_scenario
     async with aiohttp.ClientSession() as s:
         async with s.post(f"{BASE}/api/v1/exchange/", json=payload, headers=_headers(),
                           timeout=aiohttp.ClientTimeout(total=20)) as r:
