@@ -2683,36 +2683,6 @@ async def api_admin_settings(request: Request):
     return {"settings": await db.get_settings()}
 
 
-@app.post("/api/admin/snova/payment-settings")
-async def api_admin_snova_payment_settings(request: Request):
-    """Список доступных провайдеру направлений — для подбора env SNOVA_PAYMENT_SETTINGS."""
-    admin_user(request)
-    try:
-        return {"payment_settings": await snova.payment_settings()}
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.post("/api/admin/snova/test")
-async def api_admin_snova_test(request: Request):
-    """Диагностика: создаёт настоящую заявку на 100 ₴ с теми же полями, что и
-    обычное пополнение (webhook/user_uid) — чтобы увидеть точный ответ провайдера
-    при разборе ошибок. Не трогает card_payments/баланс; если не оплатите —
-    просто останется висеть неоплаченной заявкой в кабинете провайдера.
-    test_scenario этому токену недоступен (подтверждено — токен live, не sandbox)."""
-    u = admin_user(request)
-    if not snova.TOKEN or not snova.PAYMENT_SETTINGS:
-        raise HTTPException(400, "Не заданы SNOVA_TOKEN/SNOVA_PAYMENT_SETTINGS")
-    deal_id = f"test-{int(time.time())}-{secrets.token_hex(3)}"
-    webhook_url = f"{APP_URL}/api/snova/webhook" if APP_URL else ""
-    try:
-        deal = await snova.create_exchange(deal_id, 100, webhook_url, user_uid=str(u["id"]))
-    except ValueError as e:
-        return {"error": str(e)}
-    st = await snova.status(deal_id)
-    return {"created": deal, "status": st}
-
-
 @app.post("/api/admin/snova/balance")
 async def api_admin_snova_balance(request: Request):
     admin_user(request)
@@ -2736,15 +2706,6 @@ async def api_admin_snova_withdraw_usdt(request: Request):
         raise HTTPException(400, "Укажите сумму и адрес кошелька")
     try:
         return await snova.withdraw_usdt(amount, wallet)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.post("/api/admin/snova/payout-currencies")
-async def api_admin_snova_payout_currencies(request: Request):
-    admin_user(request)
-    try:
-        return {"currencies": await snova.payout_currencies()}
     except ValueError as e:
         raise HTTPException(400, str(e))
 
