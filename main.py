@@ -2681,6 +2681,16 @@ async def api_admin_settings(request: Request):
     return {"settings": await db.get_settings()}
 
 
+@app.post("/api/admin/snova/payment-settings")
+async def api_admin_snova_payment_settings(request: Request):
+    """Список доступных провайдеру направлений — для подбора env SNOVA_PAYMENT_SETTINGS."""
+    admin_user(request)
+    try:
+        return {"payment_settings": await snova.payment_settings()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/admin/bonus-pay-pct")
 async def api_admin_bonus_pay_pct(request: Request):
     """Максимальный % заказа, который можно оплатить бонусным (locked) балансом."""
