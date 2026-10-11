@@ -1622,10 +1622,12 @@ async def api_card_create(request: Request):
     webhook_url = f"{APP_URL}/api/snova/webhook" if APP_URL else ""
     try:
         deal = await snova.create_exchange(deal_id, charge, webhook_url, user_uid=str(u["id"]))
-    except ValueError:
+    except ValueError as e:
+        log.warning("Snova create_exchange не удался (user %s, %s ₴): %s", u["id"], charge, e)
         raise HTTPException(400, "Не удалось получить реквизиты — попробуйте позже")
     credentials = deal.get("credentials")
     if not credentials or not deal.get("id"):
+        log.warning("Snova не выдал credentials (user %s, %s ₴): %r", u["id"], charge, deal)
         raise HTTPException(400, "Провайдер не выдал реквизиты — попробуйте позже")
     pay_uah = round(float(deal.get("payment_amount") or charge))
     p = await db.card_payment_create(u["id"], str(deal["id"]), credentials, amount, pay_uah)
@@ -2693,18 +2695,20 @@ async def api_admin_snova_payment_settings(request: Request):
 
 @app.post("/api/admin/snova/test")
 async def api_admin_snova_test(request: Request):
-    """Тестовая заявка (test_scenario) — не трогает баланс/card_payments, только
-    проверяет поведение API с текущим токеном. На live-токене провайдер скорее
-    всего просто игнорирует test_scenario и создаст обычную заявку на 100 ₴ —
-    такую заявку стоит потом отменить/проигнорировать в кабинете провайдера."""
-    admin_user(request)
+    """Диагностика: создаёт настоящую заявку на 100 ₴ с теми же полями, что и
+    обычное пополнение (webhook/user_uid) — чтобы увидеть точный ответ провайдера
+    при разборе ошибок. Не трогает card_payments/баланс; если не оплатите —
+    просто останется висеть неоплаченной заявкой в кабинете провайдера.
+    test_scenario этому токену недоступен (подтверждено — токен live, не sandbox)."""
+    u = admin_user(request)
     if not snova.TOKEN or not snova.PAYMENT_SETTINGS:
         raise HTTPException(400, "Не заданы SNOVA_TOKEN/SNOVA_PAYMENT_SETTINGS")
     deal_id = f"test-{int(time.time())}-{secrets.token_hex(3)}"
+    webhook_url = f"{APP_URL}/api/snova/webhook" if APP_URL else ""
     try:
-        deal = await snova.create_exchange(deal_id, 100, test_scenario="success")
+        deal = await snova.create_exchange(deal_id, 100, webhook_url, user_uid=str(u["id"]))
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        return {"error": str(e)}
     st = await snova.status(deal_id)
     return {"created": deal, "status": st}
 
