@@ -27,7 +27,7 @@ import auth
 import db
 import guard_bot
 import lottery
-import paydome
+import snova
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("mm")
@@ -144,8 +144,8 @@ CARD_MIN = 200               # пополнение картой — от 200 �
 CARD_LIMIT = 30000           # оплата картой — до 30 000 ₴, свыше только крипта
 # компенсация покупателю за каждые просроченные сутки отправки (заказ в работе без ТТН)
 DELAY_BONUS = int(os.getenv("DELAY_BONUS", "50") or 50)
-# сервисный сбор на авто-оплату картой (PayDome берёт 12% — часть перекладываем на юзера).
-# 5% сверху ≈ покрывает ~4.4 п.п. из 12% комиссии; остальное на нас. Меняется env CARD_FEE_PCT.
+# сервисный сбор на авто-оплату картой — часть комиссии провайдера перекладываем
+# на юзера. Меняется env CARD_FEE_PCT.
 CARD_FEE_PCT = float(os.getenv("CARD_FEE_PCT", "5") or 5)
 
 
@@ -560,7 +560,7 @@ async def delay_compensator():
 
 async def card_checker():
     """Страховка к вебхуку: раз в 30с опрашиваем неоплаченные card-платежи."""
-    if not paydome.enabled():
+    if not snova.enabled():
         return
     while True:
         try:
@@ -1065,9 +1065,8 @@ async def lifespan(_: FastAPI):
         log.info("Бот запущен (polling)")
     else:
         log.warning("BOT_TOKEN не задан — бот не запущен, API без авторизации не работает")
-    if paydome.enabled() and APP_URL:
-        asyncio.create_task(paydome.set_webhook(f"{APP_URL}/api/paydome/webhook"))
-        log.info("PayDome включён, вебхук: %s/api/paydome/webhook", APP_URL)
+    if snova.enabled() and APP_URL:
+        log.info("Super Nova включён, вебхук: %s/api/snova/webhook", APP_URL)
     checker = asyncio.create_task(invoice_checker())
     tracker = asyncio.create_task(np_tracker())
     harvester = asyncio.create_task(grow_harvester())
@@ -1230,8 +1229,8 @@ async def _snap(uid: int) -> dict:
     snap["bonus_amount"] = BONUS_AMOUNT
     snap["min_withdraw"] = db.MIN_WITHDRAW
     snap["bonus_pay_pct"] = await db.bonus_pay_pct()   # бонусом до N% покупки
-    snap["card_auto"] = paydome.enabled()
-    snap["card_fee"] = CARD_FEE_PCT if paydome.enabled() else 0
+    snap["card_auto"] = snova.enabled()
+    snap["card_fee"] = CARD_FEE_PCT if snova.enabled() else 0
     # ссылка «вернуться в казино» с токеном: казино не спросит пин повторно
     cas = os.getenv("CASINO_TG_LINK", "").split("?")[0]
     snap["casino_link"] = f"{cas}?startapp=cs_{pass_token(uid)}" if cas else ""
@@ -1589,10 +1588,11 @@ async def api_invoice_cancel(request: Request):
     return {"ok": True}
 
 
-# ── PayDome: авто-карта для пополнения ────────────────────────────────────────
+# ── Super Nova: авто-карта для пополнения ─────────────────────────────────────
 async def _card_settle(payment_id: str) -> bool:
-    """Источник истины — GetPaymentStatus. Зачисляем только при Paid."""
-    if await paydome.status(payment_id) != paydome.STATUS_PAID:
+    """Источник истины — статус заявки у провайдера. Зачисляем только при success."""
+    d = await snova.status(payment_id)
+    if not d or d.get("status") not in snova.PAID_STATUSES:
         return False
     res = await db.card_payment_paid(payment_id)
     if not res:
@@ -1600,7 +1600,7 @@ async def _card_settle(payment_id: str) -> bool:
     await notify(res["user_id"],
                  f"✅ Оплата картой получена — баланс пополнен на <b>{res['amount']} ₴</b>."
                  + _dep_bonus_line(res))
-    await notify(ADMIN_ID, f"💳 PayDome: +{res['amount']} ₴ (payment {payment_id}).")
+    await notify(ADMIN_ID, f"💳 Super Nova: +{res['amount']} ₴ (deal {payment_id}).")
     return True
 
 
@@ -1609,7 +1609,7 @@ async def api_card_create(request: Request):
     u = tg_user(request)
     if not rate_limit(f"cardc:{u['id']}", 6, 60):
         raise HTTPException(429, "Слишком часто — подождите минуту")
-    if not paydome.enabled():
+    if not snova.enabled():
         raise HTTPException(400, "Авто-оплата картой сейчас недоступна")
     b = await request.json()
     amount = pint(b.get("amount"))   # сколько юзер хочет получить на баланс
@@ -1618,14 +1618,17 @@ async def api_card_create(request: Request):
     if amount > CARD_LIMIT:
         raise HTTPException(400, f"Картой — до {CARD_LIMIT} ₴, для больших сумм используйте крипту")
     charge = round(amount * (1 + CARD_FEE_PCT / 100))   # к оплате с сервисным сбором
+    deal_id = f"card-{u['id']}-{int(time.time() * 1000)}-{secrets.token_hex(3)}"
+    webhook_url = f"{APP_URL}/api/snova/webhook" if APP_URL else ""
     try:
-        card = await paydome.get_card(charge)
+        deal = await snova.create_exchange(deal_id, charge, webhook_url, user_uid=str(u["id"]))
     except ValueError:
-        raise HTTPException(400, "Не удалось получить карту — попробуйте позже")
-    if not card.get("card") or not card.get("payment_id"):
-        raise HTTPException(400, "Провайдер не выдал карту — попробуйте позже")
-    p = await db.card_payment_create(u["id"], card["payment_id"], card["card"],
-                                     amount, card["pay_uah"])
+        raise HTTPException(400, "Не удалось получить реквизиты — попробуйте позже")
+    credentials = deal.get("credentials")
+    if not credentials or not deal.get("id"):
+        raise HTTPException(400, "Провайдер не выдал реквизиты — попробуйте позже")
+    pay_uah = round(float(deal.get("payment_amount") or charge))
+    p = await db.card_payment_create(u["id"], str(deal["id"]), credentials, amount, pay_uah)
     return {"payment_id": p["payment_id"], "card": p["card"],
             "pay_uah": p["pay_uah"], "amount": p["amount_uah"],
             "expires": p["expires"].isoformat()}
@@ -1664,23 +1667,28 @@ async def api_card_cancel(request: Request):
     return {"ok": True}
 
 
-@app.post("/api/paydome/webhook")
-async def api_paydome_webhook(request: Request):
-    """Вебхук PayDome — только триггер: перепроверяем статус через API и зачисляем при Paid."""
+@app.post("/api/snova/webhook")
+async def api_snova_webhook(request: Request):
+    """Вебхук Super Nova — только триггер: перепроверяем статус через API и зачисляем при success."""
     # эндпоинт открытый: подделать оплату нельзя (статус берём из API), но спамить им
-    # можно — каждый вызов идёт наружу к PayDome, поэтому ограничиваем по IP
-    if not rate_limit(f"pdhook:{client_ip(request)}", 120, 60):
+    # можно — каждый вызов идёт наружу к провайдеру, поэтому ограничиваем по IP
+    if not rate_limit(f"snhook:{client_ip(request)}", 120, 60):
         return {"ok": True}
+    raw = await request.body()
+    if snova.WEBHOOK_SECRET:
+        sig = request.headers.get("SIGN", "")
+        if not snova.verify_signature(str(request.url), raw, sig):
+            return {"ok": True}
     try:
         b = await request.json()
     except Exception:
         return {"ok": True}
-    pid = b.get("paymentId")
-    if pid:
+    deal_id = b.get("id")
+    if deal_id:
         try:
-            await _card_settle(str(pid))
+            await _card_settle(str(deal_id))
         except Exception:
-            log.warning("Обработка вебхука PayDome не удалась: %s", pid)
+            log.warning("Обработка вебхука Super Nova не удалась: %s", deal_id)
     return {"ok": True}
 
 

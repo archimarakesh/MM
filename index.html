@@ -3063,7 +3063,7 @@ async function cancelInvoice() {
   if (wasOrder) { closeSheets(true); serverSync(); go('history'); }
   else renderTuBody();
 }
-/* ── PayDome: авто-карта ── */
+/* ── Super Nova: авто-карта ── */
 async function createCardPay() {
   const v = parseInt(document.getElementById('tuSum').value, 10);
   if (!v || v < CARD_MIN) return toast(`Картой — от ${fmt(CARD_MIN)} ₴`);
@@ -4110,9 +4110,9 @@ function renderAdmin(tab) {
       const tx = h.kind === 'crypto' && h.txid && h.txid !== 'manual'
         ? ` <a href="https://tronscan.org/#/transaction/${esc(h.txid)}" target="_blank"
              rel="noopener" style="color:var(--gold-soft);text-decoration:none">tx↗</a>` : '';
-      // для карты — номер заявки PayDome: по нему платёж ищется в кабинете провайдера
+      // для карты — номер заявки Super Nova: по нему платёж ищется в кабинете провайдера
       const ref = h.kind === 'card' && h.ref
-        ? `<p style="margin-top:3px">заявка PayDome:
+        ? `<p style="margin-top:3px">заявка Super Nova:
              <b style="color:var(--gold-soft);cursor:pointer;font-family:ui-monospace,monospace"
                 title="скопировать" onclick="copyText('${esc(h.ref)}')">${esc(h.ref)}</b></p>` : '';
       return `
