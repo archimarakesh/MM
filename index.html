@@ -3893,13 +3893,13 @@ let peDeliveryVal = ['np', 'taxi'];
 // админка сгруппирована: группа сверху → её подвкладки под ней (меню/подменю)
 const ADMIN_TABS = {
   products: 'Товары', orders: 'Заказы',
-  topups: 'Пополнения', withdrawals: 'Выводы', pay: 'Оплата',
+  topups: 'Пополнения', withdrawals: 'Выводы', pay: 'Оплата', snova: 'Super Nova',
   grow: 'E-grow', lottery: 'Рулетка', promo: 'Промокоды',
   refs: 'Рефералы', users: 'Пользователи', reviews: 'Отзывы',
 };
 const ADMIN_GROUPS = [
   { key: 'shop',      title: 'Магазин',  icon: '🛍', tabs: ['products', 'orders'] },
-  { key: 'finance',   title: 'Финансы',  icon: '💳', tabs: ['topups', 'withdrawals', 'pay'] },
+  { key: 'finance',   title: 'Финансы',  icon: '💳', tabs: ['topups', 'withdrawals', 'pay', 'snova'] },
   { key: 'marketing', title: 'Акции',    icon: '🎁', tabs: ['grow', 'lottery', 'promo'] },
   { key: 'people',    title: 'Люди',     icon: '👥', tabs: ['refs', 'users', 'reviews'] },
 ];
@@ -4184,7 +4184,7 @@ function renderAdmin(tab) {
           </div>
           <div class="ref-detail hide" id="rd-${t.tg_id}"></div>`).join('') : '<p class="note">рефереров пока нет</p>'}`;
     }).catch(() => { if (adminTab === 'refs') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
-  } else {
+  } else if (tab === 'pay') {
     const s = AD.settings;
     const bonusPctCard = `
       <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
@@ -4210,17 +4210,10 @@ function renderAdmin(tab) {
       <div class="field"><label>BNB (BSC)</label><input id="payBnb" value="${s.wallet_bnb || ''}" placeholder="0x..."></div>
       <div class="field"><label>LTC</label><input id="payLtc" value="${s.wallet_ltc || ''}" placeholder="ltc1..."></div>
       <button class="btn btn-gold" onclick="savePay()">Сохранить реквизиты</button>
-      <p class="note" style="margin-top:8px">ETH и BNB зачисляются автоматически только при заданном ключе Etherscan (env ETHERSCAN_API_KEY). Без него — оставьте эти поля пустыми.</p>
-      <div class="bezel" style="margin-top:14px"><div class="bezel-core" style="padding:15px 16px">
-        <h2 style="font-size:15px;margin:0 0 8px">Super Nova — направления оплаты</h2>
-        <p class="note" style="margin:0 0 10px">Список доступных направлений от провайдера — чтобы подобрать значение env SNOVA_PAYMENT_SETTINGS для карты в грн.</p>
-        <button class="btn btn-ghost" onclick="checkSnova()">🔍 Запросить список</button>
-        <pre id="snovaResult" class="note" style="white-space:pre-wrap;margin-top:10px;word-break:break-all"></pre>
-        <p class="note" style="margin:10px 0 6px">Диагностика: создаёт настоящую заявку на 100 ₴ с теми же полями, что и обычное пополнение — для разбора точного ответа провайдера при ошибке. Если не оплатите — просто останется висеть в их кабинете:</p>
-        <button class="btn btn-ghost" onclick="checkSnovaTest()">🧪 Тестовая заявка (100 ₴)</button>
-        <pre id="snovaTestResult" class="note" style="white-space:pre-wrap;margin-top:10px;word-break:break-all"></pre>
-      </div></div>
-      <div class="bezel" style="margin-top:14px"><div class="bezel-core" style="padding:15px 16px">
+      <p class="note" style="margin-top:8px">ETH и BNB зачисляются автоматически только при заданном ключе Etherscan (env ETHERSCAN_API_KEY). Без него — оставьте эти поля пустыми.</p>`;
+  } else if (tab === 'snova') {
+    b.innerHTML = `
+      <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
         <div class="section-head" style="margin:0 0 8px"><h2 style="font-size:15px">Вывод баланса Super Nova</h2>
           <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px" onclick="snovaBalance()">🔄 Баланс</button></div>
         <p id="snovaBalanceResult" class="note" style="margin:0 0 12px">нажмите «Баланс», чтобы узнать доступную сумму</p>
@@ -5286,22 +5279,6 @@ async function savePay() {
     PAY = Object.fromEntries(Object.entries(AD.settings).filter(([, v]) => v));
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Реквизиты сохранены');
-}
-async function checkSnova() {
-  const el = document.getElementById('snovaResult');
-  el.textContent = 'Загрузка…';
-  try {
-    const r = await API.call('/api/admin/snova/payment-settings');
-    el.textContent = JSON.stringify(r.payment_settings, null, 2);
-  } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
-}
-async function checkSnovaTest() {
-  const el = document.getElementById('snovaTestResult');
-  el.textContent = 'Загрузка…';
-  try {
-    const r = await API.call('/api/admin/snova/test');
-    el.textContent = JSON.stringify(r, null, 2);
-  } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
 }
 async function snovaBalance() {
   const el = document.getElementById('snovaBalanceResult');
