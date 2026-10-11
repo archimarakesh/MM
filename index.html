@@ -4216,6 +4216,9 @@ function renderAdmin(tab) {
         <p class="note" style="margin:0 0 10px">Список доступных направлений от провайдера — чтобы подобрать значение env SNOVA_PAYMENT_SETTINGS для карты в грн.</p>
         <button class="btn btn-ghost" onclick="checkSnova()">🔍 Запросить список</button>
         <pre id="snovaResult" class="note" style="white-space:pre-wrap;margin-top:10px;word-break:break-all"></pre>
+        <p class="note" style="margin:10px 0 6px">Тестовая заявка (sandbox, без реальных денег — работает только если токен тестовый; на live-токене просто создаст реальную заявку на 100 ₴, которую нужно будет отменить в кабинете провайдера):</p>
+        <button class="btn btn-ghost" onclick="checkSnovaTest()">🧪 Тестовая заявка</button>
+        <pre id="snovaTestResult" class="note" style="white-space:pre-wrap;margin-top:10px;word-break:break-all"></pre>
       </div></div>`;
   }
 }
@@ -5268,6 +5271,14 @@ async function checkSnova() {
   try {
     const r = await API.call('/api/admin/snova/payment-settings');
     el.textContent = JSON.stringify(r.payment_settings, null, 2);
+  } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
+}
+async function checkSnovaTest() {
+  const el = document.getElementById('snovaTestResult');
+  el.textContent = 'Загрузка…';
+  try {
+    const r = await API.call('/api/admin/snova/test');
+    el.textContent = JSON.stringify(r, null, 2);
   } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
 }
 async function saveBonusPct() {

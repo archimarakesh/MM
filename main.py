@@ -2691,6 +2691,24 @@ async def api_admin_snova_payment_settings(request: Request):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/admin/snova/test")
+async def api_admin_snova_test(request: Request):
+    """Тестовая заявка (test_scenario) — не трогает баланс/card_payments, только
+    проверяет поведение API с текущим токеном. На live-токене провайдер скорее
+    всего просто игнорирует test_scenario и создаст обычную заявку на 100 ₴ —
+    такую заявку стоит потом отменить/проигнорировать в кабинете провайдера."""
+    admin_user(request)
+    if not snova.TOKEN or not snova.PAYMENT_SETTINGS:
+        raise HTTPException(400, "Не заданы SNOVA_TOKEN/SNOVA_PAYMENT_SETTINGS")
+    deal_id = f"test-{int(time.time())}-{secrets.token_hex(3)}"
+    try:
+        deal = await snova.create_exchange(deal_id, 100, test_scenario="success")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    st = await snova.status(deal_id)
+    return {"created": deal, "status": st}
+
+
 @app.post("/api/admin/bonus-pay-pct")
 async def api_admin_bonus_pay_pct(request: Request):
     """Максимальный % заказа, который можно оплатить бонусным (locked) балансом."""
