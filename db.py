@@ -1387,7 +1387,7 @@ async def admin_topup_history(limit: int = 120) -> list:
                 FROM invoices i WHERE i.order_id IS NULL
                 UNION ALL
                 SELECT p.id, p.user_id, p.amount_uah, 'card',
-                       COALESCE('•' || right(p.card, 4), ''), NULL,
+                       COALESCE(left(p.card, 40), ''), NULL,
                        p.payment_id, p.status, p.created
                 FROM card_payments p
             ) x ORDER BY created DESC LIMIT $1
@@ -2239,7 +2239,7 @@ async def admin_set_balance(tg_id: int, real: int, bonus: int, wager: int) -> di
 
 
 
-# ── PayDome: авто-карта для пополнения ───────────────────────────────────────
+# ── Super Nova: авто-карта для пополнения ────────────────────────────────────
 CARD_PAY_TTL = 30 * 60  # 30 минут на оплату карты
 
 
