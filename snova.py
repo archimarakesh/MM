@@ -44,12 +44,8 @@ def _headers() -> dict:
 
 
 async def create_exchange(deal_id: str, amount_uah: int, webhook_url: str = "",
-                          user_uid: str | None = None, test_scenario: str | None = None) -> dict:
-    """Создаёт заявку на обмен. Возвращает credentials/payment_amount/status.
-
-    test_scenario — только для sandbox-токенов провайдера (success/canceled/
-    pending/trouble/random), на live-токене должно игнорироваться. Не передавать
-    из обычного пользовательского потока — только из изолированных admin-проверок."""
+                          user_uid: str | None = None) -> dict:
+    """Создаёт заявку на обмен. Возвращает credentials/payment_amount/status."""
     payload = {
         "id": deal_id,
         "payment_settings": PAYMENT_SETTINGS,
@@ -59,27 +55,12 @@ async def create_exchange(deal_id: str, amount_uah: int, webhook_url: str = "",
         payload["webhook"] = webhook_url
     if user_uid:
         payload["user_uid"] = user_uid
-    if test_scenario:
-        payload["test_scenario"] = test_scenario
     async with aiohttp.ClientSession() as s:
         async with s.post(f"{BASE}/api/v1/exchange/", json=payload, headers=_headers(),
                           timeout=aiohttp.ClientTimeout(total=20)) as r:
             data = await r.json()
             if r.status not in (200, 201):
                 raise ValueError(f"Snova exchange create {r.status}: {str(data)[:200]}")
-    return data
-
-
-async def payment_settings() -> list:
-    """Список доступных направлений оплаты (для подбора SNOVA_PAYMENT_SETTINGS)."""
-    if not TOKEN:
-        raise ValueError("SNOVA_TOKEN не задан")
-    async with aiohttp.ClientSession() as s:
-        async with s.get(f"{BASE}/api/v1/payment_settings/", headers=_headers(),
-                         timeout=aiohttp.ClientTimeout(total=20)) as r:
-            data = await r.json()
-            if r.status != 200:
-                raise ValueError(f"Snova payment_settings {r.status}: {str(data)[:200]}")
     return data
 
 
@@ -121,19 +102,6 @@ async def withdraw_usdt(amount: float, wallet: str) -> dict:
             data = await r.json()
             if r.status not in (200, 201):
                 raise ValueError(f"Snova withdrawal {r.status}: {str(data)[:200]}")
-    return data
-
-
-async def payout_currencies() -> list:
-    """Доступные валюты для вывода в фиат (курс, лимиты, комиссия)."""
-    if not TOKEN:
-        raise ValueError("SNOVA_TOKEN не задан")
-    async with aiohttp.ClientSession() as s:
-        async with s.get(f"{BASE}/api/v1/payout/currencies/", headers=_headers(),
-                         timeout=aiohttp.ClientTimeout(total=20)) as r:
-            data = await r.json()
-            if r.status != 200:
-                raise ValueError(f"Snova payout/currencies {r.status}: {str(data)[:200]}")
     return data
 
 
