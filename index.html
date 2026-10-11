@@ -4210,7 +4210,13 @@ function renderAdmin(tab) {
       <div class="field"><label>BNB (BSC)</label><input id="payBnb" value="${s.wallet_bnb || ''}" placeholder="0x..."></div>
       <div class="field"><label>LTC</label><input id="payLtc" value="${s.wallet_ltc || ''}" placeholder="ltc1..."></div>
       <button class="btn btn-gold" onclick="savePay()">Сохранить реквизиты</button>
-      <p class="note" style="margin-top:8px">ETH и BNB зачисляются автоматически только при заданном ключе Etherscan (env ETHERSCAN_API_KEY). Без него — оставьте эти поля пустыми.</p>`;
+      <p class="note" style="margin-top:8px">ETH и BNB зачисляются автоматически только при заданном ключе Etherscan (env ETHERSCAN_API_KEY). Без него — оставьте эти поля пустыми.</p>
+      <div class="bezel" style="margin-top:14px"><div class="bezel-core" style="padding:15px 16px">
+        <h2 style="font-size:15px;margin:0 0 8px">Super Nova — направления оплаты</h2>
+        <p class="note" style="margin:0 0 10px">Список доступных направлений от провайдера — чтобы подобрать значение env SNOVA_PAYMENT_SETTINGS для карты в грн.</p>
+        <button class="btn btn-ghost" onclick="checkSnova()">🔍 Запросить список</button>
+        <pre id="snovaResult" class="note" style="white-space:pre-wrap;margin-top:10px;word-break:break-all"></pre>
+      </div></div>`;
   }
 }
 async function renderAdminLottery() {
@@ -5255,6 +5261,14 @@ async function savePay() {
     PAY = Object.fromEntries(Object.entries(AD.settings).filter(([, v]) => v));
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Реквизиты сохранены');
+}
+async function checkSnova() {
+  const el = document.getElementById('snovaResult');
+  el.textContent = 'Загрузка…';
+  try {
+    const r = await API.call('/api/admin/snova/payment-settings');
+    el.textContent = JSON.stringify(r.payment_settings, null, 2);
+  } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
 }
 async function saveBonusPct() {
   const pct = parseInt(document.getElementById('bonusPct').value, 10);

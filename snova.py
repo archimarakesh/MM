@@ -64,6 +64,19 @@ async def create_exchange(deal_id: str, amount_uah: int, webhook_url: str = "",
     return data
 
 
+async def payment_settings() -> list:
+    """Список доступных направлений оплаты (для подбора SNOVA_PAYMENT_SETTINGS)."""
+    if not TOKEN:
+        raise ValueError("SNOVA_TOKEN не задан")
+    async with aiohttp.ClientSession() as s:
+        async with s.get(f"{BASE}/api/v1/payment_settings/", headers=_headers(),
+                         timeout=aiohttp.ClientTimeout(total=20)) as r:
+            data = await r.json()
+            if r.status != 200:
+                raise ValueError(f"Snova payment_settings {r.status}: {str(data)[:200]}")
+    return data
+
+
 async def status(deal_id: str) -> dict | None:
     """Текущее состояние заявки (dict) или None при ошибке/недоступности."""
     try:
