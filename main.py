@@ -2656,6 +2656,20 @@ async def api_admin_product_delete(request: Request):
     return {"products": await db.get_products(include_inactive=True)}
 
 
+@app.post("/api/admin/product/move")
+async def api_admin_product_move(request: Request):
+    admin_user(request)
+    b = await request.json()
+    direction = pint(b.get("dir"))
+    if direction not in (-1, 1):
+        raise HTTPException(400, "dir должен быть -1 или 1")
+    try:
+        await db.move_product(pint(b.get("id")), direction)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"products": await db.get_products(include_inactive=True)}
+
+
 @app.post("/api/admin/category")
 async def api_admin_category(request: Request):
     admin_user(request)
