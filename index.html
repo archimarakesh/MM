@@ -4218,7 +4218,12 @@ function renderAdmin(tab) {
           <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px" onclick="snovaBalance()">🔄 Баланс</button></div>
         <p id="snovaBalanceResult" class="note" style="margin:0 0 12px">нажмите «Баланс», чтобы узнать доступную сумму</p>
         <p class="note" style="margin:0 0 6px;color:var(--gold-soft)">Вывод в USDT (TRC-20)</p>
-        <div class="field"><label>Сумма USDT</label><input id="snWdAmount" inputmode="decimal" placeholder="0.00"></div>
+        <div class="field"><label>Сумма USDT</label>
+          <div style="display:flex;gap:8px">
+            <input id="snWdAmount" inputmode="decimal" placeholder="0.00" style="flex:1">
+            <button class="btn btn-ghost" style="width:auto;padding:0 16px;white-space:nowrap" onclick="snovaWdMax()">Макс</button>
+          </div>
+        </div>
         <div class="field"><label>Кошелёк TRC-20</label><input id="snWdWallet" placeholder="T..."></div>
         <button class="btn btn-ghost" onclick="snovaWithdrawUsdt()">Вывести USDT</button>
         <pre id="snWdResult" class="note" style="white-space:pre-wrap;margin-top:8px;word-break:break-all"></pre>
@@ -4228,7 +4233,13 @@ function renderAdmin(tab) {
           <select id="snPoCurrency" onchange="snovaPoCurrencyInfo()"><option value="UAH">UAH</option><option value="RUB">RUB</option><option value="KZT">KZT</option></select>
         </div>
         <p id="snPoRate" class="note" style="margin:0 0 10px">курс и доступная сумма — загрузка…</p>
-        <div class="field"><label>Сумма к получению</label><input id="snPoAmount" inputmode="decimal" placeholder="0"></div>
+        <div class="field"><label>Сумма USDT</label>
+          <div style="display:flex;gap:8px">
+            <input id="snPoUsdt" inputmode="decimal" placeholder="0.00" oninput="snovaPoCalc()" style="flex:1">
+            <button class="btn btn-ghost" style="width:auto;padding:0 16px;white-space:nowrap" onclick="snovaPoMax()">Макс</button>
+          </div>
+        </div>
+        <div class="field"><label>К получению (расчётно)</label><input id="snPoAmount" readonly placeholder="0"></div>
         <div class="field"><label>Номер карты</label><input id="snPoCard" placeholder="0000 0000 0000 0000"></div>
         <div class="field"><label>Банк (полное название)</label><input id="snPoBank" placeholder="PrivatBank"></div>
         <div class="field"><label>ФИО держателя</label><input id="snPoHolder" placeholder="Иван Иванов"></div>
@@ -4236,6 +4247,7 @@ function renderAdmin(tab) {
         <button class="btn btn-gold" onclick="snovaPayout()">Вывести на карту</button>
         <pre id="snPoResult" class="note" style="white-space:pre-wrap;margin-top:8px;word-break:break-all"></pre>
       </div></div>`;
+    snovaBalance();
     snovaLoadPoCurrencies();
   }
 }
@@ -5282,13 +5294,20 @@ async function savePay() {
   } catch (e) { return toast(e.message); }
   haptic('medium'); toast('Реквизиты сохранены');
 }
+let SNOVA_BALANCE = null;
 async function snovaBalance() {
   const el = document.getElementById('snovaBalanceResult');
+  if (!el) return;
   el.textContent = 'Загрузка…';
   try {
     const r = await API.call('/api/admin/snova/balance');
+    SNOVA_BALANCE = parseFloat(r.available_balance) || 0;
     el.innerHTML = `Доступно: <b style="color:var(--gold-soft)">${esc(r.available_balance)} USDT</b>`;
   } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
+}
+function snovaWdMax() {
+  if (SNOVA_BALANCE == null) return toast('Баланс ещё загружается');
+  document.getElementById('snWdAmount').value = SNOVA_BALANCE.toFixed(2);
 }
 let SNOVA_PO_CURRENCIES = [];
 async function snovaLoadPoCurrencies() {
@@ -5304,10 +5323,28 @@ function snovaPoCurrencyInfo() {
   if (!el) return;
   const cur = document.getElementById('snPoCurrency').value;
   const c = SNOVA_PO_CURRENCIES.find(x => x.code === cur);
-  if (!c) { el.textContent = `Нет данных по ${cur} — баланс в USDT, курс неизвестен`; return; }
+  if (!c) { el.textContent = `Нет данных по ${cur} — баланс в USDT, курс неизвестен`; snovaPoCalc(); return; }
   el.innerHTML = `Курс: <b style="color:var(--gold-soft)">${fmt(c.rate)} ${cur}/USDT</b> ·
     доступно: <b style="color:var(--gold-soft)">${fmt(c.available_amount)} ${cur}</b> ·
     от ${fmt(c.min_amount)} до ${fmt(c.max_amount)} ${cur} · комиссия ${c.fee_percent}%`;
+  snovaPoCalc();
+}
+function snovaPoCalc() {
+  const cur = document.getElementById('snPoCurrency').value;
+  const c = SNOVA_PO_CURRENCIES.find(x => x.code === cur);
+  const usdt = parseFloat(document.getElementById('snPoUsdt').value) || 0;
+  const fiatEl = document.getElementById('snPoAmount');
+  fiatEl.value = (c && usdt > 0) ? (usdt * c.rate).toFixed(2) : '';
+}
+function snovaPoMax() {
+  const cur = document.getElementById('snPoCurrency').value;
+  const c = SNOVA_PO_CURRENCIES.find(x => x.code === cur);
+  if (!c || !c.rate) return toast('Курс ещё загружается');
+  const limits = [c.available_amount / c.rate, c.max_amount / c.rate];
+  if (SNOVA_BALANCE != null) limits.push(SNOVA_BALANCE);
+  const maxUsdt = Math.max(0, Math.min(...limits));
+  document.getElementById('snPoUsdt').value = maxUsdt.toFixed(2);
+  snovaPoCalc();
 }
 async function snovaWithdrawUsdt() {
   const el = document.getElementById('snWdResult');
@@ -5333,7 +5370,8 @@ async function snovaPayout() {
   if (!fiat_amount || fiat_amount <= 0 || !card_number || !bank_name || !cardholder_name) {
     return toast('Заполните сумму и реквизиты карты');
   }
-  if (!confirm(`Проверьте реквизиты ещё раз:\n${card_number}\n${bank_name}\n${cardholder_name}\n\nСписание комиссии — сразу, отмена только первые 2 минуты. Продолжить?`)) return;
+  const usdt = document.getElementById('snPoUsdt').value;
+  if (!confirm(`Списать ${usdt} USDT → ${fiat_amount} ${currency}\n\nПроверьте реквизиты ещё раз:\n${card_number}\n${bank_name}\n${cardholder_name}\n\nСписание комиссии — сразу, отмена только первые 2 минуты. Продолжить?`)) return;
   el.textContent = 'Отправка…';
   try {
     const r = await API.call('/api/admin/snova/payout',
