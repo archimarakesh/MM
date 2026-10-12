@@ -40,12 +40,19 @@ DELIVERY_METHODS = ("np", "taxi")   # Новая Почта / Такси (Дне
 DEFAULT_DELIVERY = list(DELIVERY_METHODS)
 # весовой товар продаётся только этими фиксированными градациями, без произвольных граммов
 WEIGHT_LADDER = (5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 75, 100, 150)
+# товар в мл (жидкости/тинктуры и т.п.) — своя градация объёма
+VOLUME_LADDER = (10, 30, 50, 100)
+
+
+def _ladder_for(unit: str) -> tuple:
+    return VOLUME_LADDER if unit == "ml" else WEIGHT_LADDER
 # Верхнего лимита на количество нет — ограничивает только наличие (stock) товара.
 # MAX_GRAMS остаётся высоким предохранителем от абсурдных/переполняющих значений.
 MAX_GRAMS = int(os.getenv("MAX_GRAMS", "100000") or 100000)
 MIN_GRAMS = 2             # минимальная покупка, грамм
 MAX_PHOTO_LEN = 400_000   # ~300 КБ картинки в base64
 MAX_PHOTOS = 4
+MAX_FLAVORS = 20
 MAX_PENDING_ORDERS = 8    # незакрытых заказов на юзера (антиспам/сток)
 
 # бухгалтерия: комиссия на вывод прибыли и фикс-расход на отправку посылки
@@ -197,6 +204,8 @@ async def init():
             ALTER TABLE products ADD COLUMN IF NOT EXISTS category_id BIGINT;
             -- доступные способы доставки для товара: ["np","taxi"] — JSON-массив
             ALTER TABLE products ADD COLUMN IF NOT EXISTS delivery TEXT;
+            -- вкусы товара — JSON-массив строк, выбор без влияния на цену/склад
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS flavors TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
@@ -234,6 +243,7 @@ async def init():
                 grams      INT NOT NULL,
                 unit       TEXT NOT NULL DEFAULT 'g',
                 total      BIGINT NOT NULL);
+            ALTER TABLE order_items ADD COLUMN IF NOT EXISTS flavor TEXT;
             CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items(order_id);
             CREATE TABLE IF NOT EXISTS topups(
                 id      BIGSERIAL PRIMARY KEY,
@@ -561,6 +571,7 @@ def _product_row(r, rating) -> dict:
         "bonus_pct": int(r["bonus_pct"]) if r["bonus_pct"] is not None else None,
         "delivery": json.loads(r["delivery"]) if r["delivery"] else DEFAULT_DELIVERY,
         "tiers": json.loads(r["tiers"]) if r["tiers"] else DEFAULT_TIERS,
+        "flavors": json.loads(r["flavors"]) if r["flavors"] else [],
         "active": r["active"], "photos": photos,
         "pv": len(r["photos"] or ""),  # версия фото для кэш-бастинга
         "stock": r["stock"],           # None = не ограничено
@@ -615,7 +626,8 @@ async def save_product(d: dict) -> int:
         stock = d.get("stock")
         stock = None if stock in (None, "") else max(0, int(stock))
         genetics = str(d.get("genetics", "")).strip()
-        unit = "pc" if str(d.get("unit", "g")) == "pc" else "g"
+        unit = str(d.get("unit", "g"))
+        unit = unit if unit in ("g", "pc", "ml") else "g"
         min_qty = max(1, int(d.get("min_qty") or (1 if unit == "pc" else MIN_GRAMS)))
         category_id = d.get("category_id")
         category_id = int(category_id) if category_id not in (None, "") else None
@@ -623,24 +635,28 @@ async def save_product(d: dict) -> int:
         bonus_pct = None if bonus_pct in (None, "") else max(0, min(100, int(bonus_pct)))
         delivery = [m for m in (d.get("delivery") or DEFAULT_DELIVERY) if m in DELIVERY_METHODS]
         dj = json.dumps(delivery or DEFAULT_DELIVERY)
+        flavors = [str(f).strip() for f in (d.get("flavors") or []) if str(f).strip()][:MAX_FLAVORS]
+        fj = json.dumps(flavors) if flavors else None
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
                                     active=$8, photos=$9, stock=$10, genetics=$11,
-                                    unit=$12, min_qty=$13, category_id=$14, bonus_pct=$15, delivery=$16
+                                    unit=$12, min_qty=$13, category_id=$14, bonus_pct=$15, delivery=$16,
+                                    flavors=$17
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
                 d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)),
-                pj, stock, genetics, unit, min_qty, category_id, bonus_pct, dj)
+                pj, stock, genetics, unit, min_qty, category_id, bonus_pct, dj, fj)
             return int(d["id"])
         return await c.fetchval("""
             INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics,
-                                 unit, min_qty, category_id, bonus_pct, delivery, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+                                 unit, min_qty, category_id, bonus_pct, delivery, flavors, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
-            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id, bonus_pct, dj)
+            d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id,
+            bonus_pct, dj, fj)
 
 
 async def delete_product(pid: int):
@@ -970,16 +986,18 @@ async def _order_product_validate(c, product_id: int, grams: int, lock: bool = F
     p = await c.fetchrow(q, product_id)
     if not p:
         raise ValueError("Товар не найден")
+    unit = p["unit"] or "g"
     lo = int(p["min_qty"] if p["min_qty"] is not None else MIN_GRAMS)
-    unit_word = "шт" if (p["unit"] or "g") == "pc" else "грамм"
+    unit_word = {"pc": "шт", "ml": "мл"}.get(unit, "грамм")
     if grams < lo:
         raise ValueError(f"Минимум — {lo} {unit_word}")
     if grams > MAX_GRAMS:
         raise ValueError("Слишком большое количество")
-    if (p["unit"] or "g") != "pc":
-        steps = [w for w in WEIGHT_LADDER if w >= lo] or [lo]
+    if unit != "pc":
+        steps = [w for w in _ladder_for(unit) if w >= lo] or [lo]
         if grams not in steps:
-            raise ValueError(f"Вес можно выбрать только из градации: {', '.join(map(str, steps))} г")
+            raise ValueError(f"{'Объём' if unit == 'ml' else 'Вес'} можно выбрать только из градации: "
+                             f"{', '.join(map(str, steps))} {unit_word}")
     if p["stock"] is not None and grams > p["stock"]:
         raise ValueError("Такого количества нет в наличии — напишите админу")
     return p
@@ -1033,6 +1051,7 @@ async def _order_items_by_order(c, order_ids: list) -> dict:
         out.setdefault(r["order_id"], []).append({
             "product": r["product"], "product_id": r["product_id"],
             "grams": r["grams"], "unit": r["unit"] or "g", "total": r["total"],
+            "flavor": r["flavor"],
         })
     return out
 
@@ -1051,14 +1070,14 @@ async def _guard_pending_orders(c, tg_id: int):
 
 async def _insert_order(c, tg_id, lines, total, status, pay, ship,
                         receipt=None, bonus_part=0) -> int:
-    """lines: [(product_row, grams, line_total), ...] — одна или несколько позиций
-    одного заказа (одна доставка/статус/ТТН). Пишет заголовок заказа + по строке
-    в order_items на каждую позицию."""
-    first_p, first_grams, _ = lines[0]
+    """lines: [(product_row, grams, line_total, flavor), ...] — одна или несколько
+    позиций одного заказа (одна доставка/статус/ТТН). Пишет заголовок заказа + по
+    строке в order_items на каждую позицию."""
+    first_p, first_grams, _, _ = lines[0]
     if len(lines) == 1:
         summary, sum_grams, sum_unit, sum_pid = first_p["name"], first_grams, (first_p["unit"] or "g"), first_p["id"]
     else:
-        names = [p["name"] for p, _, _ in lines]
+        names = [p["name"] for p, _, _, _ in lines]
         summary = names[0] + (f" +{len(names) - 1}" if len(names) > 1 else "")
         sum_grams = sum_unit = sum_pid = None   # сводных г/шт/товара у заказа-корзины нет — смотри order_items
     oid = await c.fetchval("""
@@ -1068,11 +1087,11 @@ async def _insert_order(c, tg_id, lines, total, status, pay, ship,
     """, tg_id, sum_pid, summary, sum_grams, total, status, pay, receipt,
         json.dumps(ship, ensure_ascii=False), datetime.now().strftime("%d.%m.%Y"),
         int(bonus_part), sum_unit)
-    for p, grams, line_total in lines:
+    for p, grams, line_total, flavor in lines:
         await c.execute("""
-            INSERT INTO order_items(order_id, product_id, product, grams, unit, total)
-            VALUES($1,$2,$3,$4,$5,$6)
-        """, oid, p["id"], p["name"], grams, (p["unit"] or "g"), line_total)
+            INSERT INTO order_items(order_id, product_id, product, grams, unit, total, flavor)
+            VALUES($1,$2,$3,$4,$5,$6,$7)
+        """, oid, p["id"], p["name"], grams, (p["unit"] or "g"), line_total, flavor)
     return oid
 
 
@@ -1127,11 +1146,12 @@ async def create_order(tg_id: int, items: list, pay: str,
         raise ValueError("Корзина пуста")
     async with _pool.acquire() as c, c.transaction():
         shishki_ids = await _shishki_category_ids(c)
-        raw = []              # [(product_row, grams), ...] — сначала проверяем, без цены
+        raw = []              # [(product_row, grams, flavor), ...] — сначала проверяем, без цены
         allowed = None        # пересечение способов доставки по всем товарам корзины
         for it in items:
             p = await _order_product_validate(c, int(it["product_id"]), int(it["grams"]), lock=True)
-            raw.append((p, int(it["grams"])))
+            flavor = (str(it.get("flavor") or "").strip() or None)
+            raw.append((p, int(it["grams"]), flavor))
             da = set(json.loads(p["delivery"]) if p["delivery"] else DEFAULT_DELIVERY)
             allowed = da if allowed is None else (allowed & da)
         if not allowed:
@@ -1140,12 +1160,12 @@ async def create_order(tg_id: int, items: list, pay: str,
             raise ValueError("Этот способ доставки недоступен для заказа")
         # разные сорта «Шишки» в одном заказе складываются по весу — скидка по
         # ступени считается от общего веса категории, а не по каждой позиции отдельно
-        shishki_total_g = sum(g for p, g in raw if p["category_id"] in shishki_ids)
-        lines = []             # [(product_row, grams, line_total), ...]
-        for p, g in raw:
+        shishki_total_g = sum(g for p, g, _ in raw if p["category_id"] in shishki_ids)
+        lines = []             # [(product_row, grams, line_total, flavor), ...]
+        for p, g, flavor in raw:
             tier_w = shishki_total_g if p["category_id"] in shishki_ids else g
-            lines.append((p, g, price_for(_product_row(p, {}), g, tier_weight=tier_w)))
-        total = sum(lt for _, _, lt in lines)
+            lines.append((p, g, price_for(_product_row(p, {}), g, tier_weight=tier_w), flavor))
+        total = sum(lt for _, _, lt, _ in lines)
         u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         cash = 0
         if pay == "balance":
@@ -1157,7 +1177,7 @@ async def create_order(tg_id: int, items: list, pay: str,
             default_pct = await bonus_pay_pct()
             bonus_cap = sum(
                 lt * (p["bonus_pct"] if p["bonus_pct"] is not None else default_pct) // 100
-                for p, _, lt in lines)
+                for p, _, lt, _ in lines)
             locked = int(u["locked"] or 0)
             withdrawable = int(u["balance"]) - locked
             bonus_part = min(locked, bonus_cap)
@@ -1178,14 +1198,14 @@ async def create_order(tg_id: int, items: list, pay: str,
             oid = await _insert_order(c, tg_id, lines, total, -1, "card", ship, receipt)
         else:
             raise ValueError("Неизвестный способ оплаты")
-        for p, grams, _ in lines:
+        for p, grams, _, _ in lines:
             await _take_stock(c, p["id"], grams)
         snap = await snapshot(tg_id, c)
         snap["order_code"] = f"MM-{oid + ORDER_CODE_BASE}"
         snap["order_total"] = total
         snap["order_items"] = [
-            {"product": p["name"], "grams": g, "unit": p["unit"] or "g", "total": lt}
-            for p, g, lt in lines]
+            {"product": p["name"], "grams": g, "unit": p["unit"] or "g", "total": lt, "flavor": flavor}
+            for p, g, lt, flavor in lines]
         snap["order_product"] = lines[0][0]["name"] if len(lines) == 1 else f"{lines[0][0]['name']} +{len(lines) - 1}"
         snap["order_grams"] = lines[0][1] if len(lines) == 1 else None
         snap["order_cashback"] = cash
@@ -1199,7 +1219,7 @@ async def create_order_invoice(tg_id: int, product_id: int, grams: int, currency
         await _guard_pending_orders(c, tg_id)
         p, total = await _order_product_total(c, product_id, grams, lock=True)
         _check_delivery(p, ship)
-        oid = await _insert_order(c, tg_id, [(p, grams, total)], total, -1, currency, ship)
+        oid = await _insert_order(c, tg_id, [(p, grams, total, None)], total, -1, currency, ship)
         await _take_stock(c, product_id, grams)
         # новый счёт отменяет прежний неоплаченный (и его заказ, если был) с возвратом остатка
         await _cancel_user_pending_invoices(c, tg_id, exclude_order_id=oid)
