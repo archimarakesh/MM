@@ -105,6 +105,21 @@ async def withdraw_usdt(amount: float, wallet: str) -> dict:
     return data
 
 
+async def payout_currencies() -> list:
+    """Доступные валюты для вывода в фиат: курс (сколько фиата за USDT баланса),
+    доступная сумма в этой валюте, лимиты и комиссия — чтобы прикинуть сумму
+    перед созданием заявки, когда баланс виден только в USDT."""
+    if not TOKEN:
+        raise ValueError("SNOVA_TOKEN не задан")
+    async with aiohttp.ClientSession() as s:
+        async with s.get(f"{BASE}/api/v1/payout/currencies/", headers=_headers(),
+                         timeout=aiohttp.ClientTimeout(total=20)) as r:
+            data = await r.json()
+            if r.status != 200:
+                raise ValueError(f"Snova payout/currencies {r.status}: {str(data)[:200]}")
+    return data
+
+
 async def payout_create(currency: str, fiat_amount: float, card_number: str,
                         bank_name: str, cardholder_name: str, comment: str = "",
                         external_id: str | None = None) -> dict:
