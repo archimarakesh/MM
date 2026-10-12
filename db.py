@@ -41,7 +41,15 @@ DEFAULT_DELIVERY = list(DELIVERY_METHODS)
 # весовой товар продаётся только этими фиксированными градациями, без произвольных граммов
 WEIGHT_LADDER = (5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 75, 100, 150)
 # товар в мл (жидкости/тинктуры и т.п.) — своя градация объёма
-VOLUME_LADDER = (10, 30, 50, 100)
+VOLUME_LADDER = (10, 20, 30, 40, 50, 100, 200)
+# база — ставка ₴/мл на минимальной ступени (10мл); при этих k даёт 3900/7800/
+# 10850/13650/14250/26400/48250 ₴ за 10/20/30/40/50/100/200 мл
+DEFAULT_BASE_ML = 390
+DEFAULT_TIERS_ML = [
+    {"from": 10, "k": 1.0}, {"from": 20, "k": 1.0}, {"from": 30, "k": 0.92735},
+    {"from": 40, "k": 0.875}, {"from": 50, "k": 0.730769}, {"from": 100, "k": 0.676923},
+    {"from": 200, "k": 0.61859},
+]
 
 
 def _ladder_for(unit: str) -> tuple:
@@ -519,6 +527,14 @@ async def init():
                             DEFAULT_BASE_G, json.dumps(DEFAULT_TIERS))
             await c.execute("""
                 INSERT INTO settings(key, value) VALUES('price_grid_v2', '1')
+                ON CONFLICT (key) DO UPDATE SET value='1'
+            """)
+        # аналогично — разовая сетка цен для товаров в мл (10/20/30/40/50/100/200 мл)
+        if not await c.fetchval("SELECT value FROM settings WHERE key='price_grid_ml_v1'"):
+            await c.execute("UPDATE products SET base=$1, tiers=$2 WHERE unit='ml'",
+                            DEFAULT_BASE_ML, json.dumps(DEFAULT_TIERS_ML))
+            await c.execute("""
+                INSERT INTO settings(key, value) VALUES('price_grid_ml_v1', '1')
                 ON CONFLICT (key) DO UPDATE SET value='1'
             """)
 
