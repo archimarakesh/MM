@@ -632,6 +632,24 @@ async def delete_product(pid: int):
         await c.execute("DELETE FROM products WHERE id=$1", pid)
 
 
+async def move_product(pid: int, direction: int):
+    """Переставляет товар на одну позицию вверх (-1) или вниз (+1) в сортировке
+    админки/каталога. Перезаписывает pos у всех товаров их текущим индексом —
+    избегает коллизий, когда у нескольких строк одинаковый pos (например 0 по
+    умолчанию у старых товаров)."""
+    async with _pool.acquire() as c, c.transaction():
+        rows = await c.fetch("SELECT id FROM products ORDER BY pos, id")
+        ids = [r["id"] for r in rows]
+        if pid not in ids:
+            raise ValueError("Товар не найден")
+        i = ids.index(pid)
+        j = i + direction
+        if 0 <= j < len(ids):
+            ids[i], ids[j] = ids[j], ids[i]
+        for idx, _id in enumerate(ids):
+            await c.execute("UPDATE products SET pos=$1 WHERE id=$2", idx, _id)
+
+
 # ── разделы каталога (категории) ──────────────────────────────────────────────
 async def get_categories(include_inactive: bool = False, conn=None) -> list:
     c = conn or _pool
