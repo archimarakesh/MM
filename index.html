@@ -1364,13 +1364,21 @@ const TIERS = [
 // базовая ставка нового весового товара, ₴/г (при этих k даёт 2100/3650/5250/6750/
 // 7800/8850/9450/9950/10150/10350/15100/19650/27500 ₴ за 5/10/15/20/25/30/35/40/45/50/75/100/150 г)
 const DEFAULT_BASE_G = 420;
+// то же для нового товара в мл — 3900/7800/10850/13650/14250/26400/48250 ₴ за
+// 10/20/30/40/50/100/200 мл
+const DEFAULT_BASE_ML = 390;
+const TIERS_ML = [
+  { from: 10, k: 1.0 }, { from: 20, k: 1.0 }, { from: 30, k: 0.92735 },
+  { from: 40, k: 0.875 }, { from: 50, k: 0.730769 }, { from: 100, k: 0.676923 },
+  { from: 200, k: 0.61859 },
+];
 const WEIGHTS = [2, 5, 10, 25, 50, 100];
 const MIN_GRAMS = 2;
 const MAX_GRAMS = 100000;   // верхнего лимита нет — цифра лишь предохранитель, ограничивает наличие
 // весовой товар продаётся только этими фиксированными градациями, без произвольных граммов
 const WEIGHT_LADDER = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 75, 100, 150];
 // товар в мл (жидкости/тинктуры и т.п.) — своя градация объёма
-const VOLUME_LADDER = [10, 30, 50, 100];
+const VOLUME_LADDER = [10, 20, 30, 40, 50, 100, 200];
 // единица измерения: 'g' — граммы (вес), 'pc' — штуки (поштучный товар), 'ml' — миллилитры (объём)
 const uShort = u => u === 'pc' ? 'шт' : u === 'ml' ? 'мл' : 'г';        // короткий суффикс: 5 г / 5 шт / 5 мл
 const uWord = u => u === 'pc' ? 'шт' : u === 'ml' ? 'мл' : 'грамм';     // слово: минимум 2 грамма / 2 шт / 2 мл
@@ -4516,22 +4524,17 @@ function peSetUnit(u) {
   peReadTiers();
   const from = peUnit;   // единица ДО переключения — чтобы не тащить цену не того масштаба
   peUnit = (u === 'pc' || u === 'ml') ? u : 'g';
+  if (peUnit === from) return;   // уже на этой единице — не затирать введённое
   if (peUnit === 'pc') {
-    // сбрасываем на дефолт 100 ₴/шт, если раньше был весовой/объёмный — его цена за всё
-    // количество (например 2100 ₴ за 5 г) не имеет смысла как цена за штуку
-    peTiersArr = [{ from: 1, price: from === 'pc' ? (peTiersArr[0]?.price || 100) : 100 }];
+    // сбрасываем на дефолт 100 ₴/шт — цена за весь вес/объём (например 2100 ₴ за 5 г)
+    // не имеет смысла как цена за штуку
+    peTiersArr = [{ from: 1, price: 100 }];
   } else {
+    // переключение на вес/объём — всегда своя дефолтная градация и кривая цены
+    // (у веса и объёма разные базовые ставки, переносить ставку между ними не имеет смысла)
     const min = Math.max(1, parseInt(document.getElementById('peMin').value, 10) || MIN_GRAMS);
-    if (from !== 'pc') {
-      // переключение между весом и объёмом — сохраняем ставку за единицу, меняем только градацию
-      const rate = peTiersArr[0] ? (peTiersArr[0].price / (peTiersArr[0].from || 1)) : 100;
-      peTiersArr = weightSteps(min, peUnit).map(w => ({ from: w, price: Math.round(rate * w) }));
-    } else {
-      // переключение со штучного — подставляем дефолтную градацию, а не штучную
-      // ставку, растянутую на вес/объём
-      const srcP = { base: DEFAULT_BASE_G, tiers: TIERS };
-      peTiersArr = weightSteps(min, peUnit).map(w => ({ from: w, price: priceFor(srcP, w) }));
-    }
+    const srcP = peUnit === 'ml' ? { base: DEFAULT_BASE_ML, tiers: TIERS_ML } : { base: DEFAULT_BASE_G, tiers: TIERS };
+    peTiersArr = weightSteps(min, peUnit).map(w => ({ from: w, price: priceFor(srcP, w) }));
   }
   peSyncUnitUI();
   renderPeTiers();
