@@ -2256,6 +2256,9 @@ function updatePrice() {
   const p = curProduct, ts = tiersOf(p);
   document.querySelectorAll('#sheet-product .wchip').forEach(w =>
     w.classList.toggle('sel', parseInt(w.dataset.w, 10) === curGrams));
+  // цена за грамм в списке весов — только для категории «шишки» (по названию раздела)
+  const catName = (CATS.find(c => c.id === p.category_id)?.name || '').toLowerCase();
+  const showPerGram = catName.includes('шиш');
   // весовой товар продаётся фиксированной градацией — показываем цену за каждый вес целиком,
   // а не диапазон «от–до» с ценой за грамм (поштучные товары — как раньше, диапазонами)
   document.getElementById('tierTable').innerHTML = p.unit === 'pc'
@@ -2264,7 +2267,7 @@ function updatePrice() {
         return `<div class="tier-row ${x === t ? 'hit' : ''}"><span>${tierLabel(ts, i, p.unit)}</span><b>${fmt(Math.round(p.base * x.k))} ₴/${uShort(p.unit)}</b></div>`;
       }).join(''))
     : qtyPresets(p).map(w =>
-        `<div class="tier-row ${w === curGrams ? 'hit' : ''}"><span>${w} г · <span style="opacity:.65">${fmt(Math.round(priceFor(p, w) / w))} ₴/г</span></span><b>${fmt(priceFor(p, w))} ₴</b></div>`).join('');
+        `<div class="tier-row ${w === curGrams ? 'hit' : ''}"><span>${w} г${showPerGram ? ` · <span style="opacity:.65">${fmt(Math.round(priceFor(p, w) / w))} ₴/г</span>` : ''}</span><b>${fmt(priceFor(p, w))} ₴</b></div>`).join('');
   document.getElementById('totalGrams').textContent = `Итого · ${curGrams} ${uShort(p.unit)}`;
   document.getElementById('totalSum').textContent = fmt(priceFor(p, curGrams)) + ' ₴';
   const short = p.stock != null && (p.stock === 0 || curGrams > p.stock);
