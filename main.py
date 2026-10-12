@@ -2710,6 +2710,17 @@ async def api_admin_snova_withdraw_usdt(request: Request):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/admin/snova/payout-currencies")
+async def api_admin_snova_payout_currencies(request: Request):
+    """Курс/доступная сумма/лимиты по валютам PayOut — баланс виден только в
+    USDT, это единственный способ узнать эквивалент в гривнах заранее."""
+    admin_user(request)
+    try:
+        return {"currencies": await snova.payout_currencies()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/admin/snova/payout")
 async def api_admin_snova_payout(request: Request):
     """Вывод баланса провайдера прямо в фиат на карту (PayOut). Комиссия списывается

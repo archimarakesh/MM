@@ -4225,8 +4225,9 @@ function renderAdmin(tab) {
         <p class="note" style="margin:16px 0 6px;color:var(--gold-soft)">Вывод в фиат на карту (PayOut)</p>
         <p class="note" style="margin:0 0 10px">⚠️ Комиссия списывается сразу при создании, отменить можно только в первые 2 минуты. Проверьте реквизиты карты перед отправкой — при ошибке комиссия не возвращается.</p>
         <div class="field"><label>Валюта</label>
-          <select id="snPoCurrency"><option value="UAH">UAH</option><option value="RUB">RUB</option><option value="KZT">KZT</option></select>
+          <select id="snPoCurrency" onchange="snovaPoCurrencyInfo()"><option value="UAH">UAH</option><option value="RUB">RUB</option><option value="KZT">KZT</option></select>
         </div>
+        <p id="snPoRate" class="note" style="margin:0 0 10px">курс и доступная сумма — загрузка…</p>
         <div class="field"><label>Сумма к получению</label><input id="snPoAmount" inputmode="decimal" placeholder="0"></div>
         <div class="field"><label>Номер карты</label><input id="snPoCard" placeholder="0000 0000 0000 0000"></div>
         <div class="field"><label>Банк (полное название)</label><input id="snPoBank" placeholder="PrivatBank"></div>
@@ -4235,6 +4236,7 @@ function renderAdmin(tab) {
         <button class="btn btn-gold" onclick="snovaPayout()">Вывести на карту</button>
         <pre id="snPoResult" class="note" style="white-space:pre-wrap;margin-top:8px;word-break:break-all"></pre>
       </div></div>`;
+    snovaLoadPoCurrencies();
   }
 }
 async function renderAdminLottery() {
@@ -5287,6 +5289,25 @@ async function snovaBalance() {
     const r = await API.call('/api/admin/snova/balance');
     el.innerHTML = `Доступно: <b style="color:var(--gold-soft)">${esc(r.available_balance)} USDT</b>`;
   } catch (e) { el.textContent = 'Ошибка: ' + e.message; }
+}
+let SNOVA_PO_CURRENCIES = [];
+async function snovaLoadPoCurrencies() {
+  const el = document.getElementById('snPoRate');
+  if (!el) return;
+  try {
+    SNOVA_PO_CURRENCIES = (await API.call('/api/admin/snova/payout-currencies')).currencies || [];
+    snovaPoCurrencyInfo();
+  } catch (e) { el.textContent = 'Не удалось загрузить курс: ' + e.message; }
+}
+function snovaPoCurrencyInfo() {
+  const el = document.getElementById('snPoRate');
+  if (!el) return;
+  const cur = document.getElementById('snPoCurrency').value;
+  const c = SNOVA_PO_CURRENCIES.find(x => x.code === cur);
+  if (!c) { el.textContent = `Нет данных по ${cur} — баланс в USDT, курс неизвестен`; return; }
+  el.innerHTML = `Курс: <b style="color:var(--gold-soft)">${fmt(c.rate)} ${cur}/USDT</b> ·
+    доступно: <b style="color:var(--gold-soft)">${fmt(c.available_amount)} ${cur}</b> ·
+    от ${fmt(c.min_amount)} до ${fmt(c.max_amount)} ${cur} · комиссия ${c.fee_percent}%`;
 }
 async function snovaWithdrawUsdt() {
   const el = document.getElementById('snWdResult');
