@@ -140,6 +140,7 @@ EGROW_REMINDER_TEXT = (
 )
 # общий секрет с внешними сервисами (казино и т.п.). Пусто — кошелёк наружу закрыт
 WALLET_TOKEN = os.getenv("WALLET_TOKEN", "")
+UNIT_SHORT = {"pc": "шт", "ml": "мл"}   # короткий суффикс единицы измерения; вес ('g') — по умолчанию "г"
 CARD_MIN = 500               # пополнение картой — от 500 ₴, меньше только криптой
 CARD_LIMIT = 30000           # оплата картой — до 30 000 ₴, свыше только крипта
 # компенсация покупателю за каждые просроченные сутки отправки (заказ в работе без ТТН)
@@ -1409,7 +1410,8 @@ async def api_order(request: Request):
     else:
         ship_txt = (f"{esc(ship.get('name'))} · {esc(ship.get('phone'))}\n"
                     f"{esc(ship.get('city'))}, НП №{esc(ship.get('np'))}")
-    items = [{"product_id": pint(it.get("product_id")), "grams": pint(it.get("grams"))}
+    items = [{"product_id": pint(it.get("product_id")), "grams": pint(it.get("grams")),
+              "flavor": it.get("flavor")}
              for it in (b.get("items") or [])]
     if not items:
         # старый формат тела запроса (один товар плоским product_id/grams) —
@@ -1422,9 +1424,10 @@ async def api_order(request: Request):
         snap = await db.create_order(u["id"], items, "balance", ship)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    items_txt = "\n".join(
-        f"{esc(i['product'])} · {i['grams']} {'шт' if i['unit'] == 'pc' else 'г'} · {i['total']} ₴"
-        for i in snap.get("order_items", []))
+    def _item_line(i):
+        flavor = f" ({esc(i['flavor'])})" if i.get("flavor") else ""
+        return f"{esc(i['product'])}{flavor} · {i['grams']} {UNIT_SHORT.get(i['unit'], 'г')} · {i['total']} ₴"
+    items_txt = "\n".join(_item_line(i) for i in snap.get("order_items", []))
     await notify(ADMIN_ID,
                  f"🛒 <b>Новый заказ {snap['order_code']} (оплачен с баланса)</b>\n"
                  f"{items_txt}\n"
@@ -2629,7 +2632,7 @@ async def api_admin_product(request: Request):
         raise HTTPException(400, f"Проверьте поля товара: {e}")
     # новая активная позиция — красивый анонс всем в бота (с фото и кнопкой)
     if is_new and bool(b.get("active", True)):
-        unit = "шт" if str(b.get("unit")) == "pc" else "г"
+        unit = UNIT_SHORT.get(str(b.get("unit")), "г")
         try:
             mink = min((float(t.get("k", 1)) for t in (b.get("tiers") or [])), default=1.0)
         except Exception:
