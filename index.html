@@ -2101,8 +2101,12 @@ function toast(msg) {
 /* ═══════════ Магазин ═══════════ */
 const tiersOf = p => p.tiers || TIERS;
 function tierFor(p, g) { const ts = tiersOf(p); let t = ts[0]; for (const x of ts) if (g >= x.from) t = x; return t; }
-function priceFor(p, g) { return Math.round(p.base * tierFor(p, g).k * g); }
+// tierWeight — по какому весу искать ступень скидки, если он отличается от g
+// (сумма веса всех позиций категории «Шишки» в заказе — разные сорта складываются
+// в одну скидку). По умолчанию равен g.
+function priceFor(p, g, tierWeight) { return Math.round(p.base * tierFor(p, tierWeight == null ? g : tierWeight).k * g); }
 function tierLabel(ts, i, unit) { const u = uShort(unit); const lo = Math.max(ts[i].from, unit === 'pc' ? 1 : MIN_GRAMS); return i < ts.length - 1 ? `${lo}–${ts[i + 1].from - 1} ${u}` : `${lo} ${u}+`; }
+function isShishki(p) { return (CATS.find(c => c.id === p.category_id)?.name || '').toLowerCase().includes('шиш'); }
 let CATS = [], curCat = 'all';
 const goodsList = () => {
   const all = P || PRODUCTS;
@@ -2168,13 +2172,18 @@ const saveCart = () => localStorage.setItem(CART_KEY, JSON.stringify(CART));
 const cartProduct = pid => (P || PRODUCTS).find(p => String(p.id) === String(pid));
 // валидные строки корзины на СЕЙЧАС (товар существует/активен, вес всё ещё укладывается в градацию)
 function cartLines() {
-  return CART.map(c => {
+  const resolved = CART.map(c => {
     const p = cartProduct(c.pid);
     if (!p) return null;
     const steps = qtyPresets(p);
     const grams = steps.includes(c.grams) ? c.grams : steps[0];
-    return { product: p, grams, total: priceFor(p, grams) };
+    return { product: p, grams };
   }).filter(Boolean);
+  // разные сорта «Шишки» в корзине складываются по весу — скидка по ступени
+  // считается от общего веса категории, а не по каждой позиции отдельно
+  const shishkiTotal = resolved.filter(l => isShishki(l.product)).reduce((s, l) => s + l.grams, 0);
+  return resolved.map(l =>
+    ({ ...l, total: priceFor(l.product, l.grams, isShishki(l.product) ? shishkiTotal : l.grams) }));
 }
 function cartCount() { return CART.length; }
 function syncCartBadge() {
@@ -2256,9 +2265,8 @@ function updatePrice() {
   const p = curProduct, ts = tiersOf(p);
   document.querySelectorAll('#sheet-product .wchip').forEach(w =>
     w.classList.toggle('sel', parseInt(w.dataset.w, 10) === curGrams));
-  // цена за грамм в списке весов — только для категории «шишки» (по названию раздела)
-  const catName = (CATS.find(c => c.id === p.category_id)?.name || '').toLowerCase();
-  const showPerGram = catName.includes('шиш');
+  // цена за грамм в списке весов — только для категории «Шишки»
+  const showPerGram = isShishki(p);
   // весовой товар продаётся фиксированной градацией — показываем цену за каждый вес целиком,
   // а не диапазон «от–до» с ценой за грамм (поштучные товары — как раньше, диапазонами)
   document.getElementById('tierTable').innerHTML = p.unit === 'pc'

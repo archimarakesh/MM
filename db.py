@@ -700,10 +700,14 @@ async def delete_category(cid: int):
         await c.execute("DELETE FROM categories WHERE id=$1", cid)
 
 
-def price_for(product: dict, grams: int) -> int:
+def price_for(product: dict, grams: int, tier_weight: int | None = None) -> int:
+    """tier_weight — по какому весу искать ступень скидки, если он отличается от
+    grams (напр. сумма веса всех позиций категории «Шишки» в заказе — разные сорта
+    складываются в одну скидку). По умолчанию равен grams."""
+    tw = grams if tier_weight is None else tier_weight
     tier = product["tiers"][0]
     for t in product["tiers"]:
-        if grams >= t["from"]:
+        if tw >= t["from"]:
             tier = t
     return round(product["base"] * tier["k"] * grams)
 
@@ -958,7 +962,10 @@ async def _ref_bonus(c, buyer_id: int, total: int):
             _REF_NOTIFY.append({"ref_by": ref_by, "bonus": bonus, "pct": round(ref_percent(invited) * 100)})
 
 
-async def _order_product_total(c, product_id: int, grams: int, lock: bool = False):
+async def _order_product_validate(c, product_id: int, grams: int, lock: bool = False):
+    """Проверяет товар/количество, БЕЗ расчёта цены — чтобы сначала собрать сумму
+    веса по категории «Шишки» для всех позиций заказа, а потом посчитать цену
+    каждой позиции по ступени, соответствующей ОБЩЕМУ весу этой категории."""
     q = "SELECT * FROM products WHERE id=$1 AND active" + (" FOR UPDATE" if lock else "")
     p = await c.fetchrow(q, product_id)
     if not p:
@@ -975,7 +982,20 @@ async def _order_product_total(c, product_id: int, grams: int, lock: bool = Fals
             raise ValueError(f"Вес можно выбрать только из градации: {', '.join(map(str, steps))} г")
     if p["stock"] is not None and grams > p["stock"]:
         raise ValueError("Такого количества нет в наличии — напишите админу")
+    return p
+
+
+async def _order_product_total(c, product_id: int, grams: int, lock: bool = False):
+    p = await _order_product_validate(c, product_id, grams, lock)
     return p, price_for(_product_row(p, {}), grams)
+
+
+async def _shishki_category_ids(c) -> set:
+    """Категории «Шишки» (по названию) — для них вес разных сортов в одном заказе
+    складывается, и скидка по ступени считается от общего веса, а не отдельно
+    по каждой позиции."""
+    rows = await c.fetch("SELECT id FROM categories WHERE name ILIKE '%шиш%'")
+    return {r["id"] for r in rows}
 
 
 def _check_delivery(p, ship: dict):
@@ -1106,17 +1126,25 @@ async def create_order(tg_id: int, items: list, pay: str,
     if not items:
         raise ValueError("Корзина пуста")
     async with _pool.acquire() as c, c.transaction():
-        lines = []           # [(product_row, grams, line_total), ...]
-        allowed = None       # пересечение способов доставки по всем товарам корзины
+        shishki_ids = await _shishki_category_ids(c)
+        raw = []              # [(product_row, grams), ...] — сначала проверяем, без цены
+        allowed = None        # пересечение способов доставки по всем товарам корзины
         for it in items:
-            p, line_total = await _order_product_total(c, int(it["product_id"]), int(it["grams"]), lock=True)
-            lines.append((p, int(it["grams"]), line_total))
+            p = await _order_product_validate(c, int(it["product_id"]), int(it["grams"]), lock=True)
+            raw.append((p, int(it["grams"])))
             da = set(json.loads(p["delivery"]) if p["delivery"] else DEFAULT_DELIVERY)
             allowed = da if allowed is None else (allowed & da)
         if not allowed:
             raise ValueError("У товаров в корзине нет общего способа доставки")
         if (ship or {}).get("method") not in allowed:
             raise ValueError("Этот способ доставки недоступен для заказа")
+        # разные сорта «Шишки» в одном заказе складываются по весу — скидка по
+        # ступени считается от общего веса категории, а не по каждой позиции отдельно
+        shishki_total_g = sum(g for p, g in raw if p["category_id"] in shishki_ids)
+        lines = []             # [(product_row, grams, line_total), ...]
+        for p, g in raw:
+            tier_w = shishki_total_g if p["category_id"] in shishki_ids else g
+            lines.append((p, g, price_for(_product_row(p, {}), g, tier_weight=tier_w)))
         total = sum(lt for _, _, lt in lines)
         u = await c.fetchrow("SELECT * FROM users WHERE tg_id=$1 FOR UPDATE", tg_id)
         cash = 0
