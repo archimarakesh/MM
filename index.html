@@ -4111,7 +4111,7 @@ function renderAdmin(tab) {
             <button class="btn btn-gold" style="width:auto;padding:11px 18px;font-size:12.5px" onclick="saveTtn('${o.id}')">ОК</button>
             ${o.ttn ? `<button class="btn btn-ghost" style="width:auto;padding:11px 14px;font-size:12.5px" onclick="cancelTtn('${o.id}')">✕</button>` : ''}
           </div>` : ''}
-        ${o.status === 2 && o.ship && o.ship.method === 'taxi' ? `<button class="btn btn-gold" style="margin-top:10px;padding:11px" onclick="deliverOrder('${o.id}')">✅ Доставлено</button>` : ''}
+        ${o.status === 1 || o.status === 2 ? `<button class="btn btn-gold" style="margin-top:10px;padding:11px" onclick="deliverOrder('${o.id}')">✅ Доставлено</button>` : ''}
         <button class="btn btn-ghost" style="margin-top:10px;padding:10px;font-size:12.5px;color:var(--danger)" onclick="delOrder('${o.id}')">${orderDelArmed.has(o.id) ? '✕ Точно удалить? Нажмите ещё раз' : 'Удалить заказ'}</button>
       </div></div>`).join('') : '<div class="empty" style="padding:20px"><p>Активных заказов нет</p></div>';
     b.innerHTML = salesStats + cards
