@@ -1846,8 +1846,9 @@ async def shipped_orders() -> list:
 
 
 async def admin_deliver_order(order_code: str) -> dict:
-    """Админ вручную отмечает заказ такси полученным — для этого способа
-    доставки нет автотрекинга статуса, как у Новой Почты."""
+    """Админ вручную отмечает заказ полученным — для доставки такси (и для НП
+    без ТТН) нет автотрекинга статуса. Работает из «в работе» (1) или «в пути»
+    (2) — ТТН/ссылка не обязательны, чтобы завершить заказ вручную."""
     try:
         oid = int(order_code.split("-")[1]) - ORDER_CODE_BASE
     except (IndexError, ValueError):
@@ -1855,9 +1856,9 @@ async def admin_deliver_order(order_code: str) -> dict:
     async with _pool.acquire() as c:
         o = await c.fetchrow(
             "UPDATE orders SET status=3, ship=NULL, received_at=COALESCE(received_at, now()) "
-            "WHERE id=$1 AND status=2 RETURNING user_id", oid)
+            "WHERE id=$1 AND status IN (1, 2) RETURNING user_id", oid)
         if not o:
-            raise ValueError("Заказ не найден или не «в пути»")
+            raise ValueError("Заказ не найден или уже не в работе/в пути")
         return {"user_id": o["user_id"], "code": order_code}
 
 
