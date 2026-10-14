@@ -1651,19 +1651,40 @@ async def sales_stats(period: str = "all") -> dict:
                    COALESCE(SUM(bonus_part),0) AS bonus
             FROM orders WHERE status >= 1{flt}
         """, *args)
+        # заказы до появления корзины (PR #188) не имеют строк в order_items —
+        # только legacy-колонки orders.product/grams/total. INNER JOIN с order_items
+        # их бы молча выбрасывал из статистики, поэтому добавляем их отдельной
+        # веткой (UNION ALL), только если у заказа ДЕЙСТВИТЕЛЬНО нет order_items —
+        # иначе современные одно-позиционные заказы (у них есть оба набора колонок)
+        # посчитались бы дважды.
         grams_row = await c.fetchrow(f"""
-            SELECT COALESCE(SUM(oi.grams),0) AS grams
-            FROM order_items oi JOIN orders o ON o.id = oi.order_id
-            WHERE o.status >= 1{flt.replace('created', 'o.created')}
+            SELECT COALESCE(SUM(g),0) AS grams FROM (
+                SELECT oi.grams AS g
+                FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                WHERE o.status >= 1{flt.replace('created', 'o.created')}
+                UNION ALL
+                SELECT o.grams AS g
+                FROM orders o
+                WHERE o.status >= 1{flt} AND o.grams IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM order_items oi2 WHERE oi2.order_id = o.id)
+            ) x
         """, *args)
         # разбивка по товару — считаем от позиций заказа (order_items), а не
         # от orders.product: в заказе-корзине там сводная строка «товар +N», не название
         by = await c.fetch(f"""
-            SELECT oi.product AS product, COUNT(*) AS cnt, COALESCE(SUM(oi.total),0) AS revenue,
-                   COALESCE(SUM(oi.grams),0) AS grams
-            FROM order_items oi JOIN orders o ON o.id = oi.order_id
-            WHERE o.status >= 1{flt.replace('created', 'o.created')}
-            GROUP BY oi.product ORDER BY revenue DESC LIMIT 20
+            SELECT product, COUNT(*) AS cnt, COALESCE(SUM(revenue),0) AS revenue,
+                   COALESCE(SUM(grams),0) AS grams
+            FROM (
+                SELECT oi.product AS product, oi.total AS revenue, oi.grams AS grams
+                FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                WHERE o.status >= 1{flt.replace('created', 'o.created')}
+                UNION ALL
+                SELECT o.product AS product, o.total AS revenue, o.grams AS grams
+                FROM orders o
+                WHERE o.status >= 1{flt} AND o.product IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM order_items oi2 WHERE oi2.order_id = o.id)
+            ) x
+            GROUP BY product ORDER BY revenue DESC LIMIT 20
         """, *args)
     revenue, bonus = int(tot["revenue"]), int(tot["bonus"])
     real = revenue - bonus
