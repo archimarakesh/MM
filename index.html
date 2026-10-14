@@ -1537,8 +1537,15 @@ function applySnapshot(d) {
     go('topup');
   }
   save(); syncBalance(); renderOrders(); renderGoods(); syncSettings();
-  // открытая карточка заказа тоже должна показать свежий статус/ТТН
-  if (document.getElementById('sheet-order').classList.contains('open')) renderOrderBody(curOrderIdx);
+  // открытая карточка заказа тоже должна показать свежий статус/ТТН — но не когда
+  // покупатель сейчас печатает отзыв в этой же шторке: полная перерисовка стёрла бы
+  // ещё не отправленный текст (тот же принцип, что и в adminSync)
+  const orderSheet = document.getElementById('sheet-order');
+  if (orderSheet.classList.contains('open')) {
+    const ae = document.activeElement;
+    const typing = ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName) && orderSheet.contains(ae);
+    if (!typing) renderOrderBody(curOrderIdx);
+  }
 }
 function backToCasino() {
   if (tg?.openTelegramLink) {
