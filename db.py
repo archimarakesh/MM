@@ -214,6 +214,13 @@ async def init():
             ALTER TABLE products ADD COLUMN IF NOT EXISTS delivery TEXT;
             -- вкусы товара — JSON-массив строк, выбор без влияния на цену/склад
             ALTER TABLE products ADD COLUMN IF NOT EXISTS flavors TEXT;
+            -- себестоимость закупки, ₴ за единицу (грамм/мл/шт) — NULL/0 для своих
+            -- товаров без закупки (например собственного выращивания)
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS cost BIGINT;
+            -- платит ли админ за отправку этого товара сам (НП и т.п.) — влияет на
+            -- учёт расхода на посылку (PARCEL_COST) в бухгалтерии; по умолчанию true,
+            -- чтобы не менять поведение для уже существующих товаров
+            ALTER TABLE products ADD COLUMN IF NOT EXISTS self_ship BOOLEAN NOT NULL DEFAULT true;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS product_id BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pay TEXT;
@@ -572,12 +579,12 @@ def _make_thumb(data_url: str) -> str:
         return data_url
 
 
-def _product_row(r, rating) -> dict:
+def _product_row(r, rating, admin: bool = False) -> dict:
     try:
         photos = len(json.loads(r["photos"])) if r["photos"] else 0
     except (ValueError, TypeError):
         photos = 0
-    return {
+    d = {
         "id": r["id"], "name": r["name"], "sub": r["sub"], "emoji": r["emoji"],
         "genetics": r["genetics"] or "",
         "category_id": r["category_id"],
@@ -593,6 +600,11 @@ def _product_row(r, rating) -> dict:
         "stock": r["stock"],           # None = не ограничено
         "rating": rating.get(r["id"], {"avg": 0, "count": 0, "reviews": 0}),
     }
+    # себестоимость — только в админке, покупателю в каталоге её видно быть не должно
+    if admin:
+        d["cost"] = int(r["cost"]) if r["cost"] is not None else 0
+        d["self_ship"] = bool(r["self_ship"])
+    return d
 
 
 async def product_photo(pid: int, idx: int, size: str = "f") -> str | None:
@@ -609,7 +621,7 @@ async def product_photo(pid: int, idx: int, size: str = "f") -> str | None:
     return item  # старый формат — одна строка
 
 
-async def get_products(include_inactive: bool = False, conn=None) -> list:
+async def get_products(include_inactive: bool = False, conn=None, admin: bool = False) -> list:
     c = conn or _pool
     q = "SELECT * FROM products" + ("" if include_inactive else " WHERE active") + " ORDER BY pos, id"
     rows = await c.fetch(q)
@@ -619,7 +631,7 @@ async def get_products(include_inactive: bool = False, conn=None) -> list:
         "FROM ratings GROUP BY product_id")
     rating = {r["product_id"]: {"avg": round(float(r["avg"]), 1),
                                 "count": r["cnt"], "reviews": r["reviews"]} for r in rrows}
-    return [_product_row(r, rating) for r in rows]
+    return [_product_row(r, rating, admin) for r in rows]
 
 
 async def save_product(d: dict) -> int:
@@ -653,26 +665,30 @@ async def save_product(d: dict) -> int:
         dj = json.dumps(delivery or DEFAULT_DELIVERY)
         flavors = [str(f).strip() for f in (d.get("flavors") or []) if str(f).strip()][:MAX_FLAVORS]
         fj = json.dumps(flavors) if flavors else None
+        cost = d.get("cost")
+        cost = None if cost in (None, "") else max(0, int(cost))
+        self_ship = bool(d.get("self_ship", True))
         if d.get("id"):
             await c.execute("""
                 UPDATE products SET name=$2, sub=$3, emoji=$4, tag=$5, base=$6, tiers=$7,
                                     active=$8, photos=$9, stock=$10, genetics=$11,
                                     unit=$12, min_qty=$13, category_id=$14, bonus_pct=$15, delivery=$16,
-                                    flavors=$17
+                                    flavors=$17, cost=$18, self_ship=$19
                 WHERE id=$1
             """, int(d["id"]), d["name"], d.get("sub", ""), d.get("emoji", "📦"),
                 d.get("tag", ""), int(d["base"]), tiers, bool(d.get("active", True)),
-                pj, stock, genetics, unit, min_qty, category_id, bonus_pct, dj, fj)
+                pj, stock, genetics, unit, min_qty, category_id, bonus_pct, dj, fj, cost, self_ship)
             return int(d["id"])
         return await c.fetchval("""
             INSERT INTO products(name, sub, emoji, tag, base, tiers, photos, stock, genetics,
-                                 unit, min_qty, category_id, bonus_pct, delivery, flavors, pos)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+                                 unit, min_qty, category_id, bonus_pct, delivery, flavors, cost,
+                                 self_ship, pos)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
                    COALESCE((SELECT MAX(pos)+1 FROM products), 0))
             RETURNING id
         """, d["name"], d.get("sub", ""), d.get("emoji", "📦"),
             d.get("tag", ""), int(d["base"]), tiers, pj, stock, genetics, unit, min_qty, category_id,
-            bonus_pct, dj, fj)
+            bonus_pct, dj, fj, cost, self_ship)
 
 
 async def delete_product(pid: int):
@@ -1641,7 +1657,9 @@ async def sales_stats(period: str = "all") -> dict:
     в работу (статус 1+): заказ оплачен ещё на статусе 0, а «в работе» — уже
     подтверждённая продажа, ждать ТТН для учёта не нужно. Бонусные оплаты (промо,
     приветственные) учитываются отдельно: это не живые деньги. Чистая прибыль =
-    реальная выручка минус комиссия на вывод и минус фикс-расход на каждую посылку.
+    реальная выручка минус комиссия на вывод, минус себестоимость проданного
+    (products.cost × вес/кол-во) и минус расход на посылки — только по заказам,
+    где есть хотя бы один товар с self_ship=true (платит за отправку сам админ).
     period фильтрует по дате заказа: 'all' / 'YYYY' / 'YYYY-MM'."""
     flt, args = _sales_period_filter(period)
     async with _pool.acquire() as c:
@@ -1686,16 +1704,42 @@ async def sales_stats(period: str = "all") -> dict:
             ) x
             GROUP BY product ORDER BY revenue DESC LIMIT 20
         """, *args)
+        # себестоимость и расход на отправку — по каждому товару отдельно:
+        # cost (₴/ед., 0 — свой товар без закупки) и self_ship (платит ли админ сам
+        # за посылку с этим товаром). Один заказ = одна посылка: если в заказе есть
+        # хотя бы одна позиция self_ship=true — расход на отправку считаем один раз
+        # на заказ (COUNT DISTINCT order_id), а не по каждой позиции отдельно.
+        # Товар без ссылки (удалён/очень старый заказ) — считаем self_ship=true,
+        # cost=0, чтобы не терять расход «по умолчанию».
+        cs = await c.fetchrow(f"""
+            WITH lines AS (
+                SELECT oi.order_id AS order_id, oi.product_id AS product_id, oi.grams AS grams
+                FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                WHERE o.status >= 1{flt.replace('created', 'o.created')}
+                UNION ALL
+                SELECT o.id AS order_id, o.product_id AS product_id, o.grams AS grams
+                FROM orders o
+                WHERE o.status >= 1{flt} AND o.product_id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM order_items oi2 WHERE oi2.order_id = o.id)
+            )
+            SELECT
+                COALESCE(SUM(l.grams * COALESCE(p.cost, 0)), 0) AS cogs,
+                COUNT(DISTINCT l.order_id) FILTER (WHERE COALESCE(p.self_ship, true)) AS ship_orders
+            FROM lines l LEFT JOIN products p ON p.id = l.product_id
+        """, *args)
     revenue, bonus = int(tot["revenue"]), int(tot["bonus"])
     real = revenue - bonus
     fee = round(real * WITHDRAW_FEE_PCT / 100)
-    shipping = int(tot["cnt"]) * PARCEL_COST
+    cogs = int(cs["cogs"])
+    ship_orders = int(cs["ship_orders"])
+    shipping = ship_orders * PARCEL_COST
     return {
         "count": tot["cnt"], "revenue": revenue, "grams": int(grams_row["grams"]),
         "bonus": bonus, "real": real,
         "fee_pct": WITHDRAW_FEE_PCT, "fee": fee,
-        "parcel_cost": PARCEL_COST, "shipping": shipping,
-        "profit": real - fee - shipping,
+        "parcel_cost": PARCEL_COST, "shipping": shipping, "ship_orders": ship_orders,
+        "cogs": cogs,
+        "profit": real - fee - shipping - cogs,
         "period": (period or "all").strip() or "all",
         "by_product": [{"product": b["product"], "cnt": b["cnt"],
                         "revenue": int(b["revenue"]), "grams": int(b["grams"])} for b in by],

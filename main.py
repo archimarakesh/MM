@@ -2595,7 +2595,7 @@ async def api_referrals(request: Request):
 async def api_admin_data(request: Request):
     admin_user(request)
     return {
-        "products": await db.get_products(include_inactive=True),
+        "products": await db.get_products(include_inactive=True, admin=True),
         "categories": await db.get_categories(include_inactive=True),
         "grow_plans": await db.get_grow_plans(include_inactive=True),
         "settings": await db.get_settings(),
@@ -2648,7 +2648,7 @@ async def api_admin_product(request: Request):
         photo = f"{APP_URL}/photo/{pid}/0" if (APP_URL and b.get("photos")) else None
         asyncio.create_task(broadcast_all(
             caption, photo=photo, button=("🛒 Открыть Magic Market", PROMO_BUTTON_URL)))
-    return {"id": pid, "products": await db.get_products(include_inactive=True)}
+    return {"id": pid, "products": await db.get_products(include_inactive=True, admin=True)}
 
 
 @app.post("/api/admin/product/delete")
@@ -2656,7 +2656,7 @@ async def api_admin_product_delete(request: Request):
     admin_user(request)
     b = await request.json()
     await db.delete_product(int(b.get("id", 0)))
-    return {"products": await db.get_products(include_inactive=True)}
+    return {"products": await db.get_products(include_inactive=True, admin=True)}
 
 
 @app.post("/api/admin/product/move")
@@ -2670,7 +2670,7 @@ async def api_admin_product_move(request: Request):
         await db.move_product(pint(b.get("id")), direction)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {"products": await db.get_products(include_inactive=True)}
+    return {"products": await db.get_products(include_inactive=True, admin=True)}
 
 
 @app.post("/api/admin/category")
@@ -2690,7 +2690,7 @@ async def api_admin_category_delete(request: Request):
     b = await request.json()
     await db.delete_category(int(b.get("id", 0)))
     return {"categories": await db.get_categories(include_inactive=True),
-            "products": await db.get_products(include_inactive=True)}
+            "products": await db.get_products(include_inactive=True, admin=True)}
 
 
 @app.post("/api/admin/settings")

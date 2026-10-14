@@ -1190,6 +1190,13 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
   </div>
   <div class="field"><label id="peTiersLabel">Градация цены, ₴ за грамм</label><div id="peTiers"></div></div>
   <div class="field"><label id="peBonusPctLabel">Оплата бонусами, %</label><input id="peBonusPct" inputmode="numeric" placeholder="как в настройках по умолчанию"></div>
+  <div class="field"><label>Себестоимость закупки, ₴ за единицу</label>
+    <input id="peCost" inputmode="numeric" placeholder="0 — свой товар, без закупки">
+    <p class="note" style="margin:4px 0 0">Не видно покупателям — только для расчёта прибыли в бухгалтерии.</p>
+  </div>
+  <div class="pay-opts" style="grid-template-columns:1fr">
+    <div class="pay-opt" id="peSelfShip" onclick="peToggleSelfShip()">Я сам плачу за отправку<small>влияет на расход на посылку в бухгалтерии</small></div>
+  </div>
   <input type="file" id="peFile" accept="image/*" style="display:none">
   <div class="pay-opts" style="grid-template-columns:1fr">
     <div class="pay-opt" id="peActive" onclick="peToggleActive()">Товар активен<small>показывается в каталоге</small></div>
@@ -3950,6 +3957,7 @@ async function deleteAccount() {
 
 /* ═══════════ Админка ═══════════ */
 let AD = null, adminTab = 'products', curPe = null, peActiveVal = true, peUnit = 'g', peTiersArr = [];
+let peSelfShipVal = true;
 let peDeliveryVal = ['np', 'taxi'];
 // админка сгруппирована: группа сверху → её подвкладки под ней (меню/подменю)
 const ADMIN_TABS = {
@@ -4075,7 +4083,8 @@ function renderAdmin(tab) {
           <div><b>${fmt(sa.revenue || 0)} ₴</b><span>выручка всего · ${fmt(sa.grams || 0)} г</span></div>
           <div><b style="color:var(--gold-soft)">${fmt(sa.real || 0)} ₴</b><span>реальными деньгами</span></div>
           <div><b style="color:var(--muted)">${fmt(sa.bonus || 0)} ₴</b><span>бонусами/промо (не деньги)</span></div>
-          <div><b style="color:var(--danger)">−${fmt((sa.fee || 0) + (sa.shipping || 0))} ₴</b><span>вывод ${sa.fee_pct || 10}% (${fmt(sa.fee || 0)}) + НП ${fmt(sa.parcel_cost || 80)}×${sa.count || 0} (${fmt(sa.shipping || 0)})</span></div>
+          <div><b style="color:var(--danger)">−${fmt(sa.cogs || 0)} ₴</b><span>себестоимость закупки</span></div>
+          <div><b style="color:var(--danger)">−${fmt((sa.fee || 0) + (sa.shipping || 0))} ₴</b><span>вывод ${sa.fee_pct || 10}% (${fmt(sa.fee || 0)}) + НП ${fmt(sa.parcel_cost || 80)}×${sa.ship_orders || 0} (${fmt(sa.shipping || 0)})</span></div>
         </div>
         <div style="margin-top:11px;padding-top:11px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline">
           <span style="font-size:11px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;font-weight:700">Чистая прибыль</span>
@@ -4454,6 +4463,9 @@ function openPedit(id) {
   document.getElementById('peCategory').value = curPe?.category_id || '';
   document.getElementById('peStock').value = curPe ? (curPe.stock ?? '') : '';
   document.getElementById('peFlavors').value = (curPe?.flavors || []).join(', ');
+  document.getElementById('peCost').value = curPe && curPe.cost ? curPe.cost : '';
+  peSelfShipVal = curPe ? curPe.self_ship !== false : true;
+  syncPeSelfShip();
   peUnit = curPe?.unit || 'g';
   document.getElementById('peMin').value = curPe && curPe.min_qty != null ? curPe.min_qty : '';
   peDelReset();
@@ -4605,6 +4617,8 @@ document.getElementById('peFile').addEventListener('change', e => {
 });
 function peToggleActive() { peActiveVal = !peActiveVal; syncPeActive(); haptic('light'); }
 function syncPeActive() { document.getElementById('peActive').classList.toggle('sel', peActiveVal); }
+function peToggleSelfShip() { peSelfShipVal = !peSelfShipVal; syncPeSelfShip(); haptic('light'); }
+function syncPeSelfShip() { document.getElementById('peSelfShip').classList.toggle('sel', peSelfShipVal); }
 function peToggleDelivery(m) {
   if (peDeliveryVal.includes(m)) {
     if (peDeliveryVal.length <= 1) return toast('Должен остаться хотя бы один способ доставки');
@@ -4652,6 +4666,9 @@ async function savePedit() {
       photos: pePhotos.map(x => x.payload),
       stock: document.getElementById('peStock').value.trim() === ''
         ? null : Math.max(0, parseInt(document.getElementById('peStock').value, 10) || 0),
+      cost: document.getElementById('peCost').value.trim() === ''
+        ? 0 : Math.max(0, parseInt(document.getElementById('peCost').value, 10) || 0),
+      self_ship: peSelfShipVal,
     });
     AD.products = r.products;
     P = r.products.filter(x => x.active).map((p, i) => ({ ...p, grad: GRADS[i % GRADS.length] }));
