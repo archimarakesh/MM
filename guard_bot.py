@@ -49,6 +49,10 @@ GUARD_BOT_TOKEN = os.getenv("GUARD_BOT_TOKEN", "")
 GUARD_ADMIN_ID = int(os.getenv("GUARD_ADMIN_ID", os.getenv("ADMIN_ID", "0")) or 0)
 RULES_CHAT_ID = os.getenv("RULES_CHAT_ID", "")
 RULES_TIMEOUT = int(os.getenv("RULES_TIMEOUT", "600") or 600)
+# свой магазинный бот (BOT_TOKEN) тоже шлёт сообщения в чат (промо-рассылки) —
+# его не модерируем. ID бота — первая часть токена до ':', без похода в API.
+_SHOP_BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+MAIN_BOT_ID = int(_SHOP_BOT_TOKEN.split(":")[0]) if ":" in _SHOP_BOT_TOKEN else 0
 # канал для /stats (подписки/отписки). По умолчанию берём промо/бонус-канал.
 STATS_CHANNEL_ID = os.getenv("STATS_CHANNEL_ID",
                              os.getenv("PROMO_CHANNEL_ID", os.getenv("BONUS_CHANNEL_ID", "")))
@@ -171,6 +175,21 @@ def bad_link(text: str) -> bool:
         tl = tok.lower()
         if not any(w in tl for w in WHITELIST):
             return True
+    return False
+
+
+def has_scam_buttons(message) -> bool:
+    """Инлайн-кнопки со ссылками — это возможность только бота: обычный
+    пользователь не может прицепить их к своему сообщению. Если сообщение
+    прислал ЧУЖОЙ бот и в нём такие кнопки — почти наверняка скам-реклама
+    (лже-airdrop, «забрать бонус» и т.п., как на скрине жалобы)."""
+    kb = getattr(message, "reply_markup", None)
+    rows = getattr(kb, "inline_keyboard", None) or []
+    for row in rows:
+        for btn in row:
+            url = getattr(btn, "url", None)
+            if url and not any(w in url.lower() for w in WHITELIST):
+                return True
     return False
 
 
@@ -1578,9 +1597,30 @@ async def run(notify=None, on_ban=None, on_unban=None):
             return
         if RULES_CHAT_ID and str(message.chat.id) != str(RULES_CHAT_ID):
             return
-        if not message.from_user or message.sender_chat or message.from_user.is_bot:
-            return  # каналы/анонимные админы/боты не модерируем
+        if not message.from_user or message.sender_chat:
+            return  # каналы/анонимные админы не модерируем
         uid = message.from_user.id
+        if message.from_user.is_bot:
+            if uid == MAIN_BOT_ID:
+                return  # свой магазинный бот (промо-рассылки) — не модерируем
+            # чужой бот в чате: единственный надёжный признак скама — инлайн-
+            # кнопки со ссылками (обычный юзер их прицепить не может). Нашли —
+            # баним сразу, без страйков/мутов (это не человек, предупреждать некого).
+            if has_scam_buttons(message):
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                try:
+                    await bot.ban_chat_member(message.chat.id, uid)
+                except Exception:
+                    log.exception("Бан бота-спамера %s не прошёл", uid)
+                await _universal_ban(uid, "бот со скам-кнопками (реклама)")
+                await log_action("🤖", "Бан бота (скам-кнопки, авто)", message.chat,
+                                 "автомодерация", message.from_user.full_name, uid,
+                                 "инлайн-кнопки со сторонними ссылками",
+                                 message.text or message.caption)
+            return  # прочих ботов без скам-кнопок не трогаем
         # очки — всем, кроме владельца (он платит призы); модерация админов
         # по-прежнему не касается
         if uid != GUARD_ADMIN_ID:
