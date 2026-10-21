@@ -271,7 +271,13 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 .wchip.sel{border-color:var(--gold);color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d);
   box-shadow:0 0.375rem 1rem rgba(212,175,55,.25)}
 /* двухуровневое меню админки: группы сверху, подвкладки под ними */
-.cat-tabs{display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.875rem 0 1.125rem;overflow-x:auto;flex-wrap:nowrap;
+/* padding вместо части margin: overflow-x:auto молча включает и overflow-y:auto
+   (т.к. overflow-y по умолчанию 'visible' не сочетается с не-'visible' overflow-x),
+   из-за этого золотистое свечение .wchip.sel (box-shadow) обрезалось плоско по
+   нижней/верхней границе контейнера — отступ снизу/сверху даёт свечению место,
+   прежде чем сработает неявная обрезка */
+.cat-tabs{display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.125rem 0 0;padding:0.75rem 0.125rem 1.25rem;
+  overflow-x:auto;flex-wrap:nowrap;
   -ms-overflow-style:none;scrollbar-width:none}
 .cat-tabs::-webkit-scrollbar{display:none}
 .cat-tabs .wchip{flex:none}
