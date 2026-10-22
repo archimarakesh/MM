@@ -274,13 +274,16 @@ img.rev-ava{background:rgba(255,255,255,.06)}
 /* padding вместо части margin: overflow-x:auto молча включает и overflow-y:auto
    (т.к. overflow-y по умолчанию 'visible' не сочетается с не-'visible' overflow-x),
    из-за этого золотистое свечение .wchip.sel (box-shadow) обрезалось плоско по
-   краям контейнера — padding даёт свечению место со всех сторон, прежде чем
-   сработает неявная обрезка. По бокам компенсируем padding отрицательным
-   margin (= padding #app) — скролл уходит до края экрана, а первый чип
-   остаётся на том же месте, что и заголовок над ним */
-.cat-tabs{display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.125rem -1rem 0;padding:0.75rem 1rem 1.25rem;
+   краям контейнера — padding сверху/снизу даёт свечению место, прежде чем
+   сработает неявная обрезка. По бокам padding контейнера не годится: в части
+   браузеров (подтвердилось на реальном устройстве в Telegram) padding в начале
+   скролл-контейнера игнорируется при обрезке overflow — вместо него ::before/
+   ::after добавляют настоящие flex-элементы-распорки по краям, это уже часть
+   скроллируемого контента и обрезаться не может ни в одном движке */
+.cat-tabs{display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.125rem 0 0;padding:0.75rem 0 1.25rem;
   overflow-x:auto;flex-wrap:nowrap;
   -ms-overflow-style:none;scrollbar-width:none}
+.cat-tabs::before,.cat-tabs::after{content:'';flex:0 0 0.5rem}
 .cat-tabs::-webkit-scrollbar{display:none}
 .cat-tabs .wchip{flex:none}
 .admin-groups{display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.625rem 0 0.5rem}
