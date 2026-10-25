@@ -647,118 +647,13 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 
 .lot-top{display:flex;align-items:center;gap:12px;margin:8px 0 12px}
 .lot-title{flex:1;font-family:'Cinzel',serif;font-weight:800;font-size:20px;letter-spacing:.04em;background:linear-gradient(180deg,#fff6dc,var(--gold-soft) 50%,#b8891f);-webkit-background-clip:text;background-clip:text;color:transparent}
-.lot-timer{font-size:12px;font-weight:800;color:#fff5da;background:linear-gradient(120deg,rgba(212,175,55,.18),rgba(184,137,31,.06));border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .lot-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:5px;margin-bottom:14px}
 .lot-tabs-2{grid-template-columns:repeat(2,1fr)}
 .wallet-sec{display:none}
 .wallet-sec.active{display:block;animation:lotIn .3s var(--ease)}
 .lot-tab{position:relative;text-align:center;padding:9px 6px;border-radius:10px;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;transition:.2s}
 .lot-tab.active{color:#140f03;background:linear-gradient(135deg,#f0d47a,#c9971d)}
-.lot-badge{position:absolute;top:2px;right:6px;min-width:15px;height:15px;padding:0 4px;border-radius:99px;background:#e07a5f;color:#fff;font-size:9px;font-weight:800;display:none;place-items:center}
-.lot-sec{display:none;animation:lotIn .35s var(--ease)}
-.lot-sec.active{display:block}
 @keyframes lotIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.lot-card{background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:20px;padding:16px;margin-bottom:12px;position:relative;overflow:hidden}
-.lot-eyebrow{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:10px}
-.lot-podium{display:flex;justify-content:center;align-items:flex-end;gap:10px;margin-top:6px}
-.lot-pz{flex:1;max-width:120px;text-align:center}
-.lot-pz .disc{position:relative;margin:0 auto;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 42% 34%,#2a2013,#0e0b07);border:2px dashed rgba(212,175,55,.5);box-shadow:0 10px 22px rgba(0,0,0,.5),inset 0 0 18px rgba(0,0,0,.6)}
-.lot-pz.p1 .disc{width:104px;height:104px;border:2px solid var(--gold-soft);background:radial-gradient(circle at 42% 34%,#3b2c16,#120d07);box-shadow:0 14px 28px rgba(212,175,55,.3),0 0 0 7px rgba(212,175,55,.08),inset 0 0 18px rgba(0,0,0,.55)}
-.lot-pz.p2 .disc,.lot-pz.p3 .disc{width:86px;height:86px}
-.lot-pz .amt{font-family:'Cinzel',serif;font-weight:800;line-height:1;background:linear-gradient(180deg,#fff6dc,#b8891f);-webkit-background-clip:text;background-clip:text;color:transparent}
-.lot-pz.p1 .amt{font-size:22px}.lot-pz.p2 .amt,.lot-pz.p3 .amt{font-size:17px}
-.lot-pz .cur{font-size:10px;color:var(--muted);margin-top:2px}
-.lot-pz .plc{margin-top:8px;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--gold-soft)}
-.lot-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.lot-st{background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:16px;padding:13px;text-align:center}
-.lot-st b{display:block;font-size:24px;font-weight:800;color:#fff5da;font-variant-numeric:tabular-nums;line-height:1}
-.lot-st span{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-.lot-nums{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
-.lot-num{font-family:'Cinzel',serif;font-weight:800;font-size:18px;letter-spacing:.1em;padding:8px 14px;border-radius:12px;color:#120d05;background:linear-gradient(135deg,#fbe9ab,#b8891f);box-shadow:0 8px 16px rgba(184,137,31,.4)}
-.lot-num::before{content:"№";font-family:'Manrope';font-size:9px;opacity:.6;margin-right:2px;vertical-align:2px}
-.lot-bar{height:8px;border-radius:99px;background:rgba(255,255,255,.06);overflow:hidden;margin-top:14px}
-.lot-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#b8891f,var(--gold-soft))}
-.lot-hint{margin-top:8px;text-align:center;font-size:12.5px;color:var(--muted)}
-.lot-hint b{color:var(--gold-soft)}
-.lot-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:14px;border:none;border-radius:99px;font-family:'Manrope';font-weight:800;font-size:14.5px;color:#120d05;background:linear-gradient(135deg,#fbe9ab,#b8891f);cursor:pointer;box-shadow:0 10px 22px rgba(184,137,31,.32)}
-.lot-btn:active{transform:scale(.98)}
-.lot-btn.ghost{background:transparent;color:var(--gold-soft);border:1px solid var(--line);box-shadow:none}
-.lot-steps{display:flex;flex-direction:column;gap:10px}
-.lot-step{display:flex;gap:12px;align-items:flex-start;background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:16px;padding:13px}
-.lot-step .n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;color:#120d05;background:linear-gradient(135deg,var(--gold-soft),#b8891f)}
-.lot-step .tx{font-size:13.5px;line-height:1.4}
-.lot-step .tx b{color:var(--gold-soft)}
-.lot-step .tx span{display:block;color:var(--muted);font-size:12px;margin-top:2px}
-.lot-reflist{display:flex;flex-direction:column;gap:8px}
-.lot-ref{display:flex;align-items:center;gap:11px;background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:14px;padding:11px}
-.lot-ref .av{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:rgba(212,175,55,.12);color:var(--gold-soft);font-size:14px}
-.lot-ref .nm{flex:1;min-width:0}
-.lot-ref .nm b{display:block;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lot-ref .nm span{font-size:11.5px;color:var(--muted)}
-.lot-pill{flex:none;font-size:11px;font-weight:800;padding:5px 10px;border-radius:99px;white-space:nowrap}
-.lot-pill.ok{background:rgba(127,212,138,.14);color:#7fd48a}
-.lot-pill.mid{background:rgba(230,187,84,.14);color:#e6bb54}
-.lot-links{display:flex;flex-direction:column;gap:9px}
-.lot-lnk{display:flex;align-items:center;gap:13px;background:linear-gradient(180deg,var(--card-2),var(--card));border:1px solid var(--line);border-radius:14px;padding:14px;text-decoration:none;color:var(--txt)}
-.lot-lnk .ic{flex:none;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:18px;background:linear-gradient(135deg,rgba(212,175,55,.2),rgba(184,137,31,.1));border:1px solid var(--line)}
-.lot-lnk .tx{flex:1}.lot-lnk .tx b{display:block;font-size:14px}.lot-lnk .tx span{font-size:12px;color:var(--muted)}
-.lot-lnk .arr{color:var(--muted);font-size:18px}
-.lot-empty{text-align:center;color:var(--muted);font-size:12.5px;padding:20px 8px;line-height:1.5}
-.lot-winbanner{margin-top:12px;padding:13px;border-radius:14px;text-align:center;background:linear-gradient(135deg,rgba(212,175,55,.16),rgba(184,137,31,.06));border:1px solid var(--gold-soft)}
-.lot-winbanner b{color:var(--gold-soft)}
-#lotOverlay{position:fixed;inset:0;z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;padding:32px 22px;text-align:center;background:radial-gradient(120% 80% at 50% 20%,rgba(30,22,8,.98),rgba(4,4,4,.99))}
-#lotOverlay.on{display:flex}
-.lot-draw-eye{font-family:'Cinzel',serif;font-weight:800;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);font-size:11px}
-.lot-draw-title{font-family:'Cinzel',serif;font-weight:800;font-size:26px;margin-top:6px;background:linear-gradient(180deg,#fff6dc,var(--gold-soft));-webkit-background-clip:text;background-clip:text;color:transparent}
-.lot-reel{margin:28px 0 18px}
-.lot-reel .pb{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-soft);margin-bottom:12px}
-.lot-digits{display:flex;justify-content:center;gap:7px}
-.lot-dg{width:46px;height:62px;border-radius:12px;overflow:hidden;position:relative;background:linear-gradient(180deg,#241d12,#0d0a07);border:1px solid rgba(212,175,55,.28);box-shadow:inset 0 8px 14px rgba(0,0,0,.7),inset 0 -8px 14px rgba(0,0,0,.7),0 2px 6px rgba(0,0,0,.5);
-  -webkit-mask-image:linear-gradient(transparent,#000 22%,#000 78%,transparent);mask-image:linear-gradient(transparent,#000 22%,#000 78%,transparent)}
-.lot-dg::after{content:"";position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:62%;pointer-events:none;
-  box-shadow:inset 0 0 0 1px rgba(255,240,196,.14);border-radius:6px}
-.lot-dg .col{position:absolute;left:0;right:0;top:0;display:flex;flex-direction:column;align-items:center;font-family:'Cinzel',serif;font-weight:800;font-size:33px;color:#fff5da;will-change:transform}
-.lot-dg .col.spinning{filter:blur(1.5px)}
-.lot-dg .col div{height:62px;display:grid;place-items:center;width:100%}
-.lot-rev-av{width:4rem;height:4rem;border-radius:50%;margin:0 auto 0.6rem;overflow:hidden;display:grid;place-items:center;
-  background:radial-gradient(circle at 40% 32%,#3b2c16,#120d07);border:2px solid var(--gold-soft);
-  box-shadow:0 0.5rem 1.2rem rgba(0,0,0,.55),0 0 0 0.35rem rgba(212,175,55,.1);
-  font-family:'Cinzel',serif;font-weight:800;font-size:1.6rem;color:var(--gold-soft)}
-.lot-rev-av img{width:100%;height:100%;object-fit:cover}
-.lot-row-av{position:relative;overflow:visible}
-.lot-row-av img{width:100%;height:100%;border-radius:50%;object-fit:cover}
-.lot-place-badge{position:absolute;right:-3px;bottom:-3px;min-width:15px;height:15px;padding:0 3px;border-radius:99px;
-  display:grid;place-items:center;font-family:'Manrope';font-size:9px;font-weight:800;font-style:normal;color:#120d05;
-  background:linear-gradient(135deg,var(--gold-soft),#b8891f);box-shadow:0 1px 3px rgba(0,0,0,.5)}
-/* подиум победителей */
-.lot-wp{display:flex;justify-content:center;align-items:flex-end;gap:0.5rem;margin-top:0.9rem}
-.lot-wp .wcol{flex:1;max-width:7rem;display:flex;flex-direction:column;align-items:center;text-align:center}
-.lot-wp .wav{width:3rem;height:3rem;border-radius:50%;overflow:hidden;display:grid;place-items:center;margin-bottom:0.3rem;
-  background:radial-gradient(circle at 40% 32%,#3b2c16,#120d07);border:2px solid rgba(212,175,55,.6);
-  font-family:'Cinzel',serif;font-weight:800;color:var(--gold-soft);font-size:1.1rem}
-.lot-wp .wcol.p1 .wav{width:3.9rem;height:3.9rem;border-color:var(--gold-soft);box-shadow:0 0 0 0.3rem rgba(212,175,55,.12)}
-.lot-wp .wav img{width:100%;height:100%;object-fit:cover}
-.lot-wp .wname{font-size:0.78rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:6.6rem}
-.lot-wp .wstep{margin-top:0.35rem;width:100%;border-radius:0.55rem 0.55rem 0 0;display:flex;flex-direction:column;align-items:center;gap:0.1rem;
-  padding:0.4rem 0.25rem 0.5rem;background:linear-gradient(180deg,rgba(212,175,55,.2),rgba(184,137,31,.05));
-  border:1px solid rgba(212,175,55,.3);border-bottom:none}
-.lot-wp .wcol.p1 .wstep{height:5rem}.lot-wp .wcol.p2 .wstep{height:3.7rem}.lot-wp .wcol.p3 .wstep{height:2.9rem}
-.lot-wp .wmedal{font-size:1.15rem;line-height:1}
-.lot-wp .wprize{font-family:'Cinzel',serif;font-weight:800;font-size:0.92rem;color:var(--gold-soft);line-height:1}
-.lot-wp .wnum{font-size:0.6rem;color:var(--muted)}
-.lot-finale{display:none;margin-top:0.4rem;width:100%;max-width:22rem;text-align:center}
-.lot-finale.show{display:block;animation:lotIn .5s var(--ease)}
-.lot-fin-title{font-family:'Cinzel',serif;font-weight:800;font-size:1.35rem;color:var(--gold-soft)}
-.lot-reel.hide,.lot-reveal.hide{display:none!important}
-.lot-reveal{margin-top:20px;opacity:0;transform:translateY(8px);transition:.5s var(--ease)}
-.lot-reveal.show{opacity:1;transform:none}
-.lot-reveal .who{font-size:18px;font-weight:800;color:#fff5da}
-.lot-reveal .prize{font-family:'Cinzel',serif;font-weight:800;font-size:24px;margin-top:4px;background:linear-gradient(180deg,#fff6dc,#b8891f);-webkit-background-clip:text;background-clip:text;color:transparent}
-.lot-reveal .me{margin-top:6px;display:inline-block;font-size:12px;font-weight:800;color:#120d05;background:linear-gradient(135deg,var(--gold-soft),#b8891f);padding:4px 11px;border-radius:99px}
-#lotClose{margin-top:28px;opacity:0;transition:.4s;max-width:260px}
-#lotClose.show{opacity:1}
-#lotConfetti{position:fixed;inset:0;z-index:201;pointer-events:none;display:none}
-#lotConfetti.on{display:block}
 </style>
 </head>
 <body>
@@ -832,25 +727,6 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
     <h1 class="page-title">История <em>покупок</em></h1>
     <p class="page-sub">Статусы заказов и трек-номера Новой Почты.</p>
     <div id="ordersList"></div>
-  </section>
-
-  <!-- ══ РУЛЕТКА (лотерея) ══ -->
-  <section class="view" id="view-lottery">
-    <div class="lot-top">
-      <div class="icon-btn" onclick="go('shop')" aria-label="Назад">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      </div>
-      <div class="lot-title">Рулетка</div>
-      <div class="lot-timer" id="lotTimerChip"><span id="lotTimerText">—</span></div>
-    </div>
-    <div class="lot-tabs lot-tabs-2">
-      <div class="lot-tab active" data-lt="draw" onclick="lotGo('draw')">Розыгрыш</div>
-      <div class="lot-tab" data-lt="tasks" onclick="lotGo('tasks')">Задания<i class="lot-badge" id="lotTasksBadge"></i></div>
-    </div>
-    <div class="lot-body">
-      <div class="lot-sec active" id="lot-draw"></div>
-      <div class="lot-sec" id="lot-tasks"></div>
-    </div>
   </section>
 
   <!-- ══ МОИ РЕФЕРАЛЫ ══ -->
@@ -1297,25 +1173,6 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
 
 <div id="toast"></div>
 
-<!-- оверлей жеребьёвки рулетки -->
-<div id="lotOverlay">
-  <div class="lot-draw-eye">Magic Market</div>
-  <div class="lot-draw-title">Розыгрыш призов</div>
-  <div class="lot-reel">
-    <div class="pb" id="lotReelPlace"></div>
-    <div class="lot-digits" id="lotReelDigits"></div>
-  </div>
-  <div class="lot-reveal" id="lotReveal">
-    <div class="lot-rev-av" id="lotRevAv"></div>
-    <div class="who" id="lotRevWho"></div>
-    <div class="prize" id="lotRevPrize"></div>
-    <div class="me" id="lotRevMe" style="display:none">Это вы 🎉</div>
-  </div>
-  <div class="lot-finale" id="lotFinale"></div>
-  <button class="lot-btn" id="lotClose">Забрать и закрыть</button>
-</div>
-<canvas id="lotConfetti"></canvas>
-
 <script>
 /* ═══════════ Telegram ═══════════ */
 const tg = window.Telegram?.WebApp;
@@ -1617,7 +1474,7 @@ async function adminSync() {
   // раскрыт список приглашённых у реферера — не сбиваем его авто-перерисовкой
   if (document.querySelector('#adminBody .ref-detail:not(.hide)')) return;
   // разделы с собственной загрузкой/состоянием (поиск, открытая карточка) — не трогаем
-  if (adminTab === 'users' || adminTab === 'lottery') return;
+  if (adminTab === 'users') return;
   adminSyncing = true;
   try {
     AD = await API.call('/api/admin/data');
@@ -1639,9 +1496,8 @@ function connectWS() {
     clearInterval(wsPing);
     wsPing = setInterval(() => { try { sock.send('p'); } catch (e) {} }, 25000);  // держим канал живым
   };
-  sock.onmessage = (ev) => {
+  sock.onmessage = () => {
     softSync(true); adminSync();
-    try { const d = JSON.parse(ev.data); if (d && (d.t === 'lottery_draw' || d.t === 'lottery_start')) loadLottery(); } catch (e) {}
   };
   sock.onclose = () => { if (ws === sock) ws = null; clearInterval(wsPing); scheduleWS(); };
   sock.onerror = () => { try { sock.close(); } catch (e) {} };
@@ -1679,356 +1535,8 @@ function go(v) {
   if (v === 'topup') openWallet('topup');
   if (v === 'egrow') renderEgrow();
   if (v === 'referrals') renderReferrals();
-  if (v === 'lottery') { lotResumeAudio(); loadLottery(); }
   const sc = document.getElementById('views'); if (sc) sc.scrollTop = 0;   // скроллер, не окно
   revealNow(el);   // синхронно — иначе кадр с opacity:0 успевает отрисоваться и раздел мигает
-}
-
-/* ═══════════ Рулетка (лотерея) ═══════════ */
-let LOT = null, lotDeadline = null, lotTimerInt = null, lotTab = 'draw';
-const lotPad5 = n => String(n).padStart(5, '0');
-const LOT_SEEN = 'mm_lottery_seen_round';
-
-function lotGo(t) {
-  haptic('light'); lotResumeAudio(); lotTab = t;
-  document.querySelectorAll('.lot-sec').forEach(x => x.classList.remove('active'));
-  document.getElementById('lot-' + t).classList.add('active');
-  document.querySelectorAll('.lot-tab').forEach(x => x.classList.toggle('active', x.dataset.lt === t));
-}
-async function loadLottery() {
-  if (!lotTimerInt) lotTimerInt = setInterval(lotTick, 1000);
-  try { LOT = await API.call('/api/lottery/state', {}); renderLottery(); maybeLotAnimate(); }
-  catch (e) { document.getElementById('lot-draw').innerHTML = `<div class="lot-empty">${esc(e.message || 'Розыгрыш недоступен')}</div>`; }
-}
-function lotTick() {
-  const el = document.getElementById('lotTimerText'); if (!el) return;
-  if (!LOT || !LOT.running) { el.textContent = 'не запущен'; return; }
-  if (!lotDeadline) { el.textContent = '—'; return; }
-  const ms = lotDeadline - Date.now();
-  if (ms <= 0) { el.textContent = 'идёт розыгрыш'; return; }
-  const d = Math.floor(ms / 864e5), h = Math.floor(ms % 864e5 / 36e5), m = Math.floor(ms % 36e5 / 6e4), s = Math.floor(ms % 6e4 / 1e3);
-  el.textContent = (d ? d + 'д ' : '') + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-}
-function renderLottery() {
-  if (!LOT) return;
-  lotDeadline = LOT.round.deadline ? new Date(LOT.round.deadline).getTime() : null;
-  renderLotDraw(); renderLotTasks(); lotTick();
-}
-function lotPodium(prizes) {
-  const order = [1, 0, 2], places = ['2 место', '1 место', '3 место'], cls = ['p2', 'p1', 'p3'];
-  const podium = `<div class="lot-podium">` + order.map((idx, i) => {
-    if (prizes[idx] == null) return '';
-    return `<div class="lot-pz ${cls[i]}"><div class="disc"><div><div class="amt">${fmt(prizes[idx])}</div><div class="cur">₴</div></div></div><div class="plc">${places[i]}</div></div>`;
-  }).join('') + `</div>`;
-  // призы за 4-е место и ниже — отдельной строкой под пьедесталом
-  const extras = (prizes || []).slice(3).map((p, i) => `<b>${i + 4}-е</b> ${fmt(p)} ₴`).join(' · ');
-  return podium + (extras ? `<div class="lot-hint" style="text-align:center;margin-top:8px">и ${extras}</div>` : '');
-}
-function renderLotDraw() {
-  const me = LOT.me, st = LOT.stats, need = me.need || 3;
-  // розыгрыш ещё не запущен — показываем анонс с призами и без счётчиков
-  if (!LOT.running) {
-    let result = '';
-    const last = LOT.last_result;
-    if (last && last.winners.length) {
-      result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${lotWinPodium(last.winners)}</div>`;
-    }
-    document.getElementById('lot-draw').innerHTML =
-      `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · бонусом на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
-      `<div class="lot-card" style="text-align:center"><div class="lot-eyebrow">Розыгрыш скоро</div><div class="lot-hint" style="margin-top:0">Старт объявим отдельно. Заранее <b>вступи в чат</b>. Друзей зови <b>во время розыгрыша</b> — засчитываются только приглашённые в период розыгрыша.</div><button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Подготовиться →</button></div>` +
-      result;
-    return;
-  }
-  let my;
-  if (me.numbers.length) {
-    my = `<div class="lot-nums">${me.numbers.map(n => `<div class="lot-num">${lotPad5(n)}</div>`).join('')}</div>` + lotProgress(me);
-  } else {
-    let msg = me.eligible
-      ? `Приглашай друзей: до первого числа осталось <b>${need - (me.confirmed % need || 0)}</b> из ${need}.`
-      : `Сначала <b>вступи в чат</b> — это условие участия.`;
-    my = `<div class="lot-hint">${msg}</div>` + lotProgress(me) +
-      `<button class="lot-btn" style="margin-top:14px" onclick="lotGo('tasks')">Выполнить задания →</button>`;
-  }
-  let result = '';
-  const last = LOT.last_result;
-  if (last && last.winners.length) {
-    const mine = last.winners.filter(w => w.is_me);
-    let banner = '';
-    if (mine.length) { const sum = mine.reduce((a, w) => a + w.prize, 0); banner = `<div class="lot-winbanner">🎉 Вы выиграли <b>${fmt(sum)} ₴</b> в прошлом розыгрыше! Приз зачислен бонусом — на покупки в магазине и игру в казино.</div>`; }
-    result = `<div class="lot-card"><div class="lot-eyebrow">Итоги прошлого розыгрыша</div>${banner}${lotWinPodium(last.winners)}</div>`;
-  }
-  document.getElementById('lot-draw').innerHTML =
-    `<div class="lot-card"><div class="lot-eyebrow">Призовой фонд · бонусом на баланс</div>${lotPodium(LOT.round.prizes)}</div>` +
-    `<div class="lot-stats"><div class="lot-st"><b>${fmt(st.participants)}</b><span>участников</span></div><div class="lot-st"><b>${fmt(st.tickets)}</b><span>чисел в игре</span></div></div>` +
-    `<div class="lot-card" style="margin-top:12px"><div class="lot-eyebrow">Мои числа в розыгрыше</div>${my}</div>` + result;
-}
-function lotProgress(me) {
-  const need = me.need || 3, inGroup = me.pending % need, left = need - inGroup;
-  return `<div class="lot-bar"><i style="width:${me.numbers.length ? 100 : Math.round(inGroup / need * 100)}%"></i></div>` +
-    `<div class="lot-hint">Подтверждено друзей: <b>${me.confirmed}</b> · до следующего числа ещё <b>${left === need && !me.pending ? need : left}</b></div>`;
-}
-function renderLotTasks() {
-  const me = LOT.me, L = LOT.links;
-  const subRow = (ok, label, url) => `<a class="lot-lnk" href="${url}" target="_blank" rel="noopener"><div class="ic">${ok ? '✅' : '📣'}</div><div class="tx"><b>${label}</b><span>${ok ? 'Вы подписаны' : 'Подпишитесь, чтобы участвовать'}</span></div><div class="lot-pill ${ok ? 'ok' : 'mid'}">${ok ? 'готово' : 'подписаться'}</div></a>`;
-  const steps = [
-    ['Вступи в чат', 'Обязательное условие участия'],
-    ['Пригласи 3 друзей во время розыгрыша', 'В зачёт идут только приглашённые после старта — каждый тоже вступает в чат'],
-    ['Получи число в розыгрыше', 'За каждые 3 друга — ещё одно число. Больше чисел — больше шансов'],
-    ['Жди розыгрыш', 'По таймеру случайное число определит победителей'],
-  ].map((s, i) => `<div class="lot-step"><div class="n">${i + 1}</div><div class="tx"><b>${s[0]}</b><span>${s[1]}</span></div></div>`).join('');
-  const refs = LOT.referrals;
-  const pend = refs.filter(r => r.status === 'pending').length;
-  const badge = document.getElementById('lotTasksBadge');
-  if (pend) { badge.style.display = 'grid'; badge.textContent = pend; } else badge.style.display = 'none';
-  let refHtml;
-  if (!refs.length) refHtml = LOT.running
-    ? `<div class="lot-empty">Пока никого. Пригласи друзей — и они появятся здесь со статусом.</div>`
-    : `<div class="lot-empty">Список появится после старта розыгрыша: сюда попадут друзья, приглашённые во время розыгрыша.</div>`;
-  else refHtml = refs.map(r => {
-    const nm = r.name || 'друг', ini = (nm.trim()[0] || '?').toUpperCase();
-    let pill, note;
-    if (r.status === 'ticketed') { pill = `<div class="lot-pill ok">✓ в числе</div>`; note = 'засчитан, вошёл в число'; }
-    else if (r.status === 'counted') { pill = `<div class="lot-pill ok">✓ засчитан</div>`; note = 'все условия выполнены'; }
-    else { const cht = r.sub_chat === 'yes'; note = cht ? 'ждём' : 'не вступил в чат'; pill = `<div class="lot-pill mid">ждём</div>`; }
-    return `<div class="lot-ref"><div class="av">${esc(ini)}</div><div class="nm"><b>${esc(nm)}</b><span>${note}</span></div>${pill}</div>`;
-  }).join('');
-  document.getElementById('lot-tasks').innerHTML =
-    `<div class="lot-card"><div class="lot-eyebrow">Как участвовать</div><div class="lot-steps">${steps}</div></div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Условие участия</div>${subRow(me.sub_chat === 'yes', 'Чат магазина', L.chat)}</div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Приглашай друзей</div><div class="lot-hint" style="margin-top:0">За каждые <b>${me.need}</b> друзей — <b>+1 число</b>. Друг заходит в маркет, забирает бонус и подписывается. Засчитываются только приглашённые <b>во время розыгрыша</b>.</div><button class="lot-btn" style="margin-top:12px" onclick="lotShareRef()">🔗 Пригласить друга</button><button class="lot-btn ghost" style="margin-top:9px" onclick="lotCopyRef()">Скопировать ссылку</button></div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Мои приглашённые</div><div class="lot-hint" style="margin-top:0;font-size:11.5px">Зелёный — прошёл все условия и засчитан. Жёлтый — пригласил, ждём подписку.</div><div class="lot-reflist" style="margin-top:10px">${refHtml}</div><button class="lot-btn ghost" style="margin-top:12px" onclick="loadLottery()">↻ Обновить статусы</button></div>` +
-    `<div class="lot-card"><div class="lot-eyebrow">Кто считается рефералом</div><p style="font-size:12.5px;line-height:1.6;color:var(--muted);margin:0">Реферал — друг, который перешёл <b style="color:var(--gold-soft)">по твоей ссылке</b> и вступил в <b style="color:var(--gold-soft)">чат</b> магазина. Каждого можно засчитать <b style="color:var(--gold-soft)">только один раз</b>: в следующем розыгрыше нужны новые друзья.</p></div>`;
-}
-function lotShareRef() {
-  haptic('medium'); const url = LOT?.ref_link || ''; if (!url) return;
-  const text = `🎰 Розыгрыш в Magic Market! Забери ${S.bonusAmount || 100} ₴ приветственный бонус и участвуй в лотерее — призы до 3000 ₴ на баланс.`;
-  const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
-  if (tg?.openTelegramLink) tg.openTelegramLink(share); else window.open(share, '_blank');
-}
-async function lotCopyRef() {
-  const url = LOT?.ref_link || ''; if (!url) return;
-  try { await navigator.clipboard.writeText(url); } catch (e) { const t = document.createElement('textarea'); t.value = url; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
-  toast('Ссылка скопирована'); haptic();
-}
-
-/* анимация жеребьёвки */
-const LOT_CELL = 62;
-function maybeLotAnimate() {
-  const last = LOT?.last_result; if (!last || !last.winners.length) return;
-  if (!document.getElementById('view-lottery').classList.contains('active')) return;
-  const seen = Number(localStorage.getItem(LOT_SEEN) || 0);
-  if (last.round > seen) playLotDraw(last);
-}
-/* ── звук: барабанная дробь (Web Audio, без файлов) ── */
-let lotAC = null;
-function lotAudio() {
-  if (lotAC !== null) return lotAC || null;
-  try { lotAC = new (window.AudioContext || window.webkitAudioContext)(); }
-  catch (e) { lotAC = 0; }
-  return lotAC || null;
-}
-function lotResumeAudio() { const a = lotAudio(); if (a && a.state === 'suspended') a.resume().catch(() => {}); }
-function lotNoise(a, sec) {
-  const n = Math.max(1, Math.floor(a.sampleRate * sec)), b = a.createBuffer(1, n, a.sampleRate), d = b.getChannelData(0);
-  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
-  return b;
-}
-function lotDrumRoll(dur) {
-  const a = lotAudio(); if (!a) return; if (a.state === 'suspended') a.resume().catch(() => {});
-  const t0 = a.currentTime, buf = lotNoise(a, 0.12);
-  // щелчки СИНХРОННЫ с барабаном: тот тормозит по ease-out (быстро → медленно),
-  // значит и щелчки частые в начале и всё реже к остановке (обратный ease-out по времени)
-  const clicks = Math.max(20, Math.round(dur * 7));
-  for (let k = 1; k <= clicks; k++) {
-    const p = k / clicks;                                // «пройденная» доля оборота 0..1
-    const tau = 1 - Math.pow(1 - p, 1 / 3);              // момент по обратному ease-out
-    const t = t0 + tau * dur;
-    const src = a.createBufferSource(); src.buffer = buf;
-    const bp = a.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 0.9;
-    const g = a.createGain();
-    const amp = 0.1 + 0.05 * p;                          // ближе к остановке щелчки чуть звонче
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(amp, t + 0.004);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    src.connect(bp); bp.connect(g); g.connect(a.destination);
-    src.start(t); src.stop(t + 0.09);
-  }
-}
-function lotTone(a, freq, t, dur, type, gain) {
-  const o = a.createOscillator(); o.type = type || 'triangle'; o.frequency.setValueAtTime(freq, t);
-  const g = a.createGain();
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(gain || 0.2, t + 0.02);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + dur + 0.05);
-}
-// короткий позитивный «динь» для 2-3 места
-function lotWinChime() {
-  const a = lotAudio(); if (!a) return; if (a.state === 'suspended') a.resume().catch(() => {});
-  const t = a.currentTime;
-  [659.25, 783.99, 1046.5].forEach((f, i) => lotTone(a, f, t + i * 0.09, 0.24, 'triangle', 0.18));
-  lotTone(a, 1046.5, t + 0.2, 0.35, 'sine', 0.1);
-}
-// победная фанфара для 1 места: восходящий разгон + аккорд C-мажор + блеск
-function lotFanfare() {
-  const a = lotAudio(); if (!a) return; if (a.state === 'suspended') a.resume().catch(() => {});
-  const t = a.currentTime;
-  const N = { G4: 392, C5: 523.25, E5: 659.25, G5: 783.99, C6: 1046.5, E6: 1318.5, G6: 1568 };
-  [['G4', 0], ['C5', 0.13], ['E5', 0.26], ['G5', 0.39]].forEach(([n, dt]) => {
-    lotTone(a, N[n], t + dt, 0.15, 'triangle', 0.22);
-    lotTone(a, N[n] / 2, t + dt, 0.15, 'sine', 0.1);
-  });
-  const ct = t + 0.56, cd = 1.2;                          // держим аккорд
-  [N.C5, N.E5, N.G5, N.C6].forEach((f, i) => lotTone(a, f, ct, cd, 'triangle', 0.2 - i * 0.02));
-  lotTone(a, N.E6, ct + 0.06, 0.6, 'sine', 0.12);
-  lotTone(a, N.G6, ct + 0.14, 0.6, 'sine', 0.09);
-  // праздничный «шелест» сверху (не крэш)
-  const s = a.createBufferSource(); s.buffer = lotNoise(a, 0.7);
-  const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
-  const g = a.createGain(); g.gain.setValueAtTime(0.0001, ct);
-  g.gain.exponentialRampToValueAtTime(0.1, ct + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, ct + 0.65);
-  s.connect(hp); hp.connect(g); g.connect(a.destination); s.start(ct); s.stop(ct + 0.7);
-}
-let lotHapticRoll = null;
-function startHapticRoll(dur) {
-  stopHapticRoll(); const t0 = Date.now();
-  const tick = () => {
-    const p = (Date.now() - t0) / (dur * 1000);
-    if (p >= 1) return;
-    try { tg?.HapticFeedback?.impactOccurred(p > 0.6 ? 'medium' : 'light'); } catch (e) {}
-    lotHapticRoll = setTimeout(tick, 45 + 200 * p);      // реже к концу — синхронно с барабаном
-  };
-  tick();
-}
-function stopHapticRoll() { clearTimeout(lotHapticRoll); }
-
-function lotDigitCols(finalStr) {
-  const wrap = document.getElementById('lotReelDigits'); wrap.innerHTML = '';
-  const cells = [];
-  for (const ch of finalStr) {
-    const dg = document.createElement('div'); dg.className = 'lot-dg';
-    const col = document.createElement('div'); col.className = 'col';
-    // длинная лента — несколько полных оборотов 0-9 (эффект барабана) + финальная цифра
-    const seq = [];
-    const cycles = 8 + Math.floor(Math.random() * 2);       // 8-9 оборотов (дольше крутится)
-    for (let c = 0; c < cycles; c++) for (let d = 0; d < 10; d++) seq.push(d);
-    seq.push(Number(ch));                                    // приземляемся на нужную
-    col.innerHTML = seq.map(d => `<div>${d}</div>`).join('');
-    dg.appendChild(col); wrap.appendChild(dg); cells.push({ col, len: seq.length });
-  }
-  return cells;
-}
-function spinLotReel(finalNum) {
-  return new Promise(res => {
-    const cells = lotDigitCols(lotPad5(finalNum));
-    let maxDur = 0;
-    // длительность прокрутки (последняя колонка); дробь синхронна именно с ней
-    const spinDur = 3.8 + (cells.length - 1) * 0.55;
-    lotDrumRoll(spinDur); startHapticRoll(spinDur);
-    cells.forEach((c, i) => {
-      const targetY = -(c.len - 1) * LOT_CELL;
-      const dur = 3.8 + i * 0.55;                            // дольше и тормозят слева направо
-      maxDur = Math.max(maxDur, dur);
-      c.col.style.transition = 'none';
-      c.col.style.transform = 'translateY(0)';
-      c.col.classList.add('spinning');                       // смаз во время кручения
-      void c.col.offsetHeight;                               // форс reflow, чтобы старт зафиксировался
-      requestAnimationFrame(() => {
-        // раскрутка → плавное торможение как у барабана
-        c.col.style.transition = `transform ${dur}s cubic-bezier(.1,.62,.12,1)`;
-        c.col.style.transform = `translateY(${targetY}px)`;
-        setTimeout(() => c.col.classList.remove('spinning'), (dur - 0.55) * 1000);
-      });
-    });
-    setTimeout(res, maxDur * 1000 + 300);
-  });
-}
-function lotAvatarHtml(w) {
-  if (w && w.avatar) return `<img src="${w.avatar}" alt="">`;
-  const nm = (w && w.name) || '?';
-  return (nm.trim()[0] || '?').toUpperCase();
-}
-function lotRowAv(w) {
-  const inner = w.avatar ? `<img src="${w.avatar}" alt="">` : esc((w.name || '?').trim()[0] || '?').toUpperCase();
-  return `<div class="av lot-row-av">${inner}<i class="lot-place-badge">${w.place}</i></div>`;
-}
-// подиум победителей: 2-е слева, 1-е по центру (выше), 3-е справа
-function lotWinPodium(winners) {
-  const byPlace = {}; winners.forEach(w => byPlace[w.place] = w);
-  const medal = { 1: '🥇', 2: '🥈', 3: '🥉' };
-  const col = pl => {
-    const w = byPlace[pl]; if (!w) return '';
-    const av = w.avatar ? `<img src="${w.avatar}" alt="">` : esc((w.name || '?').trim()[0] || '?').toUpperCase();
-    return `<div class="wcol p${pl}">
-      <div class="wav">${av}</div>
-      <div class="wname">${w.is_me ? 'Вы' : esc(w.name)}</div>
-      <div class="wstep"><div class="wmedal">${medal[pl] || pl}</div><div class="wprize">${fmt(w.prize)} ₴</div></div>
-    </div>`;
-  };
-  return `<div class="lot-wp">${[2, 1, 3].map(col).join('')}</div>`;
-}
-async function playLotDraw(last) {
-  const ov = document.getElementById('lotOverlay'); ov.classList.add('on');
-  const rev = document.getElementById('lotReveal'); rev.classList.remove('show', 'hide');
-  const fin = document.getElementById('lotFinale'); fin.classList.remove('show'); fin.innerHTML = '';
-  document.querySelector('.lot-reel').classList.remove('hide');   // барабан снова виден
-  document.getElementById('lotClose').classList.remove('show'); document.getElementById('lotRevMe').style.display = 'none';
-  const winners = [...last.winners].sort((a, b) => b.place - a.place);
-  const pn = { 1: '1 место', 2: '2 место', 3: '3 место' };
-  for (const w of winners) {
-    document.getElementById('lotReelPlace').textContent = pn[w.place] || (w.place + ' место');
-    rev.classList.remove('show'); document.getElementById('lotRevMe').style.display = 'none';
-    haptic('light');
-    await spinLotReel(w.number);
-    stopHapticRoll(); haptic('heavy');
-    if (w.place === 1) lotFanfare(); else lotWinChime();   // фанфара на 1 месте, «динь» на 2-3
-    document.getElementById('lotRevAv').innerHTML = lotAvatarHtml(w);
-    document.getElementById('lotRevWho').textContent = w.is_me ? 'Вы 🎉' : w.name;
-    document.getElementById('lotRevPrize').textContent = fmt(w.prize) + ' ₴';
-    document.getElementById('lotRevMe').style.display = w.is_me ? 'inline-block' : 'none';
-    rev.classList.add('show');
-    if (w.place === 1) lotBurst();
-    await new Promise(r => setTimeout(r, w.place === 1 ? 1600 : 1100));
-  }
-  // финал: убираем барабан/раскрытие и показываем подиум всех победителей
-  document.querySelector('.lot-reel').classList.add('hide'); rev.classList.add('hide');
-  fin.innerHTML = `<div class="lot-fin-title">Победители</div>${lotWinPodium(last.winners)}`;
-  fin.classList.add('show');
-  document.getElementById('lotClose').classList.add('show');
-}
-function lotBurst() {
-  const cv = document.getElementById('lotConfetti'); cv.classList.add('on');
-  const ctx = cv.getContext('2d'), W = cv.width = innerWidth, H = cv.height = innerHeight;
-  const cols = ['#f3d27a', '#d4af37', '#b8891f', '#fff5da', '#e8c96a'], P = [];
-  for (let i = 0; i < 130; i++) P.push({ x: W / 2 + (Math.random() - .5) * W * .3, y: H * .28, vx: (Math.random() - .5) * 9, vy: Math.random() * -11 - 4, g: .32 + Math.random() * .18, s: 5 + Math.random() * 7, c: cols[i % cols.length], r: Math.random() * 6.28, vr: (Math.random() - .5) * .3, a: 1 });
-  let t = 0;
-  (function loop() {
-    ctx.clearRect(0, 0, W, H); t++;
-    P.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += p.g; p.r += p.vr; if (t > 60) p.a -= .012; ctx.save(); ctx.globalAlpha = Math.max(0, p.a); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c; ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * .6); ctx.restore(); });
-    if (t < 170) requestAnimationFrame(loop); else ctx.clearRect(0, 0, W, H);
-  })();
-}
-document.getElementById('lotClose').onclick = () => {
-  stopHapticRoll();
-  document.getElementById('lotOverlay').classList.remove('on'); document.getElementById('lotConfetti').classList.remove('on');
-  haptic();
-  if (window.__lotDemo) { window.__lotDemo = false; return; }   // демо — не трогаем реальный статус
-  if (LOT?.last_result) localStorage.setItem(LOT_SEEN, LOT.last_result.round);
-  renderLottery();
-};
-// демо-прогон анимации из админки: показывает жеребьёвку без сервера и начислений
-function lotDemoDraw() {
-  lotResumeAudio();
-  const r5 = () => Math.floor(10000 + Math.random() * 90000);
-  const demo = { round: 0, winners: [
-    { place: 1, number: r5(), prize: 3000, name: 'Вы', is_me: true, avatar: (tg?.initDataUnsafe?.user?.photo_url || null) },
-    { place: 2, number: r5(), prize: 2000, name: 'Игрок №2', is_me: false, avatar: null },
-    { place: 3, number: r5(), prize: 1500, name: 'Игрок №3', is_me: false, avatar: null },
-    { place: 4, number: r5(), prize: 1000, name: 'Игрок №4', is_me: false, avatar: null },
-    { place: 5, number: r5(), prize: 500, name: 'Игрок №5', is_me: false, avatar: null },
-  ]};
-  window.__lotDemo = true;
-  playLotDraw(demo);
 }
 
 /* ═══════════ Шторки ═══════════ */
@@ -3847,19 +3355,16 @@ const FAQ = [
     a: 'Всё в приложении оплачивается <b>с баланса</b>. Пополнить: тап по балансу вверху или кнопка <b>«Пополнить»</b> в профиле.<br><br>• <b>Карта</b> — от 200 до 30 000 ₴. Автоматически (выдаём номер карты и точную сумму) или переводом с квитанцией на ручную проверку.<br>• <b>Крипта</b> (USDT, BTC, ETH и другие) — счёт с QR-кодом и точной суммой на 30 минут, зачисление автоматическое.' },
 
   { q: '💸 Как вывести деньги',
-    a: 'Вывод — в профиле, <b>от 1000 ₴</b>, на карту или крипту. Сумма резервируется сразу, выплату оператор проводит вручную.<br><br>⚠️ Важно: выводятся только <b>реальные</b> деньги (пополнения, реферальные, выигрыши в казино). <b>Бонусы</b> (подарки, промокоды, кэшбэк, призы розыгрышей) вывести напрямую нельзя — их можно потратить в магазине или отыграть в казино.' },
+    a: 'Вывод — в профиле, <b>от 1000 ₴</b>, на карту или крипту. Сумма резервируется сразу, выплату оператор проводит вручную.<br><br>⚠️ Важно: выводятся только <b>реальные</b> деньги (пополнения, реферальные, выигрыши в казино). <b>Бонусы</b> (подарки, промокоды, кэшбэк) вывести напрямую нельзя — их можно потратить в магазине или отыграть в казино.' },
 
   { q: '🎁 Что такое бонусы и как их тратить',
-    a: 'Бонусы — это <b>невыводимые</b> средства на балансе: приветственный подарок, промокоды, кэшбэк, призы Рулетки. Что с ними делать:<br><br>• <b>Оплатить покупку</b> в магазине — бонусами можно закрыть до <b>50%</b> суммы заказа, остальное реальными.<br>• <b>Играть в Magic Casino</b> — если отыграть бонус ставками, выигрыш становится обычными деньгами и его можно вывести.<br><br>Реальные деньги тратятся и выводятся без ограничений.' },
+    a: 'Бонусы — это <b>невыводимые</b> средства на балансе: приветственный подарок, промокоды, кэшбэк. Что с ними делать:<br><br>• <b>Оплатить покупку</b> в магазине — бонусами можно закрыть до <b>50%</b> суммы заказа, остальное реальными.<br>• <b>Играть в Magic Casino</b> — если отыграть бонус ставками, выигрыш становится обычными деньгами и его можно вывести.<br><br>Реальные деньги тратятся и выводятся без ограничений.' },
 
   { q: '💎 Кэшбэк за покупки',
     a: 'Чем больше ты покупаешь реальными деньгами за <b>последние 12 месяцев</b> — тем выше твой кэшбэк. Он начисляется <b>бонусом</b> с каждой покупки:<br><br>5 000 ₴ → <b>3%</b> · 10 000 → <b>5%</b> · 20 000 → <b>8%</b> · 35 000 → <b>11%</b> · 55 000 → <b>14%</b> · 75 000 → <b>17%</b> · 100 000 → <b>20%</b>.<br><br>Учитывается скользящий год — оборот всегда считается за последние 12 месяцев. Свой уровень и прогресс видно в <b>Профиле</b>.' },
 
   { q: '👥 Реферальная программа — зови друзей',
     a: () => `Твоя ссылка — в разделе <b>Профиль</b>. За каждого друга, который зайдёт по ней и активируется, — <b>+${S.refBonus || 50} ₴ сразу</b>.<br><br>Дальше ты получаешь <b>процент с его покупок навсегда и на вывод</b>: <b>5%</b> (до 10 друзей), <b>7%</b> (10–49 друзей), <b>10%</b> (от 50). Такой же процент капает и с игры друзей в <b>Magic Casino</b> — раз в месяц приходит твоя доля от прибыли казино.` },
-
-  { q: '🎰 Рулетка — розыгрыш каждую неделю',
-    a: 'Каждую неделю разыгрываем <b>8000 ₴</b> на баланс между <b>5 победителями</b>: 3000 / 2000 / 1500 / 1000 / 500 ₴.<br><br>Как участвовать: вступи в чат и зови друзей по своей ссылке. Каждые <b>3 приглашённых друга = 1 число</b> в розыгрыше — больше друзей, больше чисел и выше шанс. Прогресс и живую жеребьёвку смотри в разделе <b>«Рулетка»</b>.' },
 
   { q: '🏆 Награды в чате: активность и викторина',
     a: 'В нашем чате тоже можно зарабатывать бонус на баланс:<br><br>• <b>Конкурс активности</b> — каждый понедельник топ-5 самых активных получают <b>500 / 400 / 300 / 200 / 100 ₴</b>. Команда <b>/top</b> покажет текущий рейтинг (флуд не считается, только содержательные сообщения).<br>• <b>Викторина</b> — в 18:00 по Киеву: <b>+20 ₴</b> за каждый правильный ответ и <b>+50 ₴</b> лучшему по итогу дня.' },
@@ -3977,13 +3482,13 @@ let peDeliveryVal = ['np', 'taxi'];
 const ADMIN_TABS = {
   products: 'Товары', orders: 'Заказы',
   topups: 'Пополнения', withdrawals: 'Выводы', pay: 'Оплата', snova: 'Super Nova',
-  grow: 'E-grow', lottery: 'Рулетка', promo: 'Промокоды',
+  grow: 'E-grow', promo: 'Промокоды',
   refs: 'Рефералы', users: 'Пользователи', reviews: 'Отзывы',
 };
 const ADMIN_GROUPS = [
   { key: 'shop',      title: 'Магазин',  icon: '🛍', tabs: ['products', 'orders'] },
   { key: 'finance',   title: 'Финансы',  icon: '💳', tabs: ['topups', 'withdrawals', 'pay', 'snova'] },
-  { key: 'marketing', title: 'Акции',    icon: '🎁', tabs: ['grow', 'lottery', 'promo'] },
+  { key: 'marketing', title: 'Акции',    icon: '🎁', tabs: ['grow', 'promo'] },
   { key: 'people',    title: 'Люди',     icon: '👥', tabs: ['refs', 'users', 'reviews'] },
 ];
 let adminGroup = 'shop';
@@ -4249,9 +3754,6 @@ function renderAdmin(tab) {
     }).catch(() => { if (adminTab === 'reviews') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
   } else if (tab === 'users') {
     renderAdminUsers();
-  } else if (tab === 'lottery') {
-    b.innerHTML = '<p class="note">Загрузка…</p>';
-    renderAdminLottery();
   } else if (tab === 'refs') {
     b.innerHTML = '<p class="note">Загрузка…</p>';
     API.call('/api/admin/referrals').then(d => {
@@ -4342,76 +3844,9 @@ function renderAdmin(tab) {
     snovaLoadPoCurrencies();
   }
 }
-async function renderAdminLottery() {
-  const b = document.getElementById('adminBody');
-  let d;
-  try { d = await API.call('/api/admin/lottery'); }
-  catch (e) { if (adminTab === 'lottery') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; return; }
-  if (adminTab !== 'lottery') return;
-  const dt = s => s ? new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
-  const def = d.defaults || { days: 7, prizes: [3000, 2000, 1500, 1000, 500], per_ticket: 3 };
-  const au = d.auto || {};
-  const cycleTxt = au.break_days ? `${au.round_days || 7} дн. розыгрыш → ${au.break_days} дн. перерыв, и снова`
-    : `каждую неделю (${au.round_days || 7} дн.), без перерыва — новый круг сразу после жеребьёвки`;
-  const autoNote = au.on ? `<div class="bezel" style="margin-bottom:12px"><div class="bezel-core" style="padding:12px 14px">
-        <div style="font-size:12.5px;line-height:1.6;color:var(--muted)">🔁 <b style="color:var(--gold-soft)">Автоцикл включён</b>: ${cycleTxt} — сам, без запуска вручную.
-        Призы цикла: <b style="color:var(--txt)">${(au.prizes || []).map(p => fmt(p)).join(' · ')} ₴</b>. Ручной запуск ниже — на случай нестандартного круга.</div>
-      </div></div>` : '';
-  const testBtn = `<button class="btn btn-ghost" style="margin-top:10px" onclick="lotDemoDraw()">🎬 Тестовый прогон анимации</button>
-      <p class="note" style="margin:6px 0 0">Демо-жеребьёвка со звуком и аватаром — без начислений и без влияния на реальный розыгрыш.</p>`;
-  let last = '';
-  if (d.last && d.last.winners && d.last.winners.length) {
-    last = `<div class="section-head" style="margin-top:14px"><h2>Прошлый розыгрыш</h2><span>${dt(d.last.drawn_at)}</span></div>` +
-      d.last.winners.map(w => `<div class="set-row"><div><h3>${w.place} место · ${fmt(w.prize)} ₴</h3><p>${esc(w.name)} · число №${String(w.number).padStart(5, '0')}</p></div></div>`).join('');
-  }
-  if (d.running) {
-    const r = d.round;
-    b.innerHTML = autoNote + `
-      <div class="bezel gold" style="margin-bottom:14px"><div class="bezel-core" style="padding:15px 16px">
-        <div class="section-head" style="margin:0 0 11px"><h2 style="font-size:15px">Розыгрыш идёт</h2><span>до ${dt(r.deadline)}</span></div>
-        <div class="admin-stats">
-          <div><b>${fmt(d.stats.participants)}</b><span>участников</span></div>
-          <div><b>${fmt(d.stats.tickets)}</b><span>чисел в игре</span></div>
-          <div><b style="color:var(--gold-soft)">${(r.prizes || []).map(p => fmt(p)).join(' · ')} ₴</b><span>призы по местам</span></div>
-        </div>
-      </div></div>
-      <p class="note" style="margin:0 0 10px">Отсчёт идёт, рефералы засчитываются. Можно провести розыгрыш прямо сейчас (иначе он пройдёт сам в момент дедлайна) или отменить круг без розыгрыша.</p>
-      <button class="btn btn-gold" onclick="lotAdminDraw()">🎲 Провести розыгрыш сейчас</button>
-      <button class="btn btn-ghost" style="margin-top:10px" onclick="lotAdminCancel()">Отменить круг (без розыгрыша)</button>
-      ${testBtn}${last}`;
-  } else {
-    b.innerHTML = autoNote + `
-      <p class="note" style="margin:0 0 12px">Розыгрыш <b>не запущен</b>${au.on ? (au.break_days ? ' (идёт неделя перерыва — следующий круг стартует автоматически)' : ' (следующий круг стартует автоматически в течение минуты)') : ''}. Пока он не запущен — отсчёт не идёт и рефералы не засчитываются. Можно запустить круг вручную: задайте срок и призы и нажмите «Запустить». Жеребьёвка пройдёт <b>в последний день в 22:00</b> (Киев), а участникам придёт напоминание за час.</p>
-      <div class="field"><label>Длительность, дней</label><input id="lotDays" inputmode="numeric" value="${def.days}"></div>
-      <div class="field"><label>Призы через запятую (1-е, 2-е, 3-е…), ₴</label><input id="lotPrizes" value="${(def.prizes || []).join(',')}"></div>
-      <p class="note" style="margin:2px 0 10px">Одно число даётся за каждые ${def.per_ticket} приглашённых. Приз — за каждое выигравшее число.</p>
-      <button class="btn btn-gold" onclick="lotAdminStart()">🚀 Запустить розыгрыш</button>
-      ${testBtn}${last}`;
-  }
-}
 function lotConfirm(msg, cb) {
   if (tg?.showConfirm) tg.showConfirm(msg, ok => { if (ok) cb(); });
   else if (window.confirm(msg)) cb();
-}
-async function lotAdminStart() {
-  const days = parseInt(document.getElementById('lotDays').value, 10) || 14;
-  const prizes = (document.getElementById('lotPrizes').value || '').trim();
-  lotConfirm(`Запустить розыгрыш на ${days} дн.? Жеребьёвка — в последний день в 22:00. Отсчёт и зачёт рефералов начнутся сразу.`, async () => {
-    try { await API.call('/api/admin/lottery/start', { days, prizes }); toast('Розыгрыш запущен'); haptic('medium'); renderAdminLottery(); }
-    catch (e) { toast(e.message || 'Ошибка'); }
-  });
-}
-async function lotAdminDraw() {
-  lotConfirm('Провести розыгрыш сейчас? Победители определятся случайно, призы зачислятся бонусом на баланс (невыводимо).', async () => {
-    try { await API.call('/api/admin/lottery/draw'); toast('Розыгрыш проведён'); haptic('heavy'); renderAdminLottery(); }
-    catch (e) { toast(e.message || 'Ошибка'); }
-  });
-}
-async function lotAdminCancel() {
-  lotConfirm('Отменить круг без розыгрыша? Призы не начислятся.', async () => {
-    try { await API.call('/api/admin/lottery/cancel'); toast('Круг отменён'); renderAdminLottery(); }
-    catch (e) { toast(e.message || 'Ошибка'); }
-  });
 }
 function renderAdminReviews(list) {
   const b = document.getElementById('adminBody');
