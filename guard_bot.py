@@ -31,8 +31,6 @@ KYIV = ZoneInfo("Europe/Kyiv")
 ACTIVITY_PRIZES = [500, 400, 300, 200, 100]   # призы за 1-5 место, ₴ на баланс (бонусные, как приветственные)
 ACTIVITY_HOUR = 12                  # понедельник, по Киеву
 # недельная реферальная гонка — топ-3 по числу активированных рефералов за неделю.
-# Работает, только пока не активна Рулетка (открытого круга нет) — чтобы не
-# перегружать людей одновременно двумя конкурсами на рефералов.
 REF_RACE_PRIZES = [500, 300, 150]   # призы за 1-3 место, ₴ бонусом (как активность)
 REF_RACE_HOUR = 13                  # понедельник, по Киеву — на час позже активности
 CONTEST_TIMES = os.getenv("CONTEST_TIMES", "11:00,19:00")   # баннер конкурса, по Киеву
@@ -952,8 +950,6 @@ async def run(notify=None, on_ban=None, on_unban=None):
             lines.append(f"{i + 1}. {_esc(r['name'])} — {r['cnt']} приглаш.{prize}")
         lines += ["", "Награждение — в понедельник в 13:00. Считаются только друзья, "
                       "которые забрали приветственный бонус (выполнили все условия)."]
-        if await db.lottery_open_round():
-            lines.append("⚠ Сейчас активна Рулетка — награждение этой недели будет пропущено.")
         await message.answer("\n".join(lines), parse_mode="HTML")
 
     async def _chat_total(chat_id: int):
@@ -1164,8 +1160,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
 
     async def weekly_ref_race():
         """Каждый понедельник в REF_RACE_HOUR по Киеву награждаем тройку лучших
-        реферальщиков — но только пока не активна Рулетка (нет открытого круга),
-        чтобы не дублировать конкурсы на рефералов одновременно."""
+        реферальщиков."""
         if not RULES_CHAT_ID:
             log.info("RULES_CHAT_ID не задан — реферальная гонка выключена")
             return
@@ -1178,9 +1173,6 @@ async def run(notify=None, on_ban=None, on_unban=None):
                     days = 7
                 nxt += timedelta(days=days)
                 await asyncio.sleep(max(30, (nxt - now).total_seconds()))
-                if await db.lottery_open_round():
-                    log.info("Реферальная гонка: пропуск недели — активна Рулетка")
-                    continue
                 end = nxt.date() - timedelta(days=1)
                 start = end - timedelta(days=6)
                 winners = await db.award_ref_race(start, end, REF_RACE_PRIZES)

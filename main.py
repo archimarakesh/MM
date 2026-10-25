@@ -26,7 +26,6 @@ from fastapi.responses import FileResponse, Response
 import auth
 import db
 import guard_bot
-import lottery
 import snova
 
 logging.basicConfig(level=logging.INFO)
@@ -48,13 +47,6 @@ MAX_RECEIPT_LEN = 6_000_000  # ~4.5 МБ файла в base64
 BONUS_CHANNEL_ID = os.getenv("BONUS_CHANNEL_ID", "")
 BONUS_CHAT_ID = os.getenv("BONUS_CHAT_ID", "")
 BONUS_AMOUNT = int(os.getenv("BONUS_AMOUNT", "100") or 100)
-
-# Розыгрыш (лотерея) — раздел ВНУТРИ маркета (вкладка «Рулетка»). Подписку
-# проверяем по тем же каналу/чату, что и бонус; приглашаем через маркет-бота.
-# Ссылки для вкладки «Помощь» берём из промо-переменных + маркет и поддержка.
-LOTTERY_ENABLED = os.getenv("LOTTERY_ENABLED", "1") != "0"
-SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/magicmarket_boss")
-MARKET_BOT = os.getenv("MARKET_BOT", "Magic_Marketplace_bot")
 
 # автопостинг промо в канал (по умолчанию — в бонусный канал)
 KYIV = ZoneInfo("Europe/Kyiv")
@@ -90,10 +82,10 @@ PROMO_CASINO_URL = os.getenv("PROMO_CASINO_URL", "") or _promo_cas
 PROMO_CHAT_URL = os.getenv("PROMO_CHAT_URL", "https://t.me/+0_b77ETKGVpiZGY6")
 PROMO_CHANNEL_URL = os.getenv("PROMO_CHANNEL_URL", "https://t.me/+HJLPBVv65kQ0YjAy")
 # 4 поста в день: каждое из двух промо — по 2 раза (чередование по слотам)
-PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,17:00,21:00,19:00").split(",") if t.strip()]
+PROMO_TIMES = [t.strip() for t in os.getenv("PROMO_TIMES", "10:00,14:00,17:00,21:00").split(",") if t.strip()]
 # слот PROMO_TIMES[i] публикует PROMO_POSTS[i] (пары по индексу, порядок ≠ хронология):
 # 10:00 общий · 14:00 egrow-4 · 17:00 анонс викторины (за час до старта в 18:00) ·
-# 21:00 реферальный · 19:00 рулетка (розыгрыш)
+# 21:00 реферальный
 PROMO_POSTS = [
     ("promo/egrow-1.png", ""),
     ("promo/egrow-4.png", ""),
@@ -114,19 +106,7 @@ PROMO_POSTS = [
      "🏆 А ещё топ-3 по числу друзей за неделю забирают <b>500 / 300 / 150 ₴</b> "
      "в реферальной гонке — просто за самых активных приглашателей.\n\n"
      "Твоя персональная ссылка — <b>прямо в Профиле приложения</b>."),
-    ("promo/roulette.png",
-     "🎰 <b>РУЛЕТКА Magic Market</b> — розыгрыш призов!\n\n"
-     "Приведи <b>3 друзей</b> — забери гарантированный бонус и поборись за крупные "
-     "призы на баланс.\n\n"
-     f"🎁 <b>{BONUS_AMOUNT} ₴</b> приветственный бонус — гарантированно каждому\n"
-     f"👥 <b>+{db.REF_ACTIVATION_BONUS} ₴</b> за каждого друга "
-     f"(3 друга = +{db.REF_ACTIVATION_BONUS * 3} ₴)\n"
-     "🏆 Розыгрыш определит <b>5 победителей</b>: 3000 / 2000 / 1500 / 1000 / 500 ₴\n\n"
-     "🔁 Каждую неделю — новый круг! Успей позвать друзей.\n"
-     "Участие — в разделе <b>«Рулетка»</b> в приложении 👇"),
 ]
-# пост рулетки постим только при активном розыгрыше (см. promo_poster)
-PROMO_ROULETTE_PATH = "promo/roulette.png"
 # личное напоминание про E-grow (не канал — ЛС всем пользователям бота):
 # раз в EGROW_REMINDER_DAYS дней, в случайное время внутри дневного окна
 EGROW_REMINDER_DAYS = int(os.getenv("EGROW_REMINDER_DAYS", "3") or 3)
@@ -521,12 +501,6 @@ async def promo_poster():
                 await db.set_kv("last_promo", slot_key)
                 continue        # слотов больше, чем постов — этот пустой
             path, caption = PROMO_POSTS[idx]
-            # Промо рулетки (розыгрыша) шлём только когда розыгрыш реально запущен —
-            # иначе люди идут в пустой раздел. Слот при этом «сгорает» (не постим).
-            if path == PROMO_ROULETTE_PATH and not await db.lottery_open_round():
-                await db.set_kv("last_promo", slot_key)
-                log.info("Промо рулетки пропущено: розыгрыш не активен (%s)", slot_key)
-                continue
             if os.path.exists(path):
                 await publish_promo([(path, caption)])
                 await db.set_kv("last_promo", slot_key)
@@ -839,7 +813,7 @@ async def ws_push(user_id: int):
 
 
 async def ws_broadcast(payload: dict):
-    """Разослать событие всем открытым приложениям (например, старт розыгрыша)."""
+    """Разослать событие всем открытым приложениям (например, обновление грядки)."""
     for uid, conns in list(WS_CLIENTS.items()):
         for ws in list(conns):
             try:
@@ -913,155 +887,10 @@ async def broadcast_all(text: str, photo: str = None, button: tuple = None) -> i
     return sent
 
 
-# ── розыгрыш (лотерея): выплаты и авто-жеребьёвка по таймеру ──────────────────
-def _prizes_block(prizes) -> str:
-    """Столбик призов по местам для сообщений бота: «1 место — 500 ₴»."""
-    return "\n".join(f"{i + 1} место — <b>{fmt_uah(p)} ₴</b>"
-                     for i, p in enumerate(prizes))
-
-
-def fmt_uah(n) -> str:
-    """Разряды пробелом: 3000 → «3 000». Мелкая косметика для сумм."""
-    return f"{int(n):,}".replace(",", " ")
-
-
-async def _lottery_pay(round_id: int, place: int, uid: int, prize: int) -> None:
-    """Идемпотентное начисление приза как НЕВЫВОДИМОГО бонуса (locked + вейджер)."""
-    try:
-        await db.lottery_pay_bonus(round_id, place, int(uid), int(prize))
-    except Exception:
-        log.exception("Лотерея: не удалось начислить приз %s/%s", round_id, place)
-
-
-async def _lottery_reconcile() -> None:
-    """Докатить призы, которые не успели начислиться (после сбоя/рестарта)."""
-    try:
-        for w in await db.lottery_unpaid_winners():
-            await _lottery_pay(w["round_id"], w["place"], w["user_id"], w["prize"])
-    except Exception:
-        log.exception("Лотерея: сверка выплат не удалась")
-
-
-async def _run_lottery_draw(rnd: dict) -> None:
-    """Провести розыгрыш круга: тянем победителей, начисляем, уведомляем, вещаем.
-    Следующий круг НЕ открываем — запуск ручной из админки."""
-    prizes = lottery._parse_prizes(rnd.get("prizes")) or lottery.PRIZES
-    winners = await db.lottery_draw(rnd["id"], prizes)
-    if winners is None:
-        return                                   # уже проведён кем-то другим
-    for w in winners:
-        await _lottery_pay(rnd["id"], w["place"], w["user_id"], w["prize"])
-        try:                                    # аватар победителя из Telegram — для красивого показа
-            av = await _avatar_data_uri(w["user_id"])
-            await db.lottery_set_avatar(rnd["id"], w["place"], av)
-        except Exception:
-            log.exception("Лотерея: аватар победителя не получен")
-        await notify(w["user_id"],
-                     f"🎉 <b>Вы в призах Рулетки!</b>\n\n"
-                     f"Ваше число <b>№{w['number']:05d}</b> заняло "
-                     f"<b>{w['place']}-е место</b> из {len(prizes)}.\n"
-                     f"🎁 Приз <b>{fmt_uah(w['prize'])} ₴</b> уже зачислен на баланс бонусом.\n\n"
-                     "Бонус не выводится напрямую — потратьте его в магазине "
-                     "или отыграйте в казино. Спасибо, что зовёте друзей! 🔥")
-    await ws_broadcast({"t": "lottery_draw", "round": rnd["id"]})
-    if ADMIN_ID:
-        if winners:
-            body = "\n".join(
-                f"{w['place']}. {w.get('name') or 'участник'} · "
-                f"№{w['number']:05d} — <b>{fmt_uah(w['prize'])} ₴</b>" for w in winners)
-            fund = fmt_uah(sum(int(w["prize"]) for w in winners))
-            msg = (f"🎰 <b>Розыгрыш #{rnd['id']} проведён!</b>\n\n{body}\n\n"
-                   f"💰 Выдано призов: <b>{fund} ₴</b> · победителей: {len(winners)}")
-        else:
-            msg = (f"🎰 <b>Розыгрыш #{rnd['id']} проведён</b>\n\n"
-                   "В этот раз участников не было — призы не разыгрывались.")
-        await notify(ADMIN_ID, msg)
-    log.info("Лотерея: круг #%s разыгран, победителей %s", rnd["id"], len(winners))
-
-
-async def _lottery_prenotify(rnd: dict) -> None:
-    """Напоминание участникам «за час до розыгрыша». Помечаем круг первым — чтобы
-    тикер не разослал повторно."""
-    if not await db.lottery_mark_prenotified(rnd["id"]):
-        return
-    dl = rnd.get("deadline")
-    tstr = dl.astimezone(KYIV).strftime("%H:%M") if dl else "22:00"
-    prizes = lottery._parse_prizes(rnd.get("prizes")) or lottery.PRIZES
-    text = ("⏰ <b>Через час — розыгрыш Рулетки!</b>\n\n"
-            f"Сегодня в <b>{tstr}</b> определим победителей.\n"
-            f"💰 Призовой фонд <b>{fmt_uah(sum(prizes))} ₴</b> на {len(prizes)} мест:\n"
-            f"{_prizes_block(prizes)}\n\n"
-            "Открой раздел «Рулетка» в приложении — жеребьёвку видно вживую 🎰")
-    ids = await db.lottery_participant_ids(rnd["id"])
-    for uid in ids:
-        await notify(uid, text)
-        await asyncio.sleep(0.05)               # мягкий троттлинг, чтобы не упереться в лимиты
-    if ADMIN_ID:
-        await notify(ADMIN_ID, f"⏰ Напоминание о розыгрыше #{rnd['id']} разослано: {len(ids)} участникам.")
-    log.info("Лотерея: разослано напоминание по кругу #%s (%s чел.)", rnd["id"], len(ids))
-
-
-async def _lottery_autostart() -> None:
-    """Автоцикл розыгрыша: неделя идёт розыгрыш, неделя перерыв — сам, без админки.
-    Открытого круга нет и перерыв (BREAK_DAYS) с прошлой жеребьёвки истёк →
-    запускаем новый круг на ROUND_DAYS дней. Первый круг стартует сразу."""
-    if not (lottery.AUTO and LOTTERY_ENABLED):
-        return
-    if await db.lottery_open_round():
-        return                                   # круг уже идёт — ничего не делаем
-    now = datetime.now(KYIV)
-    last = await db.lottery_last_finished()
-    if last is not None:
-        drawn = last.get("drawn_at")
-        if drawn is not None and (now - drawn) < timedelta(days=lottery.BREAK_DAYS):
-            return                               # перерыв ещё не закончился
-    prizes = lottery.AUTO_PRIZES
-    # дедлайн ВСЕГДА в 22:00 по Киеву в последний день круга
-    deadline = (now + timedelta(days=lottery.ROUND_DAYS)).replace(
-        hour=22, minute=0, second=0, microsecond=0)
-    await db.lottery_start(deadline, ",".join(map(str, prizes)))
-    if ADMIN_ID:
-        await notify(ADMIN_ID,
-                     "🎰 <b>Новая Рулетка запущена!</b>  <i>авто</i>\n\n"
-                     f"🗓 Жеребьёвка — <b>{deadline.strftime('%d.%m в 22:00')}</b>\n"
-                     f"💰 Призовой фонд <b>{fmt_uah(sum(prizes))} ₴</b> на {len(prizes)} мест:\n"
-                     f"{_prizes_block(prizes)}\n\n"
-                     "🔁 Автоцикл: новый круг стартует каждую неделю.")
-    await ws_broadcast({"t": "lottery_start"})   # обновить открытые приложения
-    log.info("Лотерея: авто-старт круга, дедлайн %s", deadline.isoformat())
-
-
-async def lottery_ticker():
-    """Каждые 30с: автоцикл (неделя розыгрыш / неделя перерыв); за час до дедлайна —
-    напоминание участникам; по дедлайну — розыгрыш."""
-    await asyncio.sleep(5)
-    while True:
-        try:
-            if LOTTERY_ENABLED:
-                await _lottery_autostart()
-                rnd = await db.lottery_open_round()
-                dl = rnd.get("deadline") if rnd else None
-                if dl:
-                    now = datetime.now(dl.tzinfo)
-                    secs = (dl - now).total_seconds()
-                    if 0 < secs <= 3600 and not rnd.get("pre_notified"):
-                        await _lottery_prenotify(rnd)
-                    if dl <= now:
-                        await _run_lottery_draw(rnd)
-        except Exception:
-            log.exception("lottery_ticker")
-        await asyncio.sleep(30)
-
-
 # ── приложение ───────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await db.init()
-    if LOTTERY_ENABLED:
-        try:
-            await _lottery_reconcile()   # докатить призы, если что-то не начислилось
-        except Exception:
-            log.exception("Лотерея: инициализация не удалась")
     try:
         BANNED.update(await db.banned_ids())   # восстановить гейт бана после рестарта
         log.info("Загружено забаненных: %s", len(BANNED))
@@ -1101,7 +930,6 @@ async def lifespan(_: FastAPI):
     card_task = asyncio.create_task(card_checker())
     delay_task = asyncio.create_task(delay_compensator())
     dep_bonus_task = asyncio.create_task(deposit_bonus_reminder())
-    lottery_task = asyncio.create_task(lottery_ticker()) if LOTTERY_ENABLED else None
     yield
     checker.cancel()
     tracker.cancel()
@@ -1112,8 +940,6 @@ async def lifespan(_: FastAPI):
     card_task.cancel()
     delay_task.cancel()
     dep_bonus_task.cancel()
-    if lottery_task:
-        lottery_task.cancel()
     if menu_task:
         menu_task.cancel()
     if task:
@@ -1838,199 +1664,6 @@ async def api_bonus_claim(request: Request):
                      "Ваш приглашённый активировался — забрал приветственный бонус. "
                      "Начислено на баланс магазина.")
     return await _snap(u["id"])
-
-
-def _lottery_links() -> dict:
-    return {"channel": PROMO_CHANNEL_URL, "chat": PROMO_CHAT_URL,
-            "casino": PROMO_CASINO_URL, "market": PROMO_BUTTON_URL,
-            "support": SUPPORT_URL}
-
-
-async def _lottery_state(uid: int) -> dict:
-    rnd = await db.lottery_open_round()   # None, пока розыгрыш не запущен вручную
-    running = bool(rnd)
-    rid = rnd["id"] if rnd else 0
-    subs_on = bool(bot and BONUS_CHAT_ID)
-    # условие участия — только чат (канал убрали)
-    my_ch = "yes"
-    my_cht = await _member_state_cached(BONUS_CHAT_ID, uid) if subs_on else "err"
-    eligible = (my_cht == "yes")
-    grant = {"numbers": [], "confirmed": 0, "pending": 0}
-    stats = {"participants": 0, "tickets": 0}
-    since = rnd.get("created") if running else None   # старт круга: считаем только новых
-    # ЗАСЧИТЫВАНИЕ РЕФЕРАЛОВ И БИЛЕТЫ — только пока идёт запущенный круг, и только
-    # для приглашённых ПОСЛЕ старта круга (пришедших во время розыгрыша)
-    if running:
-        if subs_on:
-            cands = await db.lottery_new_candidates(uid, since)
-            if cands:
-                confirmed: list[int] = []
-                sem = asyncio.Semaphore(8)
-
-                async def _chk(cid):
-                    async with sem:
-                        b = await _member_state_cached(BONUS_CHAT_ID, cid)
-                    if b == "yes":
-                        confirmed.append(cid)
-
-                await asyncio.gather(*[_chk(x) for x in cands[:150]])
-                if confirmed:
-                    await db.lottery_confirm_refs(uid, confirmed, rid)
-        grant = await db.lottery_grant_tickets(uid, rid, eligible, lottery.PER_TICKET)
-        stats = await db.lottery_stats(rid)
-    # мои рефералы этого круга (только приглашённые во время розыгрыша); до старта — пусто
-    refs = await db.lottery_my_referrals(uid, since) if running else []
-    pend = [r for r in refs if not r["counted"]]
-    if subs_on and pend:
-        sem = asyncio.Semaphore(8)
-
-        async def _en(r):
-            async with sem:
-                r["sub_channel"] = "yes"      # канал больше не условие
-                r["sub_chat"] = await _member_state_cached(BONUS_CHAT_ID, r["tg_id"])
-
-        await asyncio.gather(*[_en(r) for r in pend])
-    ref_out = []
-    for r in refs:
-        status = "ticketed" if r["ticketed"] else ("counted" if r["counted"] else "pending")
-        ref_out.append({
-            "name": r.get("name") or "друг",
-            "status": status,
-            "sub_channel": r.get("sub_channel", "yes" if r["counted"] else "err"),
-            "sub_chat": r.get("sub_chat", "yes" if r["counted"] else "err"),
-        })
-    # последний завершённый круг — для анимации результата и итогов
-    last = await db.lottery_last_finished()
-    last_out = None
-    if last:
-        wl = await db.lottery_winners(last["id"])
-        last_out = {
-            "round": last["id"],
-            "drawn_at": last["drawn_at"].isoformat() if last.get("drawn_at") else None,
-            "winners": [{
-                "place": w["place"], "number": w["number"], "prize": w["prize"],
-                "name": w.get("name") or "участник",
-                "avatar": w.get("avatar"),
-                "is_me": int(w["user_id"]) == int(uid),
-            } for w in wl],
-        }
-    return {
-        "enabled": True,
-        "running": running,
-        "subs_configured": subs_on,
-        "round": {
-            "id": rid,
-            "deadline": rnd["deadline"].isoformat() if running and rnd.get("deadline") else None,
-            "prizes": (lottery._parse_prizes(rnd.get("prizes")) if running else None) or lottery.PRIZES,
-            "per_ticket": lottery.PER_TICKET,
-            "days": lottery.DAYS,
-        },
-        "me": {
-            "id": uid, "eligible": eligible,
-            "sub_channel": my_ch, "sub_chat": my_cht,
-            "numbers": grant["numbers"], "confirmed": grant["confirmed"],
-            "pending": grant["pending"], "need": lottery.PER_TICKET,
-        },
-        "stats": stats,
-        "referrals": ref_out,
-        "last_result": last_out,
-        "links": _lottery_links(),
-        # приглашаем через МАРКЕТ-бота: друг заходит в маркет, забирает
-        # приветственный бонус и подписывается — там же учитывается рефералка
-        "ref_link": f"https://t.me/{MARKET_BOT}?start=ref_{uid}",
-    }
-
-
-@app.post("/api/lottery/state")
-async def api_lottery_state(request: Request):
-    u = tg_user(request)
-    if not LOTTERY_ENABLED:
-        raise HTTPException(400, "Розыгрыш временно недоступен")
-    return await _lottery_state(u["id"])
-
-
-async def _admin_lottery_snapshot() -> dict:
-    rnd = await db.lottery_open_round()
-    stats = await db.lottery_stats(rnd["id"]) if rnd else {"participants": 0, "tickets": 0}
-    last = await db.lottery_last_finished()
-    last_out = None
-    if last:
-        wl = await db.lottery_winners(last["id"])
-        last_out = {
-            "round": last["id"],
-            "drawn_at": last["drawn_at"].isoformat() if last.get("drawn_at") else None,
-            "winners": [{"place": w["place"], "number": w["number"], "prize": w["prize"],
-                         "name": w.get("name") or "участник"} for w in wl],
-        }
-    return {
-        "running": bool(rnd),
-        "round": ({
-            "id": rnd["id"],
-            "deadline": rnd["deadline"].isoformat() if rnd.get("deadline") else None,
-            "prizes": lottery._parse_prizes(rnd.get("prizes")) or lottery.PRIZES,
-        } if rnd else None),
-        "stats": stats,
-        "defaults": {"days": lottery.DAYS, "prizes": lottery.PRIZES,
-                     "per_ticket": lottery.PER_TICKET},
-        "auto": {"on": bool(lottery.AUTO and LOTTERY_ENABLED),
-                 "round_days": lottery.ROUND_DAYS, "break_days": lottery.BREAK_DAYS,
-                 "prizes": lottery.AUTO_PRIZES},
-        "last": last_out,
-    }
-
-
-@app.post("/api/admin/lottery")
-async def api_admin_lottery(request: Request):
-    admin_user(request)
-    return await _admin_lottery_snapshot()
-
-
-@app.post("/api/admin/lottery/start")
-async def api_admin_lottery_start(request: Request):
-    admin_user(request)
-    if not LOTTERY_ENABLED:
-        raise HTTPException(400, "Розыгрыш отключён (LOTTERY_ENABLED=0)")
-    b = await request.json()
-    try:
-        days = int(b.get("days") or lottery.DAYS)
-    except (TypeError, ValueError):
-        days = lottery.DAYS
-    days = max(1, min(days, 120))
-    prizes = lottery._parse_prizes(str(b.get("prizes") or "")) or lottery.PRIZES
-    prizes = [max(0, int(p)) for p in prizes][:10]
-    # дедлайн ВСЕГДА в последний день в 22:00 по Киеву — во сколько бы ни запустили
-    deadline = (datetime.now(KYIV) + timedelta(days=days)).replace(
-        hour=22, minute=0, second=0, microsecond=0)
-    await db.lottery_start(deadline, ",".join(map(str, prizes)))
-    if ADMIN_ID:
-        await notify(ADMIN_ID,
-                     "🎰 <b>Рулетка запущена!</b>\n\n"
-                     f"🗓 Жеребьёвка — <b>{deadline.strftime('%d.%m в 22:00')}</b>\n"
-                     f"💰 Призовой фонд <b>{fmt_uah(sum(prizes))} ₴</b> на {len(prizes)} мест:\n"
-                     f"{_prizes_block(prizes)}")
-    await ws_broadcast({"t": "lottery_start"})   # обновить открытые приложения
-    return await _admin_lottery_snapshot()
-
-
-@app.post("/api/admin/lottery/draw")
-async def api_admin_lottery_draw(request: Request):
-    admin_user(request)
-    rnd = await db.lottery_open_round()
-    if not rnd:
-        raise HTTPException(400, "Розыгрыш не запущен")
-    await _run_lottery_draw(rnd)
-    return await _admin_lottery_snapshot()
-
-
-@app.post("/api/admin/lottery/cancel")
-async def api_admin_lottery_cancel(request: Request):
-    admin_user(request)
-    rnd = await db.lottery_open_round()
-    if not rnd:
-        raise HTTPException(400, "Розыгрыш не запущен")
-    await db.lottery_cancel(rnd["id"])
-    await ws_broadcast({"t": "lottery_start"})
-    return await _admin_lottery_snapshot()
 
 
 @app.post("/api/pin/verify")
