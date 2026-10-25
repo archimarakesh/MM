@@ -1252,6 +1252,7 @@ async def _snap(uid: int) -> dict:
     snap["bonus_offer"] = (not snap.get("bonus_claimed")
                            and bool(bot and BONUS_CHAT_ID))
     snap["bonus_amount"] = BONUS_AMOUNT
+    snap["ref_bonus"] = db.REF_ACTIVATION_BONUS
     snap["min_withdraw"] = db.MIN_WITHDRAW
     snap["bonus_pay_pct"] = await db.bonus_pay_pct()   # бонусом до N% покупки
     snap["card_auto"] = snova.enabled()
