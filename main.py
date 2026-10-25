@@ -110,7 +110,7 @@ PROMO_POSTS = [
     ("promo/egrow-3.jpg",
      "🤝 <b>Реферальная программа</b>\n\n"
      "5–10% с покупок друзей <b>и с их игры в Magic Casino</b> — навсегда и на вывод. "
-     "Плюс <b>50 ₴ сразу</b> за каждого активированного друга.\n\n"
+     f"Плюс <b>{db.REF_ACTIVATION_BONUS} ₴ сразу</b> за каждого активированного друга.\n\n"
      "🏆 А ещё топ-3 по числу друзей за неделю забирают <b>500 / 300 / 150 ₴</b> "
      "в реферальной гонке — просто за самых активных приглашателей.\n\n"
      "Твоя персональная ссылка — <b>прямо в Профиле приложения</b>."),
@@ -118,8 +118,9 @@ PROMO_POSTS = [
      "🎰 <b>РУЛЕТКА Magic Market</b> — розыгрыш призов!\n\n"
      "Приведи <b>3 друзей</b> — забери гарантированный бонус и поборись за крупные "
      "призы на баланс.\n\n"
-     "🎁 <b>100 ₴</b> приветственный бонус — гарантированно каждому\n"
-     "👥 <b>+50 ₴</b> за каждого друга (3 друга = +150 ₴)\n"
+     f"🎁 <b>{BONUS_AMOUNT} ₴</b> приветственный бонус — гарантированно каждому\n"
+     f"👥 <b>+{db.REF_ACTIVATION_BONUS} ₴</b> за каждого друга "
+     f"(3 друга = +{db.REF_ACTIVATION_BONUS * 3} ₴)\n"
      "🏆 Розыгрыш определит <b>5 победителей</b>: 3000 / 2000 / 1500 / 1000 / 500 ₴\n\n"
      "🔁 Каждую неделю — новый круг! Успей позвать друзей.\n"
      "Участие — в разделе <b>«Рулетка»</b> в приложении 👇"),
@@ -557,6 +558,27 @@ async def delay_compensator():
         except Exception:
             log.exception("Ошибка компенсации за просрочку")
             await asyncio.sleep(300)
+
+
+async def deposit_bonus_reminder():
+    """Раз в 2 минуты: если акция «бонус за пополнение» активна и до конца
+    (00:00 Киева) остался час или меньше — шлём напоминание «успей пополнить»
+    всем. Один раз на каждый запуск акции (дедуп по until в БД), переживает
+    рестарт процесса."""
+    while True:
+        try:
+            st = await db.deposit_bonus_state()
+            if st["active"] and st["until"]:
+                left = datetime.fromisoformat(st["until"]) - datetime.now(KYIV)
+                if timedelta(0) < left <= timedelta(hours=1):
+                    if await db.deposit_bonus_mark_reminded(st["until"]):
+                        asyncio.create_task(broadcast_all(
+                            f"⏰ <b>Остался последний час!</b>\n\n"
+                            f"Акция +{st['pct']}% за пополнение заканчивается в <b>полночь</b> — "
+                            f"успей пополнить баланс и забрать бонус, пока не поздно ⏳"))
+        except Exception:
+            log.exception("Ошибка напоминания об акции на пополнение")
+        await asyncio.sleep(120)
 
 
 async def card_checker():
@@ -1078,6 +1100,7 @@ async def lifespan(_: FastAPI):
     guard = asyncio.create_task(guard_bot.run(notify, on_ban=apply_ban, on_unban=apply_unban))
     card_task = asyncio.create_task(card_checker())
     delay_task = asyncio.create_task(delay_compensator())
+    dep_bonus_task = asyncio.create_task(deposit_bonus_reminder())
     lottery_task = asyncio.create_task(lottery_ticker()) if LOTTERY_ENABLED else None
     yield
     checker.cancel()
@@ -1088,6 +1111,7 @@ async def lifespan(_: FastAPI):
     guard.cancel()
     card_task.cancel()
     delay_task.cancel()
+    dep_bonus_task.cancel()
     if lottery_task:
         lottery_task.cancel()
     if menu_task:

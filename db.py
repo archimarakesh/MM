@@ -841,6 +841,17 @@ async def deposit_bonus_set(pct: int, until_iso: str) -> None:
     await set_kv("dep_bonus_until", str(until_iso or ""))
 
 
+async def deposit_bonus_mark_reminded(until_iso: str) -> bool:
+    """True, если напоминание «остался час» для ЭТОГО until ещё не отправляли
+    (и тут же отмечает отправленным) — не даёт продублировать при перезапуске
+    или гонке между соседними тиками фонового таска."""
+    prev = await get_kv("dep_bonus_reminded_until")
+    if prev == until_iso:
+        return False
+    await set_kv("dep_bonus_reminded_until", until_iso)
+    return True
+
+
 # ── какую долю заказа можно оплатить бонусом (locked) — настраивается админом ──
 async def bonus_pay_pct() -> int:
     v = await get_kv("bonus_pay_pct")

@@ -1800,7 +1800,7 @@ function renderLotTasks() {
 }
 function lotShareRef() {
   haptic('medium'); const url = LOT?.ref_link || ''; if (!url) return;
-  const text = '🎰 Розыгрыш в Magic Market! Забери 100 ₴ приветственный бонус и участвуй в лотерее — призы до 3000 ₴ на баланс.';
+  const text = `🎰 Розыгрыш в Magic Market! Забери ${S.bonusAmount || 100} ₴ приветственный бонус и участвуй в лотерее — призы до 3000 ₴ на баланс.`;
   const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
   if (tg?.openTelegramLink) tg.openTelegramLink(share); else window.open(share, '_blank');
 }
