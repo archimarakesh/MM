@@ -35,6 +35,10 @@ REF_RACE_PRIZES = [500, 300, 150]   # призы за 1-3 место, ₴ бон
 REF_RACE_HOUR = 13                  # понедельник, по Киеву — на час позже активности
 CONTEST_TIMES = os.getenv("CONTEST_TIMES", "11:00,19:00")   # баннер конкурса, по Киеву
 CONTEST_BANNER = os.path.join("promo", "contest.png")
+# раз в DELETED_SWEEP_HOURS часов чистим из чата удалённые Telegram-аккаунты
+DELETED_SWEEP_HOURS = int(os.getenv("DELETED_SWEEP_HOURS", "24") or 24)
+# пауза между проверками одного ID — не долбить Telegram API по чату пачкой
+DELETED_SWEEP_DELAY = float(os.getenv("DELETED_SWEEP_DELAY", "0.5") or 0.5)
 CONTEST_CAPTION = ("🏆 <b>Конкурс активности</b>\n"
                    "Топ-5 самых активных в чате за неделю получают "
                    "<b>500 / 400 / 300 / 200 / 100 ₴</b> на баланс магазина.\n"
@@ -1185,6 +1189,56 @@ async def run(notify=None, on_ban=None, on_unban=None):
                 log.exception("Ошибка реферальной гонки")
                 await asyncio.sleep(300)
 
+    async def deleted_accounts_sweep():
+        """Раз в DELETED_SWEEP_HOURS часов проходит по всем известным боту ID
+        (ростер чата из member_events/chat_activity — см. taggable_members) и
+        кикает тех, чей Telegram-аккаунт удалён. Bot API не даёт отдельного
+        флага «аккаунт удалён» — удалённый профиль узнаём по характерному
+        отпечатку: first_name == 'Deleted Account', без username и фамилии
+        (так Telegram отдаёт такие аккаунты через getChatMember). Кик, не
+        вечный бан — банить уже некого, аккаунта больше не существует.
+        Ограничение: может проверить только тех, кого бот уже где-то видел
+        (вступление через капчу-гейт, сообщение в чате, пользователь магазина)
+        — списка ВСЕХ участников чата Bot API боту в принципе не даёт."""
+        if not RULES_CHAT_ID:
+            return
+        await asyncio.sleep(120)   # не стартовать проверку в первые секунды поднятия бота
+        while True:
+            try:
+                roster = await db.taggable_members(int(RULES_CHAT_ID), days=36500, limit=100000)
+                ids = {m["user_id"] for m in roster}
+                try:
+                    ids |= set(await db.all_user_ids())
+                except Exception:
+                    log.exception("Чистка удалённых: не удалось дотянуть пользователей магазина")
+                kicked = 0
+                checked = 0
+                for uid in ids:
+                    try:
+                        m = await bot.get_chat_member(RULES_CHAT_ID, uid)
+                    except Exception:
+                        continue   # не участник этого чата / недоступен — пропускаем
+                    checked += 1
+                    u = m.user
+                    if u.first_name == "Deleted Account" and not u.username and not u.last_name:
+                        try:
+                            await bot.ban_chat_member(RULES_CHAT_ID, uid)
+                            await bot.unban_chat_member(RULES_CHAT_ID, uid)   # кик, не вечный бан
+                            kicked += 1
+                        except Exception:
+                            log.warning("Чистка удалённых: не смог кикнуть %s", uid)
+                    await asyncio.sleep(DELETED_SWEEP_DELAY)
+                if kicked:
+                    await journal(
+                        f"🧹 <b>Чистка удалённых аккаунтов</b>\n"
+                        f"Проверено известных ID: <b>{checked}</b>\n"
+                        f"Удалено из чата: <b>{kicked}</b>\n"
+                        f"🕒 {_now()}")
+                log.info("Чистка удалённых аккаунтов: проверено %s, кикнуто %s", checked, kicked)
+            except Exception:
+                log.exception("Ошибка чистки удалённых аккаунтов")
+            await asyncio.sleep(DELETED_SWEEP_HOURS * 3600)
+
     # ── тематическая викторина: опрос темы → вопросы-опросы → призы ──────────
     # poll_id/correct — активный вопрос-опрос; future ставит победителя.
     # chat — где идёт викторина; allow_admin — засчитывать ответ владельца (тест в ЛС)
@@ -1794,6 +1848,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
     snaps = asyncio.create_task(snapshot_loop())
     quiz = asyncio.create_task(quiz_scheduler())
     riddles = asyncio.create_task(riddle_scheduler())
+    deleted_sweep = asyncio.create_task(deleted_accounts_sweep())
     await _set_commands()
     await initial_snapshot()
     # chat_member нужно запросить явно: aiogram включит его в allowed_updates,
@@ -1811,6 +1866,7 @@ async def run(notify=None, on_ban=None, on_unban=None):
         snaps.cancel()
         quiz.cancel()
         riddles.cancel()
+        deleted_sweep.cancel()
 
 
 if __name__ == "__main__":
