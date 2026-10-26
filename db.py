@@ -503,6 +503,18 @@ async def init():
                 INSERT INTO settings(key, value) VALUES('price_grid_ml_v1', '1')
                 ON CONFLICT (key) DO UPDATE SET value='1'
             """)
+        # разовое снижение лимита оплаты бонусами с 50% до 25% (по просьбе
+        # владельца). Разовое — дальше это обычная настройка из админки,
+        # повторный деплой её не перетрёт.
+        if not await c.fetchval("SELECT value FROM settings WHERE key='bonus_pay_pct_25_v1'"):
+            await c.execute("""
+                INSERT INTO settings(key, value) VALUES('bonus_pay_pct', '25')
+                ON CONFLICT (key) DO UPDATE SET value='25'
+            """)
+            await c.execute("""
+                INSERT INTO settings(key, value) VALUES('bonus_pay_pct_25_v1', '1')
+                ON CONFLICT (key) DO UPDATE SET value='1'
+            """)
 
 
 # ── авто-статус «Получен» ────────────────────────────────────────────────────
