@@ -2122,6 +2122,20 @@ async def set_ban(tg_id: int, banned: bool, reason: str = "") -> None:
         """, int(tg_id), bool(banned), (reason or "")[:200] or None)
 
 
+async def forfeit_bonuses(tg_id: int) -> None:
+    """При бане бонусные деньги (locked — то, что нельзя вывести, только
+    потратить/отыграть) и очки активности сгорают: забаненный не должен ни
+    сохранять бонусный баланс, ни попадать в топы/розыгрыши чата после бана.
+    Настоящий выводимый остаток (balance минус locked) не трогаем."""
+    async with _pool.acquire() as c, c.transaction():
+        await c.execute("""
+            UPDATE users SET balance = GREATEST(balance - locked, 0),
+                             locked = 0, wager_req = 0
+            WHERE tg_id=$1
+        """, int(tg_id))
+        await c.execute("DELETE FROM chat_activity WHERE user_id=$1", int(tg_id))
+
+
 async def banned_ids() -> list[int]:
     """Все забаненные — для наполнения in-memory гейта при старте."""
     async with _pool.acquire() as c:
@@ -2927,13 +2941,15 @@ async def bump_strike(user_id: int, name: str = ""):
 
 
 _TOP_SQL = """
-    SELECT user_id, MAX(name) AS name,
-           SUM(points) AS pts, COUNT(DISTINCT day) AS days, SUM(strikes) AS strikes,
-           SUM(points) + $3 * COUNT(DISTINCT day) - $4 * SUM(strikes) AS score
-    FROM chat_activity
-    WHERE day >= $1 AND day <= $2
-    GROUP BY user_id
-    HAVING SUM(points) > 0
+    SELECT ca.user_id, MAX(ca.name) AS name,
+           SUM(ca.points) AS pts, COUNT(DISTINCT ca.day) AS days, SUM(ca.strikes) AS strikes,
+           SUM(ca.points) + $3 * COUNT(DISTINCT ca.day) - $4 * SUM(ca.strikes) AS score
+    FROM chat_activity ca
+    LEFT JOIN users u ON u.tg_id = ca.user_id
+    WHERE ca.day >= $1 AND ca.day <= $2
+      AND NOT COALESCE(u.banned, false)
+    GROUP BY ca.user_id
+    HAVING SUM(ca.points) > 0
     ORDER BY score DESC, pts DESC
     LIMIT $5
 """
@@ -2987,6 +3003,8 @@ _REF_RACE_SQL = """
     JOIN users ref ON ref.tg_id = u.ref_by
     WHERE u.ref_by IS NOT NULL AND u.bonus_claimed
       AND u.created::date >= $1 AND u.created::date <= $2
+      AND NOT COALESCE(u.banned, false)
+      AND NOT COALESCE(ref.banned, false)
     GROUP BY u.ref_by
     HAVING COUNT(*) > 0
     ORDER BY cnt DESC

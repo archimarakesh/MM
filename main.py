@@ -1056,6 +1056,7 @@ async def apply_ban(uid: int, reason: str = "", source: str = "admin") -> None:
     if uid == ADMIN_ID:
         return
     await db.set_ban(uid, True, reason)
+    await db.forfeit_bonuses(uid)   # очки активности и бонусный баланс сгорают
     BANNED.add(uid)
     await _tg_ban(uid, unban=False)
     log.info("Бан %s (источник: %s, причина: %s)", uid, source, reason or "—")
