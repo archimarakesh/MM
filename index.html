@@ -3756,28 +3756,7 @@ function renderAdmin(tab) {
   } else if (tab === 'users') {
     renderAdminUsers();
   } else if (tab === 'refs') {
-    b.innerHTML = '<p class="note">Загрузка…</p>';
-    API.call('/api/admin/referrals').then(d => {
-      if (adminTab !== 'refs') return;
-      const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]));
-      b.innerHTML = `
-        <div class="admin-stats" style="margin-bottom:12px">
-          <div><b>${fmt(d.total_invited)}</b><span>пришло по рефералкам</span></div>
-          <div><b>${fmt(d.total_earned)} ₴</b><span>выплачено бонусов (магазин + казино)</span></div>
-          <div><b>${fmt(d.buys_total)} ₴</b><span>покупки приглашённых · ${fmt(d.buys_n)} зак.</span></div>
-          <div><b>${fmt(d.buys_total30)} ₴</b><span>за 30 дней · ${fmt(d.buys_n30)} зак.</span></div>
-        </div>
-        <div class="section-head"><h2>Топ рефереров</h2></div>
-        <p class="note" style="margin:-4px 0 8px">нажмите на реферера — покажем, кого он привёл и сколько каждый купил</p>
-        ${d.top.length ? d.top.map(t => `
-          <div class="set-row" style="cursor:pointer" onclick="adminRefOpen(${t.tg_id})">
-            <div><h3>${esc(t.name || 'Без имени')}${t.username ? ` · @${esc(t.username)}` : ''} · ${t.pct}%${t.flags ? ` <span class="ref-warn" title="подозрительных приглашённых — устройство/IP как у реферера или дубль устройства">⚠ ВНИМАНИЕ <b>${t.flags}</b></span>` : ''}</h3>
-            <p>приглашено ${t.invited} · покупок ${fmt(t.orders)} на ${fmt(t.total)} ₴
-            (30 дн: ${fmt(t.orders30)} на ${fmt(t.total30)} ₴) · заработал ${fmt(t.ref_earned)} ₴</p></div>
-            <b id="arr-${t.tg_id}" style="margin-left:auto;color:var(--muted)">▾</b>
-          </div>
-          <div class="ref-detail hide" id="rd-${t.tg_id}"></div>`).join('') : '<p class="note">рефереров пока нет</p>'}`;
-    }).catch(() => { if (adminTab === 'refs') b.innerHTML = '<p class="note">Не удалось загрузить</p>'; });
+    renderAdminRefs();
   } else if (tab === 'pay') {
     const s = AD.settings;
     const bonusPctCard = `
@@ -4621,6 +4600,53 @@ async function saveBalance(id) {
 }
 function auEsc(s) { return String(s == null ? '' : s).replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch])); }
 function auDate(iso) { if (!iso) return ''; try { return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: '2-digit' }); } catch (e) { return ''; } }
+let arSearchTimer = null, arSort = 'total';
+const AR_SORTS = { total: 'По покупкам', invited: 'По приглашённым', earned: 'По заработку', flags: 'По подозрениям ⚠' };
+function renderAdminRefs() {
+  const b = document.getElementById('adminBody');
+  const sorts = Object.entries(AR_SORTS).map(([k, v]) =>
+    `<option value="${k}"${k === arSort ? ' selected' : ''}>${v}</option>`).join('');
+  b.innerHTML = `
+    <div id="arStats"></div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div class="field" style="margin:0;flex:1">
+        <input id="arSearch" placeholder="Поиск реферера по имени, @юзернейму или ID" autocomplete="off"
+               oninput="clearTimeout(arSearchTimer); arSearchTimer=setTimeout(()=>loadAdminRefs(this.value, arSort),300)">
+      </div>
+      <select class="mini-input" style="width:auto;padding:0 9px;font-size:12px"
+              onchange="arSort=this.value; loadAdminRefs(document.getElementById('arSearch').value, arSort)">${sorts}</select>
+    </div>
+    <div id="arList"><p class="note">Загрузка…</p></div>`;
+  loadAdminRefs('', arSort);
+}
+async function loadAdminRefs(q, sort) {
+  const list = document.getElementById('arList');
+  if (!list) return;
+  let d;
+  try { d = await API.call('/api/admin/referrals', { q: q || '', sort: sort || 'total' }); }
+  catch (e) { if (adminTab === 'refs' && list) list.innerHTML = '<p class="note">Не удалось загрузить</p>'; return; }
+  if (adminTab !== 'refs' || !document.getElementById('arList')) return;
+  const stats = document.getElementById('arStats');
+  if (stats) stats.innerHTML = `
+    <div class="admin-stats" style="margin-bottom:12px">
+      <div><b>${fmt(d.total_invited)}</b><span>пришло по рефералкам</span></div>
+      <div><b>${fmt(d.total_earned)} ₴</b><span>выплачено бонусов (магазин + казино)</span></div>
+      <div><b>${fmt(d.buys_total)} ₴</b><span>покупки приглашённых · ${fmt(d.buys_n)} зак.</span></div>
+      <div><b>${fmt(d.buys_total30)} ₴</b><span>за 30 дней · ${fmt(d.buys_n30)} зак.</span></div>
+    </div>
+    <div class="section-head"><h2>Топ рефереров</h2></div>
+    <p class="note" style="margin:-4px 0 8px">нажмите на реферера — покажем, кого он привёл и сколько каждый купил</p>`;
+  const top = d.top || [];
+  const head = `<p class="note" style="margin:0 0 8px">${q ? `найдено: ${top.length}` : `всего рефереров: ${fmt(d.total_referrers || 0)}`}${d.total_referrers > top.length ? ` · показаны первые ${top.length}` : ''}</p>`;
+  list.innerHTML = head + (top.length ? top.map(t => `
+    <div class="set-row" style="cursor:pointer" onclick="adminRefOpen(${t.tg_id})">
+      <div><h3>${auEsc(t.name || 'Без имени')}${t.username ? ` · @${auEsc(t.username)}` : ''} · ${t.pct}%${t.flags ? ` <span class="ref-warn" title="подозрительных приглашённых — устройство/IP как у реферера или дубль устройства">⚠ ВНИМАНИЕ <b>${t.flags}</b></span>` : ''}</h3>
+      <p>приглашено ${t.invited} · покупок ${fmt(t.orders)} на ${fmt(t.total)} ₴
+      (30 дн: ${fmt(t.orders30)} на ${fmt(t.total30)} ₴) · заработал ${fmt(t.ref_earned)} ₴</p></div>
+      <b id="arr-${t.tg_id}" style="margin-left:auto;color:var(--muted)">▾</b>
+    </div>
+    <div class="ref-detail hide" id="rd-${t.tg_id}"></div>`).join('') : '<p class="note">рефереров не нашли</p>');
+}
 function renderAdminUsers() {
   const b = document.getElementById('adminBody');
   b.innerHTML = `
