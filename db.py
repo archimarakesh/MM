@@ -3388,9 +3388,70 @@ async def wallet_bonus(tg_id: int, amount: int, op_id: str,
 
 
 # ── статистика реферальной программы для админки ────────────────────────────
-async def admin_ref_stats() -> dict:
+_REF_SORT = {
+    "total":   "total DESC, invited DESC",
+    "invited": "invited DESC, total DESC",
+    "earned":  "ref_earned DESC, total DESC",
+    "flags":   "flags DESC, total DESC",
+}
+_REF_STATS_CTE = """
+    WITH inv AS (
+        SELECT ref_by AS r, COUNT(*) AS invited
+        FROM users WHERE ref_by IS NOT NULL AND bonus_claimed GROUP BY ref_by),
+    pur AS (
+        SELECT u.ref_by AS r, COUNT(o.id) AS orders,
+               COALESCE(SUM(o.total), 0) AS total,
+               COUNT(o.id) FILTER (WHERE o.created >= now() - interval '30 days') AS orders30,
+               COALESCE(SUM(o.total) FILTER (WHERE o.created >= now() - interval '30 days'), 0) AS total30
+        FROM orders o
+        JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
+        WHERE o.status >= 0
+        GROUP BY u.ref_by),
+    invd AS (
+        SELECT u.tg_id, u.ref_by AS r, u.banned,
+               bc.device_hash AS device, bc.ip AS ip
+        FROM users u
+        LEFT JOIN bonus_claims bc ON bc.user_id = u.tg_id
+        WHERE u.ref_by IS NOT NULL),
+    refd AS (
+        SELECT bc.user_id AS r, bc.device_hash AS rdevice, bc.ip AS rip
+        FROM bonus_claims bc),
+    dup AS (
+        SELECT r, device FROM invd
+        WHERE device IS NOT NULL GROUP BY r, device HAVING COUNT(*) > 1),
+    -- сколько приглашённых у реферера требуют внимания: устройство/IP как у
+    -- реферера или дубль устройства среди приглашённых, но ещё НЕ забаненные —
+    -- забанил, счётчик упал
+    flg AS (
+        SELECT i.r AS r, COUNT(*) FILTER (WHERE NOT i.banned AND (
+                 (i.device IS NOT NULL AND i.device = rd.rdevice)
+              OR (i.ip     IS NOT NULL AND i.ip     = rd.rip)
+              OR (i.device IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM dup d WHERE d.r = i.r AND d.device = i.device))
+               )) AS flags
+        FROM invd i
+        LEFT JOIN refd rd ON rd.r = i.r
+        GROUP BY i.r)
+"""
+_REF_STATS_SELECT = """
+    SELECT ref.tg_id, ref.name, ref.username, ref.ref_earned,
+           inv.invited,
+           COALESCE(pur.orders, 0) AS orders, COALESCE(pur.total, 0) AS total,
+           COALESCE(pur.orders30, 0) AS orders30, COALESCE(pur.total30, 0) AS total30,
+           COALESCE(flg.flags, 0) AS flags
+    FROM inv
+    JOIN users ref ON ref.tg_id = inv.r
+    LEFT JOIN pur ON pur.r = inv.r
+    LEFT JOIN flg ON flg.r = inv.r
+"""
+
+
+async def admin_ref_stats(query: str = "", sort: str = "total", limit: int = 50) -> dict:
     """Топ рефереров: приглашённые, покупки приглашённых (всего и за 30 дней),
-    заработано бонусов; плюс общие итоги программы."""
+    заработано бонусов; плюс общие итоги программы.
+    query — поиск реферера по имени/юзернейму/ID. sort — total|invited|earned|flags."""
+    q = (query or "").strip().lstrip("@")
+    order_sql = _REF_SORT.get(sort, _REF_SORT["total"])
     async with _pool.acquire() as c:
         # «приглашено» везде = активированные (bonus_claimed): выполнили все
         # условия (канал, чат, бонус). Кликнувшие, но не активировавшиеся — не в счёт.
@@ -3406,62 +3467,34 @@ async def admin_ref_stats() -> dict:
             JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
             WHERE o.status >= 0
         """)
-        top = await c.fetch("""
-            WITH inv AS (
-                SELECT ref_by AS r, COUNT(*) AS invited
-                FROM users WHERE ref_by IS NOT NULL AND bonus_claimed GROUP BY ref_by),
-            pur AS (
-                SELECT u.ref_by AS r, COUNT(o.id) AS orders,
-                       COALESCE(SUM(o.total), 0) AS total,
-                       COUNT(o.id) FILTER (WHERE o.created >= now() - interval '30 days') AS orders30,
-                       COALESCE(SUM(o.total) FILTER (WHERE o.created >= now() - interval '30 days'), 0) AS total30
-                FROM orders o
-                JOIN users u ON u.tg_id = o.user_id AND u.ref_by IS NOT NULL
-                WHERE o.status >= 0
-                GROUP BY u.ref_by)
-            SELECT ref.tg_id, ref.name, ref.username, ref.ref_earned,
-                   inv.invited,
-                   COALESCE(pur.orders, 0) AS orders, COALESCE(pur.total, 0) AS total,
-                   COALESCE(pur.orders30, 0) AS orders30, COALESCE(pur.total30, 0) AS total30
-            FROM inv
-            JOIN users ref ON ref.tg_id = inv.r
-            LEFT JOIN pur ON pur.r = inv.r
-            ORDER BY COALESCE(pur.total, 0) DESC, inv.invited DESC
-            LIMIT 30
-        """)
-        # сколько приглашённых у реферера требуют внимания: то же подозрение, что
-        # и в детализации (устройство/IP как у реферера или дубль устройства среди
-        # приглашённых), но ещё НЕ забаненные — забанил, счётчик упал
-        flg = await c.fetch("""
-            WITH invd AS (
-                SELECT u.tg_id, u.ref_by AS r, u.banned,
-                       bc.device_hash AS device, bc.ip AS ip
-                FROM users u
-                LEFT JOIN bonus_claims bc ON bc.user_id = u.tg_id
-                WHERE u.ref_by IS NOT NULL),
-            refd AS (
-                SELECT bc.user_id AS r, bc.device_hash AS rdevice, bc.ip AS rip
-                FROM bonus_claims bc),
-            dup AS (
-                SELECT r, device FROM invd
-                WHERE device IS NOT NULL GROUP BY r, device HAVING COUNT(*) > 1)
-            SELECT i.r AS r, COUNT(*) FILTER (WHERE NOT i.banned AND (
-                     (i.device IS NOT NULL AND i.device = rd.rdevice)
-                  OR (i.ip     IS NOT NULL AND i.ip     = rd.rip)
-                  OR (i.device IS NOT NULL AND EXISTS (
-                        SELECT 1 FROM dup d WHERE d.r = i.r AND d.device = i.device))
-                   )) AS flags
-            FROM invd i
-            LEFT JOIN refd rd ON rd.r = i.r
-            GROUP BY i.r
-        """)
-    flag_by_ref = {int(f["r"]): int(f["flags"] or 0) for f in flg}
+        if q:
+            like = f"%{q.lower()}%"
+            digits = q if q.isdigit() else None
+            top = await c.fetch(_REF_STATS_CTE + _REF_STATS_SELECT + f"""
+                WHERE lower(ref.name) LIKE $1 OR lower(ref.username) LIKE $1
+                      OR ($2::text IS NOT NULL AND ref.tg_id = $2::bigint)
+                ORDER BY {order_sql}
+                LIMIT $3
+            """, like, digits, limit)
+            total_referrers = int(await c.fetchval("""
+                SELECT COUNT(*) FROM users ref
+                WHERE EXISTS (SELECT 1 FROM users f WHERE f.ref_by = ref.tg_id AND f.bonus_claimed)
+                      AND (lower(ref.name) LIKE $1 OR lower(ref.username) LIKE $1
+                           OR ($2::text IS NOT NULL AND ref.tg_id = $2::bigint))
+            """, like, digits) or 0)
+        else:
+            top = await c.fetch(_REF_STATS_CTE + _REF_STATS_SELECT + f"""
+                ORDER BY {order_sql}
+                LIMIT $1
+            """, limit)
+            total_referrers = int(await c.fetchval(
+                "SELECT COUNT(DISTINCT ref_by) FROM users WHERE ref_by IS NOT NULL AND bonus_claimed") or 0)
     return {
         "total_invited": total_invited, "total_earned": total_earned,
         "buys_n": int(buys["n"] or 0), "buys_total": int(buys["total"] or 0),
         "buys_n30": int(buys["n30"] or 0), "buys_total30": int(buys["total30"] or 0),
-        "top": [{**dict(t), "pct": round(ref_percent(t["invited"]) * 100),
-                 "flags": flag_by_ref.get(int(t["tg_id"]), 0)} for t in top],
+        "total_referrers": total_referrers,
+        "top": [{**dict(t), "pct": round(ref_percent(t["invited"]) * 100)} for t in top],
     }
 
 

@@ -2148,9 +2148,11 @@ async def api_admin_payment_resolve(request: Request):
 
 @app.post("/api/admin/referrals")
 async def api_admin_referrals(request: Request):
-    """Статистика реферальной программы: топ рефереров и покупки приглашённых."""
+    """Статистика реферальной программы: топ рефереров и покупки приглашённых.
+    Поддерживает поиск (q — имя/юзернейм/ID реферера) и сортировку (sort)."""
     admin_user(request)
-    return await db.admin_ref_stats()
+    b = await request.json()
+    return await db.admin_ref_stats(str(b.get("q") or ""), str(b.get("sort") or "total"), 50)
 
 
 @app.post("/api/admin/referrals/detail")
