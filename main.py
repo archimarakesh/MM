@@ -101,8 +101,7 @@ PROMO_POSTS = [
      "⏰ Старт через час, в <b>18:00</b> по Киеву — не пропусти!"),
     ("promo/egrow-3.jpg",
      "🤝 <b>Реферальная программа</b>\n\n"
-     "5–10% с покупок друзей <b>и с их игры в Magic Casino</b> — навсегда и на вывод. "
-     f"Плюс <b>{db.REF_ACTIVATION_BONUS} ₴ сразу</b> за каждого активированного друга.\n\n"
+     "5–10% с покупок друзей <b>и с их игры в Magic Casino</b> — навсегда и на вывод.\n\n"
      "🏆 А ещё топ-3 по числу друзей за неделю забирают <b>500 / 300 / 150 ₴</b> "
      "в реферальной гонке — просто за самых активных приглашателей.\n\n"
      "Твоя персональная ссылка — <b>прямо в Профиле приложения</b>."),
@@ -1079,7 +1078,6 @@ async def _snap(uid: int) -> dict:
     snap["bonus_offer"] = (not snap.get("bonus_claimed")
                            and bool(bot and BONUS_CHAT_ID))
     snap["bonus_amount"] = BONUS_AMOUNT
-    snap["ref_bonus"] = db.REF_ACTIVATION_BONUS
     snap["min_withdraw"] = db.MIN_WITHDRAW
     snap["bonus_pay_pct"] = await db.bonus_pay_pct()   # бонусом до N% покупки
     snap["card_auto"] = snova.enabled()
@@ -1658,19 +1656,6 @@ async def api_bonus_claim(request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     # админу про каждый приветственный бонус НЕ шлём — их много, только докучало
-    # мгновенный бонус пригласившему за активацию друга (если сработал)
-    for r in db.pop_activation_notify():
-        await notify(r["ref_by"],
-                     f"🎉 <b>+{r['bonus']} ₴ за друга!</b>\n"
-                     "Ваш приглашённый активировался — забрал приветственный бонус. "
-                     "Начислено на баланс магазина.")
-    for r in db.pop_activation_held():
-        await notify(ADMIN_ID,
-                     f"🚩 Реф-бонус придержан (похоже на мультиаккаунт)\n\n"
-                     f"Реферер: <code>{r['ref_by']}</code> · друг: <code>{r['friend']}</code>\n"
-                     f"Устройство друга совпадает с устройством реферера или уже "
-                     f"использовалось у этого реферера — +{r['bonus']} ₴ не начислены. "
-                     "Детали — в админке, карточка реферера.")
     return await _snap(u["id"])
 
 

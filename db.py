@@ -137,8 +137,6 @@ async def init():
                 ref_earned BIGINT NOT NULL DEFAULT 0,
                 created    TIMESTAMPTZ NOT NULL DEFAULT now());
             ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_claimed BOOLEAN NOT NULL DEFAULT false;
-            -- заплатили ли пригласившему бонус за активацию этого друга (раз на друга)
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_activated BOOLEAN NOT NULL DEFAULT false;
             -- отметка «принял правила чата» (ставит guard-бот) — гейт для бонуса:
             -- иначе бонус успевали забрать до автокика за непринятие правил
             ALTER TABLE users ADD COLUMN IF NOT EXISTS rules_accepted TIMESTAMPTZ;
@@ -961,30 +959,6 @@ _REF_NOTIFY: list = []
 def pop_ref_notify() -> list:
     q = _REF_NOTIFY[:]
     _REF_NOTIFY.clear()
-    return q
-
-
-# мгновенный бонус пригласившему за активацию друга (друг забрал welcome-бонус).
-# 0 — фича выключена. Начисляется в locked (нельзя вывести; тратится в магазине или отыгрывается в казино).
-REF_ACTIVATION_BONUS = int(os.getenv("REF_ACTIVATION_BONUS", "50") or 50)
-_ACTIVATION_NOTIFY: list = []
-
-
-def pop_activation_notify() -> list:
-    q = _ACTIVATION_NOTIFY[:]
-    _ACTIVATION_NOTIFY.clear()
-    return q
-
-
-# то же самое, но для случаев, когда реф-бонус рефереру придержан из-за
-# подозрения на мультиаккаунт (см. claim_bonus) — main.py шлёт эти сигналы
-# админу, а не рефереру
-_ACTIVATION_HELD: list = []
-
-
-def pop_activation_held() -> list:
-    q = _ACTIVATION_HELD[:]
-    _ACTIVATION_HELD.clear()
     return q
 
 
@@ -2215,47 +2189,12 @@ async def claim_bonus(tg_id: int, amount: int, device: str, ip: str):
             INSERT INTO bonus_claims(user_id, device_hash, ip) VALUES($1,$2,$3)
             ON CONFLICT (user_id) DO NOTHING
         """, tg_id, device or None, ip or None)
-        # мгновенный бонус пригласившему за активацию друга (раз на друга).
-        # Триггер — приветственный бонус: он уже под защитой (подписка на канал+чат,
-        # правила, дедуп по устройству), так что накрутка бессмысленна для САМОГО
-        # друга. Но реферер может нагнать мультиаккаунтов в чат и собирать
-        # REF_ACTIVATION_BONUS за каждого — отдельно проверяем это именно здесь:
-        # не платим, если «друг» пришёл с того же устройства, что и сам реферер,
-        # либо это устройство уже засветилось у другого «друга» этого же
-        # реферера (ферма с одного-двух устройств на один аккаунт-реферер).
-        if REF_ACTIVATION_BONUS > 0:
-            inv = await c.fetchrow(
-                "SELECT ref_by, ref_activated FROM users WHERE tg_id=$1", tg_id)
-            ref_by = inv["ref_by"]
-            if ref_by and ref_by != tg_id and not inv["ref_activated"]:
-                farm = False
-                if device:
-                    farm = bool(await c.fetchval(
-                        "SELECT 1 FROM bonus_claims WHERE user_id=$1 AND device_hash=$2",
-                        ref_by, device
-                    )) or bool(await c.fetchval("""
-                        SELECT 1 FROM bonus_claims bc
-                        JOIN users u2 ON u2.tg_id = bc.user_id
-                        WHERE bc.device_hash = $1 AND u2.ref_by = $2 AND bc.user_id <> $3
-                    """, device, ref_by, tg_id))
-                # активацию друга фиксируем в любом случае — повторно это место
-                # не вызовется (bonus_claimed одноразовый), а при фроде рефереру
-                # просто не платим
-                await c.execute(
-                    "UPDATE users SET ref_activated=true WHERE tg_id=$1", tg_id)
-                if farm:
-                    _ACTIVATION_HELD.append(
-                        {"ref_by": ref_by, "friend": tg_id, "bonus": REF_ACTIVATION_BONUS})
-                else:
-                    paid = await c.fetchval(f"""
-                        UPDATE users SET balance=balance+$1, locked=locked+$1,
-                                         ref_earned=ref_earned+$1,
-                                         wager_req=(CASE WHEN locked<=0 THEN 0 ELSE wager_req END)+$1*{BONUS_WAGER_X}
-                        WHERE tg_id=$2 RETURNING tg_id
-                    """, REF_ACTIVATION_BONUS, ref_by)   # NULL, если реферер удалён
-                    if paid:
-                        _ACTIVATION_NOTIFY.append(
-                            {"ref_by": ref_by, "bonus": REF_ACTIVATION_BONUS})
+        # мгновенного бонуса рефереру за «активацию» друга больше нет (убрали —
+        # именно его фармили мультиаккаунтами: зовут в чат, забирают welcome-
+        # бонус, отыгрывают его в казино и выводят). Реферер и так получает
+        # процент с реальных покупок/игры приглашённого — см. _ref_bonus и
+        # wallet_op(ref='referral'); это не выключается одной забранной фишкой,
+        # требует настоящих трат, поэтому фармить бессмысленно.
 
 
 # ── промокоды (одноразовые бонус-коды, деньги в locked) ──────────────────────
