@@ -63,9 +63,10 @@ PROMO_TOPIC_ID = int(os.getenv("PROMO_TOPIC_ID", "0") or 0)   # 0 = без те�
 PROMO_TARGET_CHAT = (os.getenv("PROMO_TARGET_CHAT", "")
                      or (BONUS_CHAT_ID if PROMO_TOPIC_ID else "")
                      or PROMO_CHANNEL_ID)
-# кнопка под постом: после /newapp в BotFather поставь https://t.me/Magic_market1_bot/shop —
-# будет открывать мини-апп сразу (web_app-кнопки в каналах Telegram не разрешает)
-PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_market1_bot/shop")
+# кнопка под постом открывает чат с ботом (там кнопка мини-аппа по /start). Когда в BotFather
+# появится /newapp — поставь https://t.me/Magic_market1_bot/<имя>, и откроется сразу мини-апп
+# (web_app-кнопки в каналах Telegram не разрешает)
+PROMO_BUTTON_URL = os.getenv("PROMO_BUTTON_URL", "https://t.me/Magic_market1_bot")
 # кнопка на казино-мини-апп под постами. Чтобы кнопка СРАЗУ ЗАПУСКАЛА приложение
 # (а не открывала чат), нужна app-ссылка t.me/<bot>/<app>. Короткое имя аппа
 # казино — «play» (PROMO_CASINO_APP). Бота берём из CASINO_TG_LINK, добавляем /play.
