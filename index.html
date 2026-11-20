@@ -781,7 +781,7 @@ nav{position:fixed;left:1rem;right:1rem;bottom:calc(1rem + env(safe-area-inset-b
         </div>
         <div class="ref-link" onclick="copyRef()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          <span id="refLink">t.me/Magic_Marketplace_bot?start=ref…</span>
+          <span id="refLink">t.me/Magic_market1_bot?start=ref…</span>
         </div>
         <button class="btn btn-gold" style="margin-top:12px" onclick="shareRef()">Пригласить друга
           <span class="btn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg></span>
@@ -2955,7 +2955,7 @@ function initProfile() {
   } else av.textContent = (name[0] || 'M').toUpperCase();
   document.getElementById('refLink').textContent = refUrl(id);
 }
-const refUrl = id => `t.me/Magic_Marketplace_bot?start=ref_${id}`;
+const refUrl = id => `t.me/Magic_market1_bot?start=ref_${id}`;
 function copyRef() {
   navigator.clipboard?.writeText('https://' + refUrl(tgUser?.id || '000000'));
   haptic('medium'); toast('Ссылка скопирована');
@@ -5071,7 +5071,7 @@ function initLock() {
     document.getElementById('lockPad').style.display = 'none';
     document.getElementById('lockDots').style.display = 'none';
     title.innerHTML = 'Магазин доступен только внутри Telegram<br><br>' +
-      '<a href="https://t.me/Magic_Marketplace_bot" style="color:var(--gold-soft);font-weight:700;text-decoration:none">@Magic_Marketplace_bot</a>';
+      '<a href="https://t.me/Magic_market1_bot" style="color:var(--gold-soft);font-weight:700;text-decoration:none">@Magic_market1_bot</a>';
     return;
   }
   lock.classList.add('show');

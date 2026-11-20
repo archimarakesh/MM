@@ -8,7 +8,7 @@ Telegram Mini App: магазин товаров на вес с градацие
 
 ## Бэкенд (Railway)
 
-- `main.py` — FastAPI: отдаёт `index.html` + API (`/api/auth`, `/api/order`, `/api/topup`, `/api/transfer/*`) + aiogram-бот ([@Magic_Marketplace_bot](https://t.me/Magic_Marketplace_bot)) в одном процессе
+- `main.py` — FastAPI: отдаёт `index.html` + API (`/api/auth`, `/api/order`, `/api/topup`, `/api/transfer/*`) + aiogram-бот ([@Magic_market1_bot](https://t.me/Magic_market1_bot)) в одном процессе
 - `db.py` — PostgreSQL (asyncpg), `auth.py` — проверка подписи Telegram initData
 - Переменные окружения: `BOT_TOKEN`, `APP_URL` (публичный https-адрес сервиса), `DATABASE_URL` (даёт Railway Postgres)
 
